@@ -1,0 +1,10 @@
+<?php
+
+namespace App\Svarium\Resources\{{ResourceName}}\Pages\Panel;
+
+use Upsoftware\Svarium\Resources\Pages\Panel\ListPage;
+
+class List{{ResourceNamePlural}} extends ListPage
+{
+
+}

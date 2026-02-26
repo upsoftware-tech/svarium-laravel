@@ -1,0 +1,25 @@
+<?php
+
+return [
+    'Your one-time login code :code' => 'Il tuo codice di accesso monouso :code',
+    'Hello!' => 'Ciao!',
+    'We received a request to log in to your account in the' => 'Abbiamo ricevuto una richiesta di accesso al tuo account in',
+    'To confirm the login, enter the code below:' => 'Per confermare l’accesso, inserisci il codice qui sotto:',
+    'Your login code' => 'Il tuo codice di accesso',
+    'The code and the link will expire in 30 minutes (:expires).' => 'Il codice e il link scadranno tra 30 minuti (:expires).',
+    'If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.' => 'Se non hai richiesto un codice di verifica, puoi ignorare questo messaggio. Se il messaggio continua a ripetersi, contattaci.',
+    'Your one-time code :code for password reset' => 'Il tuo codice monouso :code per il reset della password',
+    'We received a request to reset the password for your account in the :system system.' => 'Abbiamo ricevuto una richiesta di reimpostazione della password per il tuo account nel sistema :system.',
+    'To confirm the request to set a new password, enter the code below:' => 'Per confermare la richiesta di impostare una nuova password, inserisci il codice qui sotto:',
+    'Team :system' => 'Team :system',
+    'Confirmation of password change' => 'Conferma del cambio password',
+    'Your password for accessing the :system panel has been changed.' => 'La tua password per accedere al pannello :system è stata modificata.',
+    'Please remember this the next time you log in.' => 'Ricordalo al prossimo accesso.',
+    'If you have not changed your password or believe this message to be incorrect, please contact us as soon as possible.' => 'Se non hai cambiato la password o pensi che questo messaggio sia errato, contattaci il prima possibile.',
+    'We have detected a new login to your account' => 'Abbiamo rilevato un nuovo accesso al tuo account',
+    'Device' => 'Dispositivo',
+    'Operating system' => 'Sistema operativo',
+    'Browser' => 'Browser',
+    'If this was your login, you do not need to do anything.' => 'Se sei stato tu, non devi fare nulla.',
+    'If you do not recognise this login, change your password immediately and contact us.' => 'Se non riconosci questo accesso, cambia immediatamente la password e contattaci.',
+];

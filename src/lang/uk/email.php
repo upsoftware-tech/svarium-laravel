@@ -1,0 +1,25 @@
+<?php
+
+return [
+    'Your one-time login code :code' => 'Ваш одноразовий код входу :code',
+    'Hello!' => 'Вітаємо!',
+    'We received a request to log in to your account in the' => 'Ми отримали запит на вхід до вашого облікового запису в',
+    'To confirm the login, enter the code below:' => 'Щоб підтвердити вхід, введіть код нижче:',
+    'Your login code' => 'Ваш код входу',
+    'The code and the link will expire in 30 minutes (:expires).' => 'Код і посилання дійсні протягом 30 хвилин (:expires).',
+    'If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.' => 'Якщо ви не запитували код підтвердження, можете проігнорувати це повідомлення. Якщо повідомлення повторюється, зв’яжіться з нами.',
+    'Your one-time code :code for password reset' => 'Ваш одноразовий код :code для скидання пароля',
+    'We received a request to reset the password for your account in the :system system.' => 'Ми отримали запит на скидання пароля для вашого облікового запису в системі :system.',
+    'To confirm the request to set a new password, enter the code below:' => 'Щоб підтвердити встановлення нового пароля, введіть код нижче:',
+    'Team :system' => 'Команда :system',
+    'Confirmation of password change' => 'Підтвердження зміни пароля',
+    'Your password for accessing the :system panel has been changed.' => 'Ваш пароль доступу до панелі :system змінено.',
+    'Please remember this the next time you log in.' => 'Будь ласка, пам’ятайте про це під час наступного входу.',
+    'If you have not changed your password or believe this message to be incorrect, please contact us as soon as possible.' => 'Якщо ви не змінювали пароль або вважаєте це повідомлення помилковим, зв’яжіться з нами якнайшвидше.',
+    'We have detected a new login to your account' => 'Ми виявили новий вхід до вашого облікового запису',
+    'Device' => 'Пристрій',
+    'Operating system' => 'Операційна система',
+    'Browser' => 'Браузер',
+    'If this was your login, you do not need to do anything.' => 'Якщо це були ви, нічого робити не потрібно.',
+    'If you do not recognise this login, change your password immediately and contact us.' => 'Якщо ви не впізнаєте цей вхід, негайно змініть пароль і зв’яжіться з нами.',
+];

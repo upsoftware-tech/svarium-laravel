@@ -1,0 +1,19 @@
+<?php
+
+namespace App\Svarium\Modules\{{ModuleName}};
+
+use App\Svarium\Modules\{{ModuleName}}\Panel\{{ModuleName}}Resource;
+use Upsoftware\Svarium\Modules\Module;
+
+class {{ModuleName}}Module extends Module
+{
+    public function name(): string
+    {
+        return '{{ModuleName}}';
+    }
+
+    public function register(): void
+    {
+        $this->registerResource({{ModuleName}}Resource::class);
+    }
+}

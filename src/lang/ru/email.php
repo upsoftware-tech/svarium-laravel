@@ -1,0 +1,25 @@
+<?php
+
+return [
+    'Your one-time login code :code' => 'Ваш одноразовый код входа :code',
+    'Hello!' => 'Здравствуйте!',
+    'We received a request to log in to your account in the' => 'Мы получили запрос на вход в вашу учетную запись в',
+    'To confirm the login, enter the code below:' => 'Чтобы подтвердить вход, введите код ниже:',
+    'Your login code' => 'Ваш код входа',
+    'The code and the link will expire in 30 minutes (:expires).' => 'Код и ссылка действительны в течение 30 минут (:expires).',
+    'If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.' => 'Если вы не запрашивали код подтверждения, можете игнорировать это сообщение. Если сообщения продолжают повторяться, свяжитесь с нами.',
+    'Your one-time code :code for password reset' => 'Ваш одноразовый код :code для сброса пароля',
+    'We received a request to reset the password for your account in the :system system.' => 'Мы получили запрос на сброс пароля для вашей учетной записи в системе :system.',
+    'To confirm the request to set a new password, enter the code below:' => 'Чтобы подтвердить установку нового пароля, введите код ниже:',
+    'Team :system' => 'Команда :system',
+    'Confirmation of password change' => 'Подтверждение смены пароля',
+    'Your password for accessing the :system panel has been changed.' => 'Ваш пароль для доступа к панели :system был изменён.',
+    'Please remember this the next time you log in.' => 'Пожалуйста, запомните это при следующем входе.',
+    'If you have not changed your password or believe this message to be incorrect, please contact us as soon as possible.' => 'Если вы не меняли пароль или считаете сообщение ошибочным, свяжитесь с нами как можно скорее.',
+    'We have detected a new login to your account' => 'Мы обнаружили новый вход в вашу учетную запись',
+    'Device' => 'Устройство',
+    'Operating system' => 'Операционная система',
+    'Browser' => 'Браузер',
+    'If this was your login, you do not need to do anything.' => 'Если это были вы, ничего делать не нужно.',
+    'If you do not recognise this login, change your password immediately and contact us.' => 'Если вы не узнаёте этот вход, немедленно смените пароль и свяжитесь с нами.',
+];

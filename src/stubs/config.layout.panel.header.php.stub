@@ -1,0 +1,26 @@
+<?php
+
+namespace App\Svarium\Config\Layout\Panel;
+
+use Upsoftware\Svarium\Resources\Components\Component;
+use Upsoftware\Svarium\Resources\Layout\Panel\HeaderLayout;
+
+class Header extends HeaderLayout
+{
+    public bool $enabled = false;
+
+    public function left(): array|Component
+    {
+        return [];
+    }
+
+    public function right(): array|Component
+    {
+        return [];
+    }
+
+    public function default(): array|Component
+    {
+        return [];
+    }
+}

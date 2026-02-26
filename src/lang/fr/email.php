@@ -1,0 +1,25 @@
+<?php
+
+return [
+    'Your one-time login code :code' => 'Votre code de connexion à usage unique :code',
+    'Hello!' => 'Bonjour !',
+    'We received a request to log in to your account in the' => 'Nous avons reçu une demande de connexion à votre compte dans',
+    'To confirm the login, enter the code below:' => 'Pour confirmer la connexion, saisissez le code ci-dessous :',
+    'Your login code' => 'Votre code de connexion',
+    'The code and the link will expire in 30 minutes (:expires).' => 'Le code et le lien expireront dans 30 minutes (:expires).',
+    'If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.' => 'Si vous n’avez pas demandé de code de vérification, vous pouvez ignorer ce message. Si le message continue à apparaître, veuillez nous contacter.',
+    'Your one-time code :code for password reset' => 'Votre code à usage unique :code pour la réinitialisation du mot de passe',
+    'We received a request to reset the password for your account in the :system system.' => 'Nous avons reçu une demande de réinitialisation du mot de passe pour votre compte dans le système :system.',
+    'To confirm the request to set a new password, enter the code below:' => 'Pour confirmer la demande de nouveau mot de passe, saisissez le code ci-dessous :',
+    'Team :system' => 'Équipe :system',
+    'Confirmation of password change' => 'Confirmation du changement de mot de passe',
+    'Your password for accessing the :system panel has been changed.' => 'Votre mot de passe pour accéder au panneau :system a été modifié.',
+    'Please remember this the next time you log in.' => 'Veuillez vous en souvenir lors de votre prochaine connexion.',
+    'If you have not changed your password or believe this message to be incorrect, please contact us as soon as possible.' => 'Si vous n’avez pas changé votre mot de passe ou pensez que ce message est incorrect, veuillez nous contacter dès que possible.',
+    'We have detected a new login to your account' => 'Nous avons détecté une nouvelle connexion à votre compte',
+    'Device' => 'Appareil',
+    'Operating system' => 'Système d’exploitation',
+    'Browser' => 'Navigateur',
+    'If this was your login, you do not need to do anything.' => 'Si c’était vous, vous n’avez rien à faire.',
+    'If you do not recognise this login, change your password immediately and contact us.' => 'Si vous ne reconnaissez pas cette connexion, changez immédiatement votre mot de passe et contactez-nous.',
+];

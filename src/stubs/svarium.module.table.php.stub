@@ -1,0 +1,53 @@
+<?php
+
+namespace App\Svarium\Modules\{{ModuleName}}\Tables;
+
+use App\Models\{{ModuleName}};
+use Illuminate\Database\Eloquent\Builder;
+use Upsoftware\Svarium\Panel\Table\TableBuilder;
+use Upsoftware\Svarium\UI\Components\ColumnVisibility;
+use Upsoftware\Svarium\UI\Components\Search\InputSearch;
+use Upsoftware\Svarium\UI\Components\Table\Action;
+use Upsoftware\Svarium\UI\Components\Table\Column;
+
+class {{ModuleName}}Table
+{
+    public static function make(?Builder $query = null): TableBuilder
+    {
+        return TableBuilder::make($query ?? static::query())
+            ->columns(static::columns())
+            ->actions(static::rowActions())
+            ->actionDisplay('dropdown')
+            ->header(static::headerComponents())
+            ->searchbar(static::searchbar())
+            ->title(__('{{ModuleNamePlural}}'))
+            ->tabs([])
+            ->tabsFromViews(true)
+            ->searchable(['title', 'slug']);
+    }
+
+    protected static function query(): Builder
+    {
+        return {{ModuleName}}::query();
+    }
+
+    protected static function columns(): array
+    {
+        return [
+
+        ];
+    }
+
+    protected static function headerComponents(): array
+    {
+        return [
+            ColumnVisibility::make()
+                ->variant('outline')
+                ->size('sm'),
+
+            Action::create()
+                ->variant('outline')
+                ->size('sm'),
+        ];
+    }
+}

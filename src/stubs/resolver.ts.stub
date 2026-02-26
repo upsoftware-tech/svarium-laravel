@@ -1,0 +1,24 @@
+import { DefineComponent } from 'vue';
+
+interface ViteVueModule {
+    default: DefineComponent<Record<string, any>, Record<string, any>, any>;
+    [key: string]: any;
+}
+
+const resourceComponents = import.meta.glob<ViteVueModule>('../../app/Svarium/Resources/*/Components/**/*.vue', { eager: true });
+
+const mappedComponents: Record<string, DefineComponent<any, any, any>> = {};
+
+Object.keys(resourceComponents).forEach((path) => {
+    const partAfterComponents = path.split('/Components/')[1];
+
+    if (partAfterComponents) {
+        const cleanPath = partAfterComponents.replace('.vue', '');
+        const segments = cleanPath.split('/');
+        const componentName = segments.join('');
+
+        mappedComponents[componentName] = resourceComponents[path].default;
+    }
+});
+
+export default mappedComponents;

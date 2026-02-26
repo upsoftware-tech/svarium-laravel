@@ -1,0 +1,13 @@
+<?php
+
+namespace App\Svarium\Resources\{{ResourceName}}\Schemas;
+
+use Upsoftware\Svarium\Resources\Schemas\Table;
+
+class {{ResourceName}}Table extends Table
+{
+    public function schema(): array
+    {
+        return [];
+    }
+}

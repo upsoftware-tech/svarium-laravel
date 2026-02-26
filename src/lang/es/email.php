@@ -1,0 +1,25 @@
+<?php
+
+return [
+    'Your one-time login code :code' => 'Tu código de acceso de un solo uso :code',
+    'Hello!' => '¡Hola!',
+    'We received a request to log in to your account in the' => 'Hemos recibido una solicitud para iniciar sesión en tu cuenta en',
+    'To confirm the login, enter the code below:' => 'Para confirmar el inicio de sesión, introduce el código a continuación:',
+    'Your login code' => 'Tu código de acceso',
+    'The code and the link will expire in 30 minutes (:expires).' => 'El código y el enlace caducarán en 30 minutos (:expires).',
+    'If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.' => 'Si no solicitaste un código de verificación, puedes ignorar este mensaje con seguridad. Si el mensaje sigue repitiéndose, por favor contáctanos.',
+    'Your one-time code :code for password reset' => 'Tu código de un solo uso :code para restablecer la contraseña',
+    'We received a request to reset the password for your account in the :system system.' => 'Hemos recibido una solicitud para restablecer la contraseña de tu cuenta en el sistema :system.',
+    'To confirm the request to set a new password, enter the code below:' => 'Para confirmar la solicitud de establecer una nueva contraseña, introduce el código a continuación:',
+    'Team :system' => 'Equipo :system',
+    'Confirmation of password change' => 'Confirmación del cambio de contraseña',
+    'Your password for accessing the :system panel has been changed.' => 'Tu contraseña para acceder al panel :system ha sido cambiada.',
+    'Please remember this the next time you log in.' => 'Por favor, recuérdalo la próxima vez que inicies sesión.',
+    'If you have not changed your password or believe this message to be incorrect, please contact us as soon as possible.' => 'Si no cambiaste tu contraseña o crees que este mensaje es incorrecto, contáctanos lo antes posible.',
+    'We have detected a new login to your account' => 'Hemos detectado un nuevo inicio de sesión en tu cuenta',
+    'Device' => 'Dispositivo',
+    'Operating system' => 'Sistema operativo',
+    'Browser' => 'Navegador',
+    'If this was your login, you do not need to do anything.' => 'Si este fuiste tú, no necesitas hacer nada.',
+    'If you do not recognise this login, change your password immediately and contact us.' => 'Si no reconoces este inicio de sesión, cambia tu contraseña inmediatamente y contáctanos.',
+];

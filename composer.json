@@ -1,0 +1,49 @@
+{
+    "version": "1.0.1+0",
+    "name": "upsoftware/svarium",
+    "description": "Svarium Commercial System",
+    "license": "proprietary",
+    "autoload": {
+        "psr-4": {
+            "Upsoftware\\Svarium\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "upSoftware.tech",
+            "email": "info@upsoftware.tech"
+        }
+    ],
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Upsoftware\\Svarium\\Providers\\SvariumServiceProvider"
+            ],
+            "aliases": {
+                "Svarium": "Upsoftware\\Svarium\\Facades\\Svarium"
+            }
+        }
+    },
+    "require-dev": {
+        "orchestra/testbench": "^7.15"
+    },
+    "require": {
+        "hisorange/browser-detect": "^4.5",
+        "inertiajs/inertia-laravel": "^2.0",
+        "jenssegers/agent": "^2.6",
+        "laravel-lang/common": "^6.7",
+        "laravel-lang/locales": "^2.10",
+        "laravel/prompts": "^0.3.11",
+        "laravel/socialite": "^5.24",
+        "vinkla/hashids": "^13.0",
+        "nativephp/mobile": "^3.0",
+        "psr/http-message": "^1.1",
+        "spatie/laravel-activitylog": "^4.11",
+        "spatie/laravel-permission": "^6.24",
+        "spatie/laravel-translatable": "^6.12",
+        "stancl/tenancy": "^3.9",
+        "tightenco/ziggy": "^2.6",
+        "barryvdh/laravel-ide-helper": "^3.6",
+        "winter/laravel-config-writer": "^1.2"
+    }
+}

@@ -1,0 +1,13 @@
+<?php
+
+namespace App\Svarium\Resources\{{ResourceName}}\Schemas;
+
+use Upsoftware\Svarium\Resources\Schemas\Form;
+
+class {{ResourceName}}Form extends Form
+{
+    public function schema(): array
+    {
+        return [];
+    }
+}

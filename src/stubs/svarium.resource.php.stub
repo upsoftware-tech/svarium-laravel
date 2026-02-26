@@ -1,0 +1,22 @@
+<?php
+
+namespace App\Svarium\Resources\{{ResourceName}};
+
+use App\Models\{{ResourceName}};
+use App\Svarium\Resources\{{ResourceName}}\Schemas\{{ResourceName}}Form;
+use App\Svarium\Resources\{{ResourceName}}\Schemas\{{ResourceName}}Table;
+use Upsoftware\Svarium\Resources\Resource;
+
+class {{ResourceName}}Resource extends Resource
+{
+    protected static ?string $resource = {{ResourceName}}Resource::class;
+    protected static ?string $model = {{ResourceName}}::class;
+    protected static ?string $routeName = '{{resource-name}}';
+    protected static ?string $tableSchema = {{ResourceName}}Table::class;
+    protected static ?string $formSchema = {{ResourceName}}Form::class;
+
+    public static function getTitle(): string
+    {
+        return __('{{ResourceName}}');
+    }
+}

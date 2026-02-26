@@ -1,0 +1,79 @@
+import '../css/app.css';
+
+import { createInertiaApp } from '@inertiajs/vue3';
+import Svarium from '@upsoftware_tech/svarium';
+import { AppLayout } from '@upsoftware_tech/svarium';
+import { createApp, h, DefineComponent } from 'vue';
+
+import mappedComponents from '@/resolver';
+
+import { globalComponents } from './components';
+
+const appName = import.meta.env.VITE_APP_NAME || 'Extra Poradnia';
+
+interface PageModule {
+    default: DefineComponent<{}, {}, any> & {
+        layout?: any;
+    };
+}
+
+createInertiaApp({
+    title: (title) => (title ? `${title} - ${appName}` : appName),
+    resolve: (name) => {
+        const localPages = import.meta.glob('./pages/**/*.vue', { eager: true });
+        const vendorPages = import.meta.glob('../../node_modules/@upsoftware_tech/*/src/pages/**/*.vue', { eager: true });
+        const resourcePages = import.meta.glob('../../app/Svarium/Resources/*/Views/**/*.vue', { eager: true });
+
+        let page: PageModule | undefined;
+
+        page = localPages[`./pages/${name}.vue`];
+
+        if (!page) {
+            const [module, view] = name.split('/');
+            const resourceKey = `../../app/Svarium/Resources/${module}/Views/${view}.vue`;
+            page = resourcePages[resourceKey];
+        }
+
+        if (!page) {
+            const vendorKey = Object.keys(vendorPages).find((path) => path.includes(`src/pages/${name}.vue`));
+            if (vendorKey) {
+                page = vendorPages[vendorKey];
+            }
+        }
+
+        if (!page) {
+            throw new Error(`Svarium: Page [${name}] not found in any location.`);
+        }
+
+        page.default.layout = page.default.layout || AppLayout;
+        return page.default;;
+    },
+    setup({ el, App, props, plugin }) {
+        const vueApp = createApp({ render: () => h(App, props) });
+
+        vueApp.use(plugin)
+            .use(Svarium, {
+                prefix: 'Ep',
+                i18n: {
+                    lang: props.initialPage.props.locale || 'pl',
+                    resolve: (lang: string) => import(`../../lang/${lang}.json`),
+                },
+                logo: {
+                    default: {},
+                },
+            });
+
+        Object.entries(globalComponents).forEach(([name, component]) => {
+            vueApp.component(name, component);
+        });
+
+        Object.entries(mappedComponents).forEach(([name, component]) => {
+            vueApp.component(`${name}`, component);
+        });
+
+        vueApp.mount(el);
+    },
+    progress: {
+        color: '#4B5563',
+    },
+});

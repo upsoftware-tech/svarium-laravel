@@ -1,0 +1,48 @@
+<?php
+
+namespace App\Svarium\Modules\{{ModuleName}}\Panel;
+
+use App\Models\{{ModuleName}};
+use App\Svarium\Modules\{{ModuleName}}\Forms\{{ModuleName}}Form;
+use App\Svarium\Modules\{{ModuleName}}\Tables\{{ModuleName}}Table;
+use Illuminate\Database\Eloquent\Model;
+use Upsoftware\Svarium\Panel\Form\Form;
+use Upsoftware\Svarium\Panel\Resource;
+use Upsoftware\Svarium\Panel\Table\Table;
+use Upsoftware\Svarium\Panel\Table\TableBuilder;
+use Upsoftware\Svarium\UI\Components\Form\Input;
+
+class {{ModuleName}}Resource extends Resource
+{
+    protected static string $model = {{ModuleName}}::class;
+
+    public function access(): array
+    {
+        return [
+            // 'title' => [
+            //     'default' => 'hidden',
+            //     'view' => 'perm:{{ModuleNamePluralLower}}.field.title.view',
+            //     'edit' => 'perm:{{ModuleNamePluralLower}}.field.title.edit',
+            //     'table' => true,
+            // ],
+        ];
+    }
+
+    public function duplicateForm(?Model $record = null): array
+    {
+        return [
+            Input::make('title')
+                ->label('Tytuł'),
+        ];
+    }
+
+    public function form(?Model $record = null): array
+    {
+        return Form::make({{ModuleName}}Form::class, $record);
+    }
+
+    public function table(): TableBuilder
+    {
+        return Table::make({{ModuleName}}Table::class);
+    }
+}
