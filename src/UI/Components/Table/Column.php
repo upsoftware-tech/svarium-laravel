@@ -21,6 +21,8 @@ class Column extends Component
 
     protected bool $searchable = false;
 
+    protected bool $selected = true;
+
     protected bool $visible = true;
 
     protected bool $filterEnabled = false;
@@ -128,6 +130,7 @@ class Column extends Component
             'label' => $this->props['label'] ?? ucfirst($key),
             'sortable' => $this->sortable,
             'searchable' => $this->searchable,
+            'selected' => $this->selected,
             'visible' => $this->visible,
             ...$props,
         ];
@@ -158,6 +161,13 @@ class Column extends Component
     public function searchable(bool $state = true): static
     {
         $this->searchable = $state;
+
+        return $this;
+    }
+
+    public function selected(bool $state = true): static
+    {
+        $this->selected = $state;
 
         return $this;
     }
@@ -778,6 +788,7 @@ class Column extends Component
             'label' => $this->props['label'] ?? ucfirst($key),
             'sortable' => $this->sortable,
             'searchable' => $this->searchable,
+            'selected' => $this->selected,
             'visible' => $this->visible,
             'filterable' => $this->filterEnabled,
             'filter' => $this->toFilterDefinition(),
