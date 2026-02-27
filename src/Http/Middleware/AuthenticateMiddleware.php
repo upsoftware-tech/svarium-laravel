@@ -4,18 +4,16 @@ namespace Upsoftware\Svarium\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Route;
 use Illuminate\Support\Facades\Auth;
-use Symfony\Component\HttpFoundation\Response;
 
 class AuthenticateMiddleware
 {
     /**
      * Handle an incoming request.
      *
-     * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
+     * @param  \Closure(\Illuminate\Http\Request): mixed  $next
      */
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next)
     {
 // Pobieramy bazę nazwy trasy z configu (np. "panel.auth")
         $authRoutePrefix = config('upsoftware.panel.route_prefix', 'panel.auth');
