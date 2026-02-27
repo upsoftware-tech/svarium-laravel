@@ -18,26 +18,27 @@ class ResourceRegistry
 
         $resource = app($resourceClass);
         $slug = $resource::slug();
+        $panel = $this->resolvePanelName();
 
         $registry = app(OperationRegistry::class);
 
-        $registry->register('admin', ['GET', 'POST'], $slug, ResourceListOperation::class, [
+        $registry->register($panel, ['GET', 'POST'], $slug, ResourceListOperation::class, [
             'resource' => $resourceClass,
         ]);
 
-        $registry->register('admin', ['GET', 'POST'], "{$slug}/create", ResourceCreateOperation::class, [
+        $registry->register($panel, ['GET', 'POST'], "{$slug}/create", ResourceCreateOperation::class, [
             'resource' => $resourceClass,
         ]);
 
-        $registry->register('admin', ['GET', 'POST'], "{$slug}/{id}/edit", ResourceEditOperation::class, [
+        $registry->register($panel, ['GET', 'POST'], "{$slug}/{id}/edit", ResourceEditOperation::class, [
             'resource' => $resourceClass,
         ]);
 
-        $registry->register('admin', ['POST'], "{$slug}/{id}/delete", ResourceDeleteOperation::class, [
+        $registry->register($panel, ['POST'], "{$slug}/{id}/delete", ResourceDeleteOperation::class, [
             'resource' => $resourceClass,
         ]);
 
-        $registry->register('admin', ['GET', 'POST'], "{$slug}/{id}/duplicate", ResourceDuplicateOperation::class, [
+        $registry->register($panel, ['GET', 'POST'], "{$slug}/{id}/duplicate", ResourceDuplicateOperation::class, [
             'resource' => $resourceClass,
         ]);
     }
@@ -45,5 +46,22 @@ class ResourceRegistry
     public function all(): array
     {
         return $this->resources;
+    }
+
+    protected function resolvePanelName(): string
+    {
+        $configured = config('upsoftware.panel.name');
+
+        if (is_string($configured) && $configured !== '') {
+            return $configured;
+        }
+
+        $panels = app(PanelRegistry::class)->all();
+
+        if ($panels !== []) {
+            return array_key_first($panels);
+        }
+
+        return 'admin';
     }
 }

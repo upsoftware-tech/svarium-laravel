@@ -24,6 +24,7 @@ return [
     ],
     'panel' => [
         'enabled' => true,
+        'name' => env('SVARIUM_PANEL_NAME', 'admin'),
         'route_prefix' => 'panel.auth',
         'prefix' => '',
     ],

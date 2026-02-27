@@ -3,6 +3,10 @@
 namespace Upsoftware\Svarium\Panel;
 
 use Illuminate\Http\Request;
+use Illuminate\Routing\Router;
+use ReflectionMethod;
+use ReflectionNamedType;
+use ReflectionUnionType;
 use Symfony\Component\HttpFoundation\Response;
 use Upsoftware\Svarium\Http\ComponentResult;
 use Upsoftware\Svarium\Http\OperationResult;
@@ -12,22 +16,127 @@ class OperationRouter
 {
     protected function resolveMiddleware(array $middleware, PanelContext $context): array
     {
+        $resolvedMiddleware = $this->expandMiddlewareAliases($middleware);
+
         return array_map(function ($middleware) use ($context) {
 
-            return function ($request, $next) use ($middleware, $context) {
+            if ($middleware instanceof \Closure) {
+                return $middleware;
+            }
 
-                $instance = is_string($middleware)
-                    ? app($middleware)
-                    : $middleware;
+            if (! is_string($middleware)) {
+                return $middleware;
+            }
 
-                if (method_exists($instance, 'handle')) {
-                    return $instance->handle($request, $next, $context);
-                }
+            [$class, $parameters] = $this->parseMiddlewareString($middleware);
 
-                return $next($request);
+            if (! class_exists($class)) {
+                return $middleware;
+            }
+
+            if (! $this->middlewareExpectsPanelContext($class)) {
+                return $middleware;
+            }
+
+            return function ($request, $next) use ($class, $parameters, $context) {
+                $instance = app($class);
+                return $instance->handle($request, $next, $context, ...$parameters);
             };
+        }, $resolvedMiddleware);
+    }
 
-        }, $middleware);
+    protected function expandMiddlewareAliases(array $middleware): array
+    {
+        $router = app(Router::class);
+        $aliases = $router->getMiddleware();
+        $groups = $router->getMiddlewareGroups();
+
+        $resolved = [];
+
+        foreach ($middleware as $definition) {
+            $resolved = array_merge(
+                $resolved,
+                $this->expandMiddlewareDefinition($definition, $aliases, $groups)
+            );
+        }
+
+        return $resolved;
+    }
+
+    protected function expandMiddlewareDefinition(
+        mixed $middleware,
+        array $aliases,
+        array $groups
+    ): array {
+        if ($middleware instanceof \Closure || ! is_string($middleware)) {
+            return [$middleware];
+        }
+
+        [$name, $parameters] = $this->parseMiddlewareString($middleware);
+
+        if (isset($groups[$name])) {
+            $expanded = [];
+
+            foreach ($groups[$name] as $groupMiddleware) {
+                $expanded = array_merge(
+                    $expanded,
+                    $this->expandMiddlewareDefinition($groupMiddleware, $aliases, $groups)
+                );
+            }
+
+            return $expanded;
+        }
+
+        if (isset($aliases[$name])) {
+            $resolved = $aliases[$name];
+
+            if (is_string($resolved) && $parameters !== []) {
+                return [$resolved.':'.implode(',', $parameters)];
+            }
+
+            return [$resolved];
+        }
+
+        return [$middleware];
+    }
+
+    protected function parseMiddlewareString(string $middleware): array
+    {
+        [$name, $parameterString] = array_pad(explode(':', $middleware, 2), 2, null);
+        $parameters = $parameterString === null || $parameterString === ''
+            ? []
+            : array_values(array_filter(explode(',', $parameterString), fn (string $value) => $value !== ''));
+
+        return [$name, $parameters];
+    }
+
+    protected function middlewareExpectsPanelContext(string $class): bool
+    {
+        if (! method_exists($class, 'handle')) {
+            return false;
+        }
+
+        $parameters = (new ReflectionMethod($class, 'handle'))->getParameters();
+
+        if (count($parameters) < 3) {
+            return false;
+        }
+
+        $type = $parameters[2]->getType();
+
+        if ($type instanceof ReflectionNamedType) {
+            return $type->getName() === PanelContext::class;
+        }
+
+        if ($type instanceof ReflectionUnionType) {
+            foreach ($type->getTypes() as $namedType) {
+                if ($namedType instanceof ReflectionNamedType && $namedType->getName() === PanelContext::class) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     public function handle(Request $request, string $panel, ?string $prefix): Response

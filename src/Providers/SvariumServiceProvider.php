@@ -198,21 +198,21 @@ class SvariumServiceProvider extends ServiceProvider
 
         /*
         |-----------------------------
-        | Fallback router Svarium
-        |-----------------------------
-        */
-        Route::middleware(['web'])
-            ->any('{path}', SvariumHttpKernel::class)
-            ->where('path', '.*');
-
-        /*
-        |-----------------------------
         | Default routes
         |-----------------------------
         */
         Route::middleware(['web'])
             ->namespace('Upsoftware\Svarium\Http\Controllers')
             ->group(__DIR__.'/../routes/web.php');
+
+        /*
+        |-----------------------------
+        | Fallback router Svarium
+        |-----------------------------
+        */
+        Route::middleware(['web'])
+            ->any('{path}', SvariumHttpKernel::class)
+            ->where('path', '.*');
 
         /*
         |-----------------------------

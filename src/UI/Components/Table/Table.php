@@ -136,6 +136,11 @@ class Table extends Component
         return $this->prop('sticky', $normalized);
     }
 
+    public function selected(bool $state = true): static
+    {
+        return $this->prop('columnSelection', $state);
+    }
+
     protected function wrapActions(array $actions): array
     {
         if (empty($actions)) {

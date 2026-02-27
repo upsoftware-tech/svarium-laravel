@@ -123,6 +123,8 @@ class TableBuilder
 
     protected array $stickySections = [];
 
+    protected bool $selected = true;
+
     protected string $filterInputSize = 'default';
 
     public function searchbar($searchbar): static
@@ -486,6 +488,13 @@ class TableBuilder
         }
 
         $this->stickySections = $normalized;
+
+        return $this;
+    }
+
+    public function selected(bool $state = true): static
+    {
+        $this->selected = $state;
 
         return $this;
     }
@@ -1574,6 +1583,13 @@ class TableBuilder
         return $head;
     }
 
+    protected function buildRowMultiSelectHeaderCell(): TableHead
+    {
+        return TableHead::make()
+            ->appearance($this->rowMultiSelectColumnAppearance())
+            ->prop('data-row-multi-select-header', true);
+    }
+
     protected function buildSelectionCell(array $row, string $bulkMode): TableCell
     {
         $rowKey = (string) ($row['id'] ?? $row['uuid'] ?? uniqid('row_', true));
@@ -1597,11 +1613,40 @@ class TableBuilder
             ->children([$control]);
     }
 
+    protected function buildRowMultiSelectCell(array $row): TableCell
+    {
+        $rowKey = (string) ($row['id'] ?? $row['uuid'] ?? uniqid('row_', true));
+
+        return TableCell::make()
+            ->appearance($this->rowMultiSelectColumnAppearance())
+            ->prop('data-row-multi-select-cell', true)
+            ->prop('data-row-key', $rowKey)
+            ->children([
+                Icon::make('lucide:menu')
+                    ->appearance([
+                        'class' => 'mx-auto h-4 w-4 select-none',
+                    ]),
+            ]);
+    }
+
     protected function selectionColumnAppearance(): array
     {
         return [
             'width' => '36px',
         ];
+    }
+
+    protected function rowMultiSelectColumnAppearance(): array
+    {
+        return [
+            'width' => '24px',
+            'class' => 'cursor-pointer select-none text-center text-slate-400',
+        ];
+    }
+
+    protected function shouldRenderRowMultiSelectColumn(?string $bulkMode): bool
+    {
+        return $this->selected && $bulkMode === 'multiple';
     }
 
     protected function buildNumberingHeaderCell(): TableHead
@@ -1689,6 +1734,10 @@ class TableBuilder
         $globalHeaderAppearance = $this->headerAppearanceProps['appearance'] ?? [];
         $globalHeaderAppearance = is_array($globalHeaderAppearance) ? $globalHeaderAppearance : [];
 
+        if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
+            $heads[] = $this->buildRowMultiSelectHeaderCell();
+        }
+
         if ($bulkMode !== null) {
             $heads[] = $this->buildSelectionHeaderCell($bulkMode);
         }
@@ -1733,6 +1782,12 @@ class TableBuilder
 
         if ($this->shouldRenderInlineFilters()) {
             $filterHeads = [];
+
+            if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
+                $filterHeads[] = TableHead::make()
+                    ->appearance($this->rowMultiSelectColumnAppearance())
+                    ->prop('class', 'py-2');
+            }
 
             if ($bulkMode !== null) {
                 $filterHeads[] = TableHead::make()
@@ -1800,6 +1855,10 @@ class TableBuilder
         $data['_model'] = get_class($model);
 
         $cells = [];
+
+        if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
+            $cells[] = $this->buildRowMultiSelectCell($data);
+        }
 
         if ($bulkMode !== null) {
             $cells[] = $this->buildSelectionCell($data, $bulkMode);
@@ -2584,6 +2643,10 @@ class TableBuilder
 
         $cells = [];
 
+        if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
+            $cells[] = TableCell::make()->appearance($this->rowMultiSelectColumnAppearance());
+        }
+
         if ($bulkMode !== null) {
             $cells[] = TableCell::make()->appearance($this->selectionColumnAppearance());
         }
@@ -2668,6 +2731,8 @@ class TableBuilder
             ->prop('numbering', $this->numberingEnabled)
             ->prop('numberingMode', $numberingMode)
             ->prop('sticky', $this->stickySections)
+            ->prop('columnSelection', $this->selected)
+            ->prop('rowSelectionColumn', $this->shouldRenderRowMultiSelectColumn($bulkMode))
             ->prop('hasActions', $hasActions)
             ->prop('footer', $footer)
             ->prop('bulkActions', array_map(
