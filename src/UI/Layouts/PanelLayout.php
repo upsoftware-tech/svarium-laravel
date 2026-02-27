@@ -21,6 +21,16 @@ class PanelLayout extends Component
         return $this->slot('content', $c);
     }
 
+    public function contentHeader(Component|array|string|\Closure|null $c): static
+    {
+        return $this->slot('contentHeader', $c);
+    }
+
+    public function contentFooter(Component|array|string|\Closure|null $c): static
+    {
+        return $this->slot('contentFooter', $c);
+    }
+
     public function header(Component|array|string|\Closure|null $c): static
     {
         return $this->slot('header', $c);

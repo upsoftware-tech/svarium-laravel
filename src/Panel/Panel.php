@@ -75,6 +75,18 @@ class Panel
         return $this;
     }
 
+    public function contentHeader($content): static
+    {
+        $this->layoutSlots['contentHeader'] = $content;
+        return $this;
+    }
+
+    public function contentFooter($content): static
+    {
+        $this->layoutSlots['contentFooter'] = $content;
+        return $this;
+    }
+
     public function aside($content): static
     {
         $this->layoutSlots['aside'] = $content;

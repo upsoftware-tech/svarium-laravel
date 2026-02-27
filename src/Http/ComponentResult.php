@@ -59,6 +59,18 @@ class ComponentResult implements OperationResult
         return $this;
     }
 
+    public function contentHeader($content): static
+    {
+        $this->slotOverrides['contentHeader'] = $content;
+        return $this;
+    }
+
+    public function contentFooter($content): static
+    {
+        $this->slotOverrides['contentFooter'] = $content;
+        return $this;
+    }
+
     public function sidebar($content): static
     {
         $this->slotOverrides['sidebar'] = $content;
