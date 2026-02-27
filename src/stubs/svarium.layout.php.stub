@@ -1,0 +1,10 @@
+<?php
+
+namespace App\Svarium\Layouts;
+
+use Upsoftware\Svarium\UI\Layouts\PanelLayout;
+
+class {{LayoutName}} extends PanelLayout
+{
+}
+
