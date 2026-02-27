@@ -121,6 +121,10 @@ class TableBuilder
 
     protected ?array $footerTotalRowsCache = null;
 
+    protected array $stickySections = [];
+
+    protected string $filterInputSize = 'default';
+
     public function searchbar($searchbar): static
     {
         $this->searchbar = $searchbar;
@@ -429,6 +433,61 @@ class TableBuilder
     public function filterAppearance(string $appearance): static
     {
         return $this->filtersAppearance($appearance);
+    }
+
+    public function filtersSize(string $size): static
+    {
+        $normalized = strtolower(trim($size));
+
+        if ($normalized === 'base') {
+            $normalized = 'default';
+        }
+
+        if (! in_array($normalized, ['xs', 'sm', 'default'], true)) {
+            throw new \InvalidArgumentException(
+                "Invalid filters size [{$size}]. Allowed values: 'xs', 'sm', 'default'."
+            );
+        }
+
+        $this->filterInputSize = $normalized;
+
+        return $this;
+    }
+
+    public function filterSize(string $size): static
+    {
+        return $this->filtersSize($size);
+    }
+
+    public function sticky(array|string ...$sections): static
+    {
+        $normalized = [];
+
+        foreach ($sections as $section) {
+            if (is_array($section)) {
+                foreach ($section as $nested) {
+                    if (! is_string($nested)) {
+                        continue;
+                    }
+
+                    $value = strtolower(trim($nested));
+                    if (in_array($value, ['header', 'search', 'footer'], true) && ! in_array($value, $normalized, true)) {
+                        $normalized[] = $value;
+                    }
+                }
+
+                continue;
+            }
+
+            $value = strtolower(trim($section));
+            if (in_array($value, ['header', 'search', 'footer'], true) && ! in_array($value, $normalized, true)) {
+                $normalized[] = $value;
+            }
+        }
+
+        $this->stickySections = $normalized;
+
+        return $this;
     }
 
     public function pagination(array $config): static
@@ -1584,7 +1643,7 @@ class TableBuilder
 
     protected function buildInlineFilterHeadCell(Column $column): TableHead
     {
-        $head = TableHead::make();
+        $head = TableHead::make()->prop('class', 'py-2');
         $searchAppearance = $column->getSearchAppearance();
 
         if (is_array($searchAppearance) && ! empty($searchAppearance)) {
@@ -1618,7 +1677,7 @@ class TableBuilder
             ->prop('field', $field)
             ->prop('operators', $operators)
             ->prop('mode', $mode)
-            ->prop('size', 'default')
+            ->prop('size', $this->filterInputSize)
             ->prop('type', $type);
 
         return $head->children([$input]);
@@ -1676,16 +1735,18 @@ class TableBuilder
             $filterHeads = [];
 
             if ($bulkMode !== null) {
-                $filterHeads[] = TableHead::make()->appearance($this->selectionColumnAppearance());
+                $filterHeads[] = TableHead::make()
+                    ->appearance($this->selectionColumnAppearance())
+                    ->prop('class', 'py-2');
             }
 
             if ($numberingMode !== null) {
-                $filterHeads[] = TableHead::make();
+                $filterHeads[] = TableHead::make()->prop('class', 'py-2');
             }
 
             foreach ($this->columnObjects as $column) {
                 if (! $column instanceof Column) {
-                    $filterHeads[] = TableHead::make();
+                    $filterHeads[] = TableHead::make()->prop('class', 'py-2');
                     continue;
                 }
 
@@ -1693,7 +1754,7 @@ class TableBuilder
             }
 
             if ($hasActions) {
-                $filterHeads[] = TableHead::make();
+                $filterHeads[] = TableHead::make()->prop('class', 'py-2');
             }
 
             $rows[] = TableRow::make()->children($filterHeads);
@@ -2606,6 +2667,7 @@ class TableBuilder
             ->prop('bulkMode', $bulkMode)
             ->prop('numbering', $this->numberingEnabled)
             ->prop('numberingMode', $numberingMode)
+            ->prop('sticky', $this->stickySections)
             ->prop('hasActions', $hasActions)
             ->prop('footer', $footer)
             ->prop('bulkActions', array_map(

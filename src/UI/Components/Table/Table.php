@@ -107,6 +107,35 @@ class Table extends Component
         return $this;
     }
 
+    public function sticky(array|string ...$sections): static
+    {
+        $normalized = [];
+
+        foreach ($sections as $section) {
+            if (is_array($section)) {
+                foreach ($section as $nested) {
+                    if (! is_string($nested)) {
+                        continue;
+                    }
+
+                    $value = strtolower(trim($nested));
+                    if (in_array($value, ['header', 'search', 'footer'], true) && ! in_array($value, $normalized, true)) {
+                        $normalized[] = $value;
+                    }
+                }
+
+                continue;
+            }
+
+            $value = strtolower(trim($section));
+            if (in_array($value, ['header', 'search', 'footer'], true) && ! in_array($value, $normalized, true)) {
+                $normalized[] = $value;
+            }
+        }
+
+        return $this->prop('sticky', $normalized);
+    }
+
     protected function wrapActions(array $actions): array
     {
         if (empty($actions)) {
