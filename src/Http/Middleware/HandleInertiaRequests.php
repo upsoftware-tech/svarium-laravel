@@ -67,7 +67,7 @@ class HandleInertiaRequests extends Middleware
     {
         return $this->safe(
             fn () => Setting::getSettingGlobal('layout'),
-            []
+            (object) []
         );
     }
 
