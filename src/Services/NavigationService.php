@@ -26,14 +26,14 @@ class NavigationService
     /**
      * Pobiera drzewo z bazy danych i opcjonalnie łączy je z elementami statycznymi.
      */
-    public function getTree(string|int $id = null): array
+    public function getTree(string|int|null $id = null): array
     {
         $modelClass = $this->getModelClass();
         $query = $modelClass::with('children')
             ->where('is_active', true)
             ->orderBy('order');
 
-        if ($id === null) {
+        if ($id === null || $id === '') {
             $query->whereNull('parent_id');
 
             return $query->get()
@@ -41,13 +41,29 @@ class NavigationService
                 ->toArray();
         }
 
-        $item = is_string($id)
-            ? $query->where('label', $id)->first()
-            : $query->where('id', $id)->first();
+        $item = $this->resolveItemByIdentifier($query, $id);
 
         return $item
             ? $this->formatItem($item)
             : [];
+    }
+
+    protected function resolveItemByIdentifier($query, string|int $id): mixed
+    {
+        if (is_int($id)) {
+            return $query->where('id', $id)->first();
+        }
+
+        $trimmed = trim($id);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (ctype_digit($trimmed)) {
+            return $query->where('id', (int) $trimmed)->first();
+        }
+
+        return $query->where('label', $trimmed)->first();
     }
 
     /**
@@ -104,7 +120,7 @@ class NavigationService
         return 'invalid';
     }
 
-    public function addItem(string $label, string $route, string $icon = null): self
+    public function addItem(string $label, string $route, ?string $icon = null): self
     {
         $this->items->push([
             'label' => $label,

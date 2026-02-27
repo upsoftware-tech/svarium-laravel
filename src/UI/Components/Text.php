@@ -41,4 +41,13 @@ class Text extends Component
     {
         return $this->prop('variant', $variant);
     }
+
+    public function content(array|Component|string $children): static
+    {
+        if (is_string($children)) {
+            return $this->text($children);
+        }
+
+        return parent::content($children);
+    }
 }

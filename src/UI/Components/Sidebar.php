@@ -3,9 +3,12 @@
 namespace Upsoftware\Svarium\UI\Components;
 
 use Upsoftware\Svarium\UI\Component;
+use Upsoftware\Svarium\UI\Concerns\Props\HasChildren;
 
 class Sidebar extends Component
 {
+    use HasChildren;
+
     public static function make(?string $name = null): static
     {
         return parent::make($name)
@@ -32,5 +35,25 @@ class Sidebar extends Component
         }
 
         return $this->prop('position', $position);
+    }
+
+    public function header(Component|array|string|\Closure|null $content): static
+    {
+        return $this->slot('header', $content);
+    }
+
+    public function footer(Component|array|string|\Closure|null $content): static
+    {
+        return $this->slot('footer', $content);
+    }
+
+    public function top(Component|array|string|\Closure|null $content): static
+    {
+        return $this->slot('top', $content);
+    }
+
+    public function bottom(Component|array|string|\Closure|null $content): static
+    {
+        return $this->slot('bottom', $content);
     }
 }

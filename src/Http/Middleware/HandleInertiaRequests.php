@@ -66,9 +66,98 @@ class HandleInertiaRequests extends Middleware
     protected function resolveSettings(): mixed
     {
         return $this->safe(
-            fn () => Setting::getSettingGlobal('layout'),
+            fn () => $this->hydrateNavigationComponentProps(Setting::getSettingGlobal('layout')),
             (object) []
         );
+    }
+
+    protected function hydrateNavigationComponentProps(mixed $value): mixed
+    {
+        $cache = [];
+
+        return $this->mapNavigationComponents($value, $cache);
+    }
+
+    protected function mapNavigationComponents(mixed $value, array &$cache): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        $mapped = [];
+        foreach ($value as $key => $item) {
+            $mapped[$key] = $this->mapNavigationComponents($item, $cache);
+        }
+
+        if (! $this->isNavigationVerticalConfig($mapped)) {
+            return $mapped;
+        }
+
+        $props = $mapped['props'] ?? [];
+        if (! is_array($props)) {
+            $props = [];
+        }
+
+        $navigationId = $this->normalizeNavigationId($props['navigation_id'] ?? null);
+        if ($navigationId === null) {
+            $mapped['props'] = [
+                ...$props,
+                'navigation' => [],
+                'items' => [],
+                'navigations' => [],
+            ];
+
+            return $mapped;
+        }
+
+        $cacheKey = (string) $navigationId;
+        if (! array_key_exists($cacheKey, $cache)) {
+            $cache[$cacheKey] = NavigationService::make()->getTree($navigationId);
+        }
+
+        $tree = $cache[$cacheKey];
+        $items = is_array($tree)
+            ? ($tree['children'] ?? [])
+            : [];
+
+        $mapped['props'] = [
+            ...$props,
+            'navigation_id' => $navigationId,
+            'navigation' => $tree,
+            'items' => $items,
+            'navigations' => $items,
+        ];
+
+        return $mapped;
+    }
+
+    protected function isNavigationVerticalConfig(array $value): bool
+    {
+        $componentName = $value['name'] ?? $value['component'] ?? null;
+
+        return is_string($componentName) && $componentName === 'NavigationVertical';
+    }
+
+    protected function normalizeNavigationId(mixed $navigationId): string|int|null
+    {
+        if (is_int($navigationId)) {
+            return $navigationId;
+        }
+
+        if (! is_string($navigationId)) {
+            return null;
+        }
+
+        $trimmed = trim($navigationId);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (ctype_digit($trimmed)) {
+            return (int) $trimmed;
+        }
+
+        return $trimmed;
     }
 
     protected function resolveNavigation(bool $isAuthenticated): mixed
