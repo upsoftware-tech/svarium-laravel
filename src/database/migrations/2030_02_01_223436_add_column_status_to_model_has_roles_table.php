@@ -23,7 +23,7 @@ return new class extends Migration
                 $table->index('role_id', 'model_has_roles_role_id_foreign');
                 $table->foreign('role_id', 'model_has_roles_role_id_foreign')
                     ->references('id')
-                    ->on('_roles')
+                    ->on('roles')
                     ->onDelete('cascade');
             });
 
