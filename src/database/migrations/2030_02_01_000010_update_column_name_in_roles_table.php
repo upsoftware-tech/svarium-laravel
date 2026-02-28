@@ -37,9 +37,11 @@ return new class extends Migration
         $locale = app()->getLocale(); // stała wartość zapisana w strukturze DB
 
         // 1. usuń stary unique index
-        Schema::table('roles', function (Blueprint $table) {
-            $table->dropUnique('roles_name_guard_name_unique');
-        });
+        if ($this->indexExists('roles', 'roles_name_guard_name_unique')) {
+            Schema::table('roles', function (Blueprint $table) {
+                $table->dropUnique('roles_name_guard_name_unique');
+            });
+        }
 
         // 2. dodaj kolumnę json
         Schema::table('roles', function (Blueprint $table) {
