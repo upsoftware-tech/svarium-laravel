@@ -124,3 +124,75 @@ function show(string|array $dataOrView, ?array $params) {
         return $dataOrView;
     }
 }
+
+if (! function_exists('module_route')) {
+    /**
+     * Build panel module/resource path in Svarium.
+     *
+     * Examples:
+     * - module_route('patient') => "admin/patients"
+     * - module_route('patient', 'create') => "admin/patients/create"
+     * - module_route('patient', 'edit', 10) => "admin/patients/10/edit"
+     */
+    function module_route(
+        string $module,
+        ?string $action = null,
+        string|int|null $id = null,
+        ?string $panel = null
+    ): string {
+        $panelSegment = trim((string) ($panel ?? config('upsoftware.panel.name', 'admin')), '/');
+        $moduleName = trim($module);
+
+        if ($moduleName === '') {
+            return $panelSegment;
+        }
+
+        if (str_contains($moduleName, '\\')) {
+            $moduleName = class_basename($moduleName);
+        }
+
+        $moduleName = (string) str($moduleName)
+            ->replace('Resource', '')
+            ->replace('Module', '')
+            ->replace(['/', '-'], '_')
+            ->snake();
+
+        $slug = (string) str($moduleName)->replace('_', '')->plural()->lower();
+        $base = trim(implode('/', array_filter([$panelSegment, $slug])), '/');
+
+        $normalizedAction = strtolower(trim((string) $action));
+
+        if ($normalizedAction === '' || in_array($normalizedAction, ['index', 'list'], true)) {
+            return $base;
+        }
+
+        if ($normalizedAction === 'create') {
+            return "{$base}/create";
+        }
+
+        if (in_array($normalizedAction, ['edit', 'duplicate', 'delete'], true)) {
+            if ($id === null || $id === '') {
+                throw new InvalidArgumentException("Action [{$normalizedAction}] requires record identifier.");
+            }
+
+            return "{$base}/{$id}/{$normalizedAction}";
+        }
+
+        if ($id !== null && $id !== '') {
+            return "{$base}/{$id}/{$normalizedAction}";
+        }
+
+        return "{$base}/{$normalizedAction}";
+    }
+}
+
+if (! function_exists('module_helper')) {
+    function module_helper(
+        string $module,
+        ?string $action = null,
+        string|int|null $id = null,
+        ?string $panel = null
+    ): string {
+        return module_route($module, $action, $id, $panel);
+    }
+}

@@ -19,6 +19,7 @@ use Upsoftware\Svarium\Modules\DependencyResolver;
 use Upsoftware\Svarium\Modules\ModuleRegistry;
 use Upsoftware\Svarium\Panel\BindingRegistry;
 use Upsoftware\Svarium\Panel\OperationRegistry;
+use Upsoftware\Svarium\Panel\Panel;
 use Upsoftware\Svarium\Panel\PanelRegistry;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 use Upsoftware\Svarium\Services\DeviceTracking\DeviceTracking;
@@ -65,7 +66,7 @@ class SvariumServiceProvider extends ServiceProvider
         $this->app->singleton(PanelRegistry::class, function () {
             $registry = new PanelRegistry;
 
-            foreach (require base_path('app/Svarium/panels.php') as $panel) {
+            foreach ($this->resolvePanels() as $panel) {
                 $registry->register($panel);
             }
 
@@ -306,5 +307,54 @@ class SvariumServiceProvider extends ServiceProvider
         );
 
         $this->commands($commands);
+    }
+
+    /**
+     * Resolve panel definitions from app/Svarium/panels.php.
+     * Falls back to a safe default panel when the file is missing or invalid.
+     *
+     * @return list<Panel>
+     */
+    protected function resolvePanels(): array
+    {
+        $file = base_path('app/Svarium/panels.php');
+        $resolved = [];
+
+        if (is_file($file)) {
+            $panels = require $file;
+
+            if (is_array($panels)) {
+                foreach ($panels as $panel) {
+                    if ($panel instanceof Panel) {
+                        $resolved[] = $panel;
+                    }
+                }
+            }
+        }
+
+        if ($resolved !== []) {
+            return $resolved;
+        }
+
+        return [$this->defaultPanel()];
+    }
+
+    protected function defaultPanel(): Panel
+    {
+        $name = trim((string) config('upsoftware.panel.name', 'admin'));
+        if ($name === '') {
+            $name = 'admin';
+        }
+
+        $configuredPrefix = config('upsoftware.panel.prefix');
+        $prefix = is_string($configuredPrefix)
+            ? trim($configuredPrefix, '/')
+            : '';
+
+        if ($prefix === '') {
+            return Panel::make($name)->noPrefix();
+        }
+
+        return Panel::make($name)->prefix($prefix);
     }
 }

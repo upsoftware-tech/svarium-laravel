@@ -41,12 +41,26 @@ class ResourceCreateOperation extends Operation
     {
         $context->setOperationType('create');
         $resource = $this->resource();
+        $this->applyTitleIfEmpty($resource->createTitle($context));
 
         if (method_exists($resource, 'createForm')) {
             return $resource->createForm();
         }
 
         return $resource->form(null);
+    }
+
+    protected function applyTitleIfEmpty(string $title): void
+    {
+        if (! function_exists('set_title') || ! function_exists('get_title')) {
+            return;
+        }
+
+        if (trim((string) get_title()) !== '') {
+            return;
+        }
+
+        set_title($title);
     }
 
     protected function save(PanelContext $context): RedirectResult

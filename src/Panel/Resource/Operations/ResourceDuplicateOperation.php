@@ -40,6 +40,7 @@ class ResourceDuplicateOperation extends Operation
     protected function schema(PanelContext $context, Model $record): array
     {
         $resource = $this->resource();
+        $this->applyTitleIfEmpty($resource->duplicateTitle($context, $record));
 
         $clone = $record->replicate();
 
@@ -48,6 +49,19 @@ class ResourceDuplicateOperation extends Operation
         }
 
         return $resource->form($clone);
+    }
+
+    protected function applyTitleIfEmpty(string $title): void
+    {
+        if (! function_exists('set_title') || ! function_exists('get_title')) {
+            return;
+        }
+
+        if (trim((string) get_title()) !== '') {
+            return;
+        }
+
+        set_title($title);
     }
 
     protected function save(PanelContext $context, Model $record): RedirectResult

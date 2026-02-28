@@ -330,6 +330,7 @@ class Action
         return match ($this->type) {
             'create' => 'create',
             'edit' => '{id}/edit',
+            'view' => '{id}/preview',
             'delete' => '{id}/delete',
             'duplicate' => '{id}/duplicate',
             default => '{id}',

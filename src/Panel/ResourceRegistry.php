@@ -2,11 +2,14 @@
 
 namespace Upsoftware\Svarium\Panel;
 
+use Illuminate\Support\Facades\Route;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceCreateOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDeleteOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDuplicateOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceEditOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceListOperation;
+use Upsoftware\Svarium\Panel\Resource\Operations\ResourcePreviewOperation;
+use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 
 class ResourceRegistry
 {
@@ -19,6 +22,7 @@ class ResourceRegistry
         $resource = app($resourceClass);
         $slug = $resource::slug();
         $panel = $this->resolvePanelName();
+        $this->registerModuleRouteAliases($resourceClass, $panel, $slug);
 
         $registry = app(OperationRegistry::class);
 
@@ -31,6 +35,10 @@ class ResourceRegistry
         ]);
 
         $registry->register($panel, ['GET', 'POST'], "{$slug}/{id}/edit", ResourceEditOperation::class, [
+            'resource' => $resourceClass,
+        ]);
+
+        $registry->register($panel, ['GET'], "{$slug}/{id}/preview", ResourcePreviewOperation::class, [
             'resource' => $resourceClass,
         ]);
 
@@ -63,5 +71,44 @@ class ResourceRegistry
         }
 
         return 'admin';
+    }
+
+    protected function registerModuleRouteAliases(string $resourceClass, string $panel, string $slug): void
+    {
+        $module = (string) str(class_basename($resourceClass))
+            ->replace('Resource', '')
+            ->snake();
+
+        if ($module === '') {
+            $module = (string) str($slug)->singular()->snake();
+        }
+
+        $base = trim(implode('/', array_filter([
+            trim($panel, '/'),
+            trim($slug, '/'),
+        ])), '/');
+
+        if ($base === '') {
+            return;
+        }
+
+        $routes = [
+            "module:{$module}" => $base,
+            "module:{$module}.create" => "{$base}/create",
+            "module:{$module}.edit" => "{$base}/{id}/edit",
+            "module:{$module}.preview" => "{$base}/{id}/preview",
+            "module:{$module}.delete" => "{$base}/{id}/delete",
+            "module:{$module}.duplicate" => "{$base}/{id}/duplicate",
+        ];
+
+        foreach ($routes as $name => $uri) {
+            if (Route::has($name)) {
+                continue;
+            }
+
+            Route::middleware(['web'])
+                ->any($uri, SvariumHttpKernel::class)
+                ->name($name);
+        }
     }
 }

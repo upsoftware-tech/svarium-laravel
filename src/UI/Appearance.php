@@ -6,6 +6,14 @@ class Appearance
 {
     protected array $props = [];
 
+    protected const CSS_GLOBAL_VALUES = [
+        'inherit',
+        'initial',
+        'unset',
+        'revert',
+        'revert-layer',
+    ];
+
     protected function appendClass(string $token): static
     {
         $token = trim($token);
@@ -337,6 +345,244 @@ class Appearance
         }
 
         return $this->appendClass('gap-'.$value);
+    }
+
+    public function padding(string|int|float $padding): static
+    {
+        if (is_int($padding)) {
+            return $this->appendClass('p-'.$padding);
+        }
+
+        if (is_float($padding)) {
+            return $this->style([
+                'padding' => $padding.'px',
+            ]);
+        }
+
+        $value = trim($padding);
+        if ($value === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($value);
+
+        if (str_starts_with($normalized, 'p-') || preg_match('/^p[trblxyse]-.+$/', $normalized)) {
+            return $this->appendClass($normalized);
+        }
+
+        if (preg_match('/^(x|y|t|r|b|l|s|e)-.+$/', $normalized)) {
+            return $this->appendClass('p-'.$normalized);
+        }
+
+        if (is_numeric($normalized)) {
+            return $this->appendClass('p-'.$normalized);
+        }
+
+        if ($this->shouldTreatAsCssValue($value)) {
+            return $this->style([
+                'padding' => $value,
+            ]);
+        }
+
+        return $this->appendClass('p-'.$normalized);
+    }
+
+    public function justifyContent(string|int|float $value): static
+    {
+        return $this->applyUtilityProperty($value, 'justify', 'justifyContent', [
+            'start' => 'justify-start',
+            'flex-start' => 'justify-start',
+            'justify-start' => 'justify-start',
+            'end' => 'justify-end',
+            'flex-end' => 'justify-end',
+            'justify-end' => 'justify-end',
+            'end-safe' => 'justify-end-safe',
+            'safe-end' => 'justify-end-safe',
+            'safe flex-end' => 'justify-end-safe',
+            'safe-flex-end' => 'justify-end-safe',
+            'justify-end-safe' => 'justify-end-safe',
+            'center' => 'justify-center',
+            'justify-center' => 'justify-center',
+            'center-safe' => 'justify-center-safe',
+            'safe-center' => 'justify-center-safe',
+            'safe center' => 'justify-center-safe',
+            'justify-center-safe' => 'justify-center-safe',
+            'between' => 'justify-between',
+            'space-between' => 'justify-between',
+            'justify-between' => 'justify-between',
+            'around' => 'justify-around',
+            'space-around' => 'justify-around',
+            'justify-around' => 'justify-around',
+            'evenly' => 'justify-evenly',
+            'space-evenly' => 'justify-evenly',
+            'justify-evenly' => 'justify-evenly',
+            'stretch' => 'justify-stretch',
+            'justify-stretch' => 'justify-stretch',
+            'baseline' => 'justify-baseline',
+            'justify-baseline' => 'justify-baseline',
+            'normal' => 'justify-normal',
+            'justify-normal' => 'justify-normal',
+        ]);
+    }
+
+    public function justifyItems(string|int|float $value): static
+    {
+        return $this->applyUtilityProperty($value, 'justify-items', 'justifyItems', [
+            'start' => 'justify-items-start',
+            'flex-start' => 'justify-items-start',
+            'justify-items-start' => 'justify-items-start',
+            'end' => 'justify-items-end',
+            'flex-end' => 'justify-items-end',
+            'justify-items-end' => 'justify-items-end',
+            'center' => 'justify-items-center',
+            'justify-items-center' => 'justify-items-center',
+            'stretch' => 'justify-items-stretch',
+            'justify-items-stretch' => 'justify-items-stretch',
+            'normal' => 'justify-items-normal',
+            'justify-items-normal' => 'justify-items-normal',
+        ]);
+    }
+
+    public function justifySelf(string|int|float $value): static
+    {
+        return $this->applyUtilityProperty($value, 'justify-self', 'justifySelf', [
+            'auto' => 'justify-self-auto',
+            'justify-self-auto' => 'justify-self-auto',
+            'start' => 'justify-self-start',
+            'flex-start' => 'justify-self-start',
+            'justify-self-start' => 'justify-self-start',
+            'end' => 'justify-self-end',
+            'flex-end' => 'justify-self-end',
+            'justify-self-end' => 'justify-self-end',
+            'center' => 'justify-self-center',
+            'justify-self-center' => 'justify-self-center',
+            'stretch' => 'justify-self-stretch',
+            'justify-self-stretch' => 'justify-self-stretch',
+        ]);
+    }
+
+    public function alignContent(string|int|float $value): static
+    {
+        return $this->applyUtilityProperty($value, 'content', 'alignContent', [
+            'start' => 'content-start',
+            'flex-start' => 'content-start',
+            'content-start' => 'content-start',
+            'end' => 'content-end',
+            'flex-end' => 'content-end',
+            'content-end' => 'content-end',
+            'center' => 'content-center',
+            'content-center' => 'content-center',
+            'between' => 'content-between',
+            'space-between' => 'content-between',
+            'content-between' => 'content-between',
+            'around' => 'content-around',
+            'space-around' => 'content-around',
+            'content-around' => 'content-around',
+            'evenly' => 'content-evenly',
+            'space-evenly' => 'content-evenly',
+            'content-evenly' => 'content-evenly',
+            'baseline' => 'content-baseline',
+            'content-baseline' => 'content-baseline',
+            'stretch' => 'content-stretch',
+            'content-stretch' => 'content-stretch',
+            'normal' => 'content-normal',
+            'content-normal' => 'content-normal',
+        ]);
+    }
+
+    public function alignItems(string|int|float $value): static
+    {
+        return $this->applyUtilityProperty($value, 'items', 'alignItems', [
+            'start' => 'items-start',
+            'flex-start' => 'items-start',
+            'items-start' => 'items-start',
+            'end' => 'items-end',
+            'flex-end' => 'items-end',
+            'items-end' => 'items-end',
+            'center' => 'items-center',
+            'items-center' => 'items-center',
+            'baseline' => 'items-baseline',
+            'items-baseline' => 'items-baseline',
+            'stretch' => 'items-stretch',
+            'items-stretch' => 'items-stretch',
+        ]);
+    }
+
+    public function alignSelf(string|int|float $value): static
+    {
+        return $this->applyUtilityProperty($value, 'self', 'alignSelf', [
+            'auto' => 'self-auto',
+            'self-auto' => 'self-auto',
+            'start' => 'self-start',
+            'flex-start' => 'self-start',
+            'self-start' => 'self-start',
+            'end' => 'self-end',
+            'flex-end' => 'self-end',
+            'self-end' => 'self-end',
+            'center' => 'self-center',
+            'self-center' => 'self-center',
+            'baseline' => 'self-baseline',
+            'self-baseline' => 'self-baseline',
+            'stretch' => 'self-stretch',
+            'self-stretch' => 'self-stretch',
+        ]);
+    }
+
+    protected function applyUtilityProperty(
+        string|int|float $value,
+        string $classPrefix,
+        string $styleProperty,
+        array $aliases = []
+    ): static {
+        if (is_int($value) || is_float($value)) {
+            return $this->style([
+                $styleProperty => $value.'px',
+            ]);
+        }
+
+        $raw = trim($value);
+        if ($raw === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($raw);
+        if (isset($aliases[$normalized])) {
+            return $this->appendClass($aliases[$normalized]);
+        }
+
+        if (str_starts_with($normalized, $classPrefix.'-')) {
+            return $this->appendClass($normalized);
+        }
+
+        return $this->style([
+            $styleProperty => $raw,
+        ]);
+    }
+
+    protected function shouldTreatAsCssValue(string $value): bool
+    {
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            return false;
+        }
+
+        if (in_array($normalized, self::CSS_GLOBAL_VALUES, true)) {
+            return true;
+        }
+
+        if (preg_match('/^-?\d+(\.\d+)?(px|rem|em|%|vw|vh|vmin|vmax|ch|ex)$/i', $normalized)) {
+            return true;
+        }
+
+        if (str_contains($normalized, ' ')) {
+            return true;
+        }
+
+        return str_starts_with($normalized, 'var(')
+            || str_starts_with($normalized, 'calc(')
+            || str_starts_with($normalized, 'clamp(')
+            || str_starts_with($normalized, 'min(')
+            || str_starts_with($normalized, 'max(');
     }
 
     public function style(array $style): static

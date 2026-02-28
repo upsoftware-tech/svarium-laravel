@@ -41,12 +41,26 @@ class ResourceEditOperation extends Operation
     {
         $context->setOperationType('edit');
         $resource = $this->resource();
+        $this->applyTitleIfEmpty($resource->editTitle($context, $record));
 
         if (method_exists($resource, 'editForm')) {
             return $resource->editForm($record);
         }
 
         return $resource->form($record);
+    }
+
+    protected function applyTitleIfEmpty(string $title): void
+    {
+        if (! function_exists('set_title') || ! function_exists('get_title')) {
+            return;
+        }
+
+        if (trim((string) get_title()) !== '') {
+            return;
+        }
+
+        set_title($title);
     }
 
     protected function save(PanelContext $context, Model $record): RedirectResult

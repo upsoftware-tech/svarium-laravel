@@ -86,9 +86,50 @@ abstract class Resource
         return true;
     }
 
+    public function canPreview(PanelContext $context): bool
+    {
+        return true;
+    }
+
     public function access(): array
     {
         return [];
+    }
+
+    public function listTitle(PanelContext $context): string
+    {
+        $label = (string) str($this->resourceTitleLabel())->headline();
+
+        return "{$label} list";
+    }
+
+    public function createTitle(PanelContext $context): string
+    {
+        return "Create {$this->resourceTitleLabel()}";
+    }
+
+    public function editTitle(PanelContext $context, Model $record): string
+    {
+        return "Edit {$this->resourceTitleLabel()}";
+    }
+
+    public function duplicateTitle(PanelContext $context, Model $record): string
+    {
+        return "Duplicate {$this->resourceTitleLabel()}";
+    }
+
+    public function previewTitle(PanelContext $context, Model $record): string
+    {
+        return "Preview {$this->resourceTitleLabel()}";
+    }
+
+    public function previewForm(Model $record): array
+    {
+        if (method_exists($this, 'editForm')) {
+            return $this->editForm($record);
+        }
+
+        return $this->form($record);
     }
 
     /*
@@ -109,6 +150,15 @@ abstract class Resource
         $class = static::model();
 
         return $class::query();
+    }
+
+    protected function resourceTitleLabel(): string
+    {
+        return (string) str(class_basename(static::model()))
+            ->snake(' ')
+            ->lower()
+            ->trim()
+            ->toString();
     }
 
     protected function tableQuery(): Builder

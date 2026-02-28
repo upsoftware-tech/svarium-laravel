@@ -42,7 +42,12 @@ class ResourceListOperation extends Operation
     public function table(PanelContext $context): ?TableBuilder
     {
         $resource = $this->resource();
+        $this->applyTitleIfEmpty($resource->listTitle($context));
         $builder = $resource->table();
+
+        if (method_exists($resource, 'canPreview') && ! $resource->canPreview($context)) {
+            $builder->disableDefaultActions(['view']);
+        }
 
         if (method_exists($resource, 'canDelete') && ! $resource->canDelete($context)) {
             $builder->disableDefaultActions(['delete']);
@@ -55,6 +60,19 @@ class ResourceListOperation extends Operation
         }
 
         return $builder;
+    }
+
+    protected function applyTitleIfEmpty(string $title): void
+    {
+        if (! function_exists('set_title') || ! function_exists('get_title')) {
+            return;
+        }
+
+        if (trim((string) get_title()) !== '') {
+            return;
+        }
+
+        set_title($title);
     }
 
     protected function handleTable(PanelContext $context, ...$args): OperationResult
