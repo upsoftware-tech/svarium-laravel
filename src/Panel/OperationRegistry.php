@@ -68,31 +68,112 @@ class OperationRegistry
                 continue;
             }
 
-            $panelPath = $module->path('Panel');
+            $this->registerOperationsFromPath($module->path('Panel'));
+        }
 
-            if (! is_dir($panelPath)) {
+        // Backward compatible path for non-module operations.
+        $this->registerOperationsFromPath(svarium_path('Panel/Operations'));
+    }
+
+    protected function registerOperationsFromPath(string $path): void
+    {
+        if (! is_dir($path)) {
+            return;
+        }
+
+        foreach (File::allFiles($path) as $file) {
+            $class = $this->classFromFile($file->getPathname());
+
+            if (! class_exists($class) || ! is_subclass_of($class, Operation::class)) {
                 continue;
             }
 
-            foreach (File::allFiles($panelPath) as $file) {
+            $uri = method_exists($class, 'uri')
+                ? (string) $class::uri()
+                : '';
 
-                $class = $this->classFromFile($file->getPathname());
+            $methods = method_exists($class, 'methods')
+                ? (array) $class::methods()
+                : ['GET'];
 
-                if (! class_exists($class) || ! is_subclass_of($class, Operation::class)) {
-                    continue;
-                }
+            foreach ($this->resolvePanelsForOperation($class) as $panel) {
+                $this->register(
+                    $panel,
+                    $methods,
+                    $uri,
+                    $class
+                );
+            }
+        }
+    }
 
-                foreach ((array) $class::$panels as $panel) {
+    protected function resolvePanelsForOperation(string $class): array
+    {
+        $legacyPanel = $this->readStaticProperty($class, 'panel');
 
-                    $this->register(
-                        $panel,
-                        $class::methods(),
-                        $class::uri(),
-                        $class
-                    );
-                }
+        if (is_string($legacyPanel) && trim($legacyPanel) !== '') {
+            return [trim($legacyPanel)];
+        }
+
+        if (is_array($legacyPanel)) {
+            $normalizedLegacyPanels = $this->normalizePanels($legacyPanel);
+            if ($normalizedLegacyPanels !== []) {
+                return $normalizedLegacyPanels;
+            }
+        }
+
+        $panels = $this->readStaticProperty($class, 'panels');
+        $normalizedPanels = $this->normalizePanels($panels);
+
+        return $normalizedPanels !== []
+            ? $normalizedPanels
+            : ['admin'];
+    }
+
+    protected function normalizePanels(mixed $panels): array
+    {
+        if (is_string($panels)) {
+            $panels = [$panels];
+        }
+
+        if (! is_array($panels)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($panels as $panel) {
+            if (! is_string($panel)) {
+                continue;
             }
 
+            $panel = trim($panel);
+
+            if ($panel === '') {
+                continue;
+            }
+
+            $normalized[] = $panel;
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    protected function readStaticProperty(string $class, string $property): mixed
+    {
+        try {
+            $reflection = new \ReflectionClass($class);
+
+            if (! $reflection->hasProperty($property)) {
+                return null;
+            }
+
+            $reflectionProperty = $reflection->getProperty($property);
+            $reflectionProperty->setAccessible(true);
+
+            return $reflectionProperty->getValue();
+        } catch (\Throwable) {
+            return null;
         }
     }
 

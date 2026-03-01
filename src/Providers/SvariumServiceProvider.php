@@ -211,9 +211,11 @@ class SvariumServiceProvider extends ServiceProvider
         | Fallback router Svarium
         |-----------------------------
         */
-        Route::middleware(['web'])
-            ->any('{path}', SvariumHttpKernel::class)
-            ->where('path', '.*');
+        $this->app->booted(function (): void {
+            Route::middleware(['web'])->group(function (): void {
+                Route::fallback(SvariumHttpKernel::class);
+            });
+        });
 
         /*
         |-----------------------------
