@@ -26,6 +26,12 @@ Przykład (górna belka, poziomo):
 PanelNavigation::make()->horizontal();
 ```
 
+Przykład (sidebar, pionowo, konkretna gałąź po kluczu):
+
+```php
+PanelNavigation::make()->vertical('main_menu');
+```
+
 Możesz też wskazać konkretny root navigation id:
 
 ```php
@@ -192,4 +198,14 @@ register_menu([
 - `->path([...])` / `->under([...])`
 - `->order(10)`
 - `->navigation(1)` (opcjonalnie przypisanie do konkretnego root navigation)
+- `->menu('main_menu')` (alias do `navigation`, wygodny dla kluczy tekstowych)
 - `->children([...])` (zagnieżdżanie)
+
+Przykład przypisania wpisu do konkretnego klucza menu:
+
+```php
+MenuItem::make('Lista pacjentów')
+    ->url(module_route('patient'))
+    ->path(['Pacjenci'])
+    ->menu('main_menu');
+```

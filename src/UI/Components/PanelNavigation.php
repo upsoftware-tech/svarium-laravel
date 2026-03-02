@@ -17,8 +17,8 @@ class PanelNavigation extends Component
 
             if (in_array($normalized, ['vertical', 'horizontal'], true)) {
                 $instance->variant($normalized);
-            } elseif ($normalized !== '' && ctype_digit($normalized)) {
-                $instance->navigationId((int) $normalized);
+            } elseif ($normalized !== '') {
+                $instance->navigationId(ctype_digit($normalized) ? (int) $normalized : $name);
             }
         }
 
@@ -36,19 +36,36 @@ class PanelNavigation extends Component
         return $this->prop('variant', $normalized);
     }
 
-    public function vertical(): static
+    public function vertical(string|int|null $navigationId = null): static
     {
-        return $this->variant('vertical');
+        $this->variant('vertical');
+
+        if ($navigationId !== null && $navigationId !== '') {
+            $this->navigationId($navigationId);
+        }
+
+        return $this;
     }
 
-    public function horizontal(): static
+    public function horizontal(string|int|null $navigationId = null): static
     {
-        return $this->variant('horizontal');
+        $this->variant('horizontal');
+
+        if ($navigationId !== null && $navigationId !== '') {
+            $this->navigationId($navigationId);
+        }
+
+        return $this;
     }
 
     public function navigationId(string|int $navigationId): static
     {
         return $this->prop('navigation_id', $navigationId);
+    }
+
+    public function menu(string|int $navigationId): static
+    {
+        return $this->navigationId($navigationId);
     }
 
     public function toArray(): array

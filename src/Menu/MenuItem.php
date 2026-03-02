@@ -103,6 +103,11 @@ class MenuItem
         return $this;
     }
 
+    public function menu(string|int $menuKey): static
+    {
+        return $this->navigation($menuKey);
+    }
+
     public function children(array $children): static
     {
         $this->data['children'] = $children;
