@@ -15,6 +15,7 @@ use Upsoftware\Svarium\Bundles\Bundle;
 use Upsoftware\Svarium\Bundles\BundleRegistry;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Http\Middleware\AuthenticateMiddleware;
+use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
 use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Modules\ActivationRegistry;
 use Upsoftware\Svarium\Modules\DependencyResolver;
@@ -219,7 +220,13 @@ class SvariumServiceProvider extends ServiceProvider
         |-----------------------------
         */
         $this->app->booted(function (): void {
-            Route::middleware(['web'])->group(function (): void {
+            $fallbackMiddleware = ['web'];
+
+            if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
+                $fallbackMiddleware[] = InitializeTenancy::class;
+            }
+
+            Route::middleware($fallbackMiddleware)->group(function (): void {
                 Route::fallback(SvariumHttpKernel::class);
             });
         });
