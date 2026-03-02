@@ -63,8 +63,20 @@ return new class extends Migration
             });
         }
 
-        // 2. dodaj kolumnę json
-        if (!$this->columnExists('roles', 'name_json')) {
+        // 2. upewnij się, że istnieje kolumna name, a potem dodaj name_json
+        if (! $this->columnExists('roles', 'name')) {
+            $afterGuardName = $this->columnExists('roles', 'guard_name');
+
+            Schema::table('roles', function (Blueprint $table) use ($afterGuardName) {
+                $column = $table->string('name')->nullable();
+
+                if ($afterGuardName) {
+                    $column->after('guard_name');
+                }
+            });
+        }
+
+        if (! $this->columnExists('roles', 'name_json')) {
             Schema::table('roles', function (Blueprint $table) {
                 $table->json('name_json')->nullable()->after('name');
             });
