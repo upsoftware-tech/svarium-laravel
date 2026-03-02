@@ -4,6 +4,7 @@ namespace Upsoftware\Svarium\Modules;
 
 use Illuminate\Support\Facades\File;
 use Upsoftware\Svarium\Events\EventBus;
+use Upsoftware\Svarium\Menu\MenuRegistry;
 
 class ModuleRegistry
 {
@@ -60,6 +61,13 @@ class ModuleRegistry
     public function registerPhase(): void
     {
         foreach ($this->modules as $module) {
+            $menu = $module->menu();
+            if (is_array($menu) && $menu !== []) {
+                app(MenuRegistry::class)->register($menu, [
+                    'source' => get_class($module),
+                ]);
+            }
+
             $module->register();
         }
     }

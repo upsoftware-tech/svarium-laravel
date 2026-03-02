@@ -2,6 +2,7 @@
 
 namespace App\Svarium\Modules\{{ModuleName}};
 
+use Upsoftware\Svarium\Menu\MenuItem;
 use App\Svarium\Modules\{{ModuleName}}\Panel\{{ModuleName}}Resource;
 use Upsoftware\Svarium\Modules\Module;
 
@@ -15,5 +16,18 @@ class {{ModuleName}}Module extends Module
     public function register(): void
     {
         $this->registerResource({{ModuleName}}Resource::class);
+    }
+
+    public function menu(): array
+    {
+        return [
+            MenuItem::make('{{ModuleNamePlural}}')
+                ->routeName('panel.{{ModuleNamePluralLower}}')
+                ->icon('lucide:menu')
+                ->path(['Menu 1', 'Podmenu 1.1']),
+            MenuItem::make('{{ModuleNamePlural}}')
+                ->routeName('panel.{{ModuleNamePluralLower}}')
+                ->path(['Menu 2']),
+        ];
     }
 }

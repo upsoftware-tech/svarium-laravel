@@ -61,6 +61,11 @@ abstract class Operation
         return ['GET'];
     }
 
+    public static function menu(): array
+    {
+        return [];
+    }
+
     public function renderMode(): string
     {
         return 'page';

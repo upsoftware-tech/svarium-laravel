@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Panel;
 
 use Illuminate\Support\Facades\File;
+use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Modules\ActivationRegistry;
 use Upsoftware\Svarium\Modules\ModuleRegistry;
 
@@ -86,6 +87,16 @@ class OperationRegistry
 
             if (! class_exists($class) || ! is_subclass_of($class, Operation::class)) {
                 continue;
+            }
+
+            $menu = method_exists($class, 'menu')
+                ? (array) $class::menu()
+                : [];
+
+            if ($menu !== []) {
+                app(MenuRegistry::class)->register($menu, [
+                    'source' => $class,
+                ]);
             }
 
             $uri = method_exists($class, 'uri')

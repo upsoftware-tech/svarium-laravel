@@ -44,42 +44,54 @@ return new class extends Migration
         }
 
         // 2. dodaj kolumnę json
-        Schema::table('roles', function (Blueprint $table) {
-            $table->json('name_json')->nullable()->after('name');
-        });
+        if (!$this->columnExists('roles', 'name_json')) {
+            Schema::table('roles', function (Blueprint $table) {
+                $table->json('name_json')->nullable()->after('name');
+            });
+        }
 
         // 3. migracja danych
-        DB::table('roles')->orderBy('id')->chunkById(100, function ($roles) use ($locale) {
-            foreach ($roles as $role) {
-                DB::table('roles')
-                    ->where('id', $role->id)
-                    ->update([
-                        'name_json' => json_encode([$locale => $role->name], JSON_UNESCAPED_UNICODE)
-                    ]);
-            }
-        });
+        if ($this->columnExists('roles', 'name') && $this->columnExists('roles', 'name_json')) {
+            DB::table('roles')->orderBy('id')->chunkById(100, function ($roles) use ($locale) {
+                foreach ($roles as $role) {
+                    DB::table('roles')
+                        ->where('id', $role->id)
+                        ->update([
+                            'name_json' => json_encode([$locale => $role->name], JSON_UNESCAPED_UNICODE)
+                        ]);
+                }
+            });
+        }
 
         // 4. usuń starą kolumnę
-        Schema::table('roles', function (Blueprint $table) {
-            $table->dropColumn('name');
-        });
+        if ($this->columnExists('roles', 'name')) {
+            Schema::table('roles', function (Blueprint $table) {
+                $table->dropColumn('name');
+            });
+        }
 
         // 5. rename json → name
-        Schema::table('roles', function (Blueprint $table) {
-            $table->renameColumn('name_json', 'name');
-        });
+        if ($this->columnExists('roles', 'name_json') && !$this->columnExists('roles', 'name')) {
+            Schema::table('roles', function (Blueprint $table) {
+                $table->renameColumn('name_json', 'name');
+            });
+        }
 
         // 6. generated column (dla indeksu spatie)
-        DB::statement("
-            ALTER TABLE roles
-            ADD COLUMN name_locale VARCHAR(191)
-            GENERATED ALWAYS AS (JSON_UNQUOTE(JSON_EXTRACT(name, '$.\"{$locale}\"'))) STORED
-        ");
+        if (!$this->columnExists('roles', 'name_locale') && $this->columnExists('roles', 'name')) {
+            DB::statement("
+                ALTER TABLE roles
+                ADD COLUMN name_locale VARCHAR(191)
+                GENERATED ALWAYS AS (JSON_UNQUOTE(JSON_EXTRACT(name, '$.\"{$locale}\"'))) STORED
+            ");
+        }
 
         // 7. odtwórz unique index
-        Schema::table('roles', function (Blueprint $table) {
-            $table->unique(['name_locale', 'guard_name'], 'roles_name_guard_name_unique');
-        });
+        if (!$this->indexExists('roles', 'roles_name_guard_name_unique') && $this->columnExists('roles', 'name_locale')) {
+            Schema::table('roles', function (Blueprint $table) {
+                $table->unique(['name_locale', 'guard_name'], 'roles_name_guard_name_unique');
+            });
+        }
     }
 
     public function down(): void

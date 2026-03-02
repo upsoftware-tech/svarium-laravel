@@ -89,7 +89,7 @@ class HandleInertiaRequests extends Middleware
             $mapped[$key] = $this->mapNavigationComponents($item, $cache);
         }
 
-        if (! $this->isNavigationVerticalConfig($mapped)) {
+        if (! $this->isNavigationComponentConfig($mapped)) {
             return $mapped;
         }
 
@@ -100,13 +100,7 @@ class HandleInertiaRequests extends Middleware
 
         $navigationId = $this->normalizeNavigationId($props['navigation_id'] ?? null);
         if ($navigationId === null) {
-            $mapped['props'] = [
-                ...$props,
-                'navigation' => [],
-                'items' => [],
-                'navigations' => [],
-            ];
-
+            // Keep explicit props provided by runtime components (e.g. PanelNavigation).
             return $mapped;
         }
 
@@ -131,11 +125,12 @@ class HandleInertiaRequests extends Middleware
         return $mapped;
     }
 
-    protected function isNavigationVerticalConfig(array $value): bool
+    protected function isNavigationComponentConfig(array $value): bool
     {
         $componentName = $value['name'] ?? $value['component'] ?? null;
 
-        return is_string($componentName) && $componentName === 'NavigationVertical';
+        return is_string($componentName)
+            && in_array($componentName, ['NavigationVertical', 'NavigationHorizontal'], true);
     }
 
     protected function normalizeNavigationId(mixed $navigationId): string|int|null

@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\Modules;
 
+use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Panel\ResourceRegistry;
 
 abstract class Module
@@ -31,6 +32,19 @@ abstract class Module
     public function listen(): array
     {
         return [];
+    }
+
+    public function menu(): array
+    {
+        return [];
+    }
+
+    protected function registerMenu(array $items, string|int|null $navigationId = null): void
+    {
+        app(MenuRegistry::class)->register($items, [
+            'source' => static::class,
+            'navigation_id' => $navigationId,
+        ]);
     }
 
     abstract public function name(): string;

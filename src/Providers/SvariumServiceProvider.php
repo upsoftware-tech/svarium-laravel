@@ -15,6 +15,7 @@ use Upsoftware\Svarium\Bundles\Bundle;
 use Upsoftware\Svarium\Bundles\BundleRegistry;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Http\Middleware\AuthenticateMiddleware;
+use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Modules\ActivationRegistry;
 use Upsoftware\Svarium\Modules\DependencyResolver;
 use Upsoftware\Svarium\Modules\ModuleRegistry;
@@ -55,6 +56,7 @@ class SvariumServiceProvider extends ServiceProvider
         $this->app->singleton(BundleRegistry::class);
 
         $this->app->singleton(EventBus::class);
+        $this->app->singleton(MenuRegistry::class);
 
         $this->app->singleton(ModuleRegistry::class, function () {
             $registry = new ModuleRegistry;

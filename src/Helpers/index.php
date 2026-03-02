@@ -252,3 +252,21 @@ if (! function_exists('module_helper')) {
         return module_route($module, $action, $id, $panel);
     }
 }
+
+if (! function_exists('register_menu')) {
+    /**
+     * Register runtime menu items from modules/pages.
+     *
+     * Example:
+     * register_menu([
+     *   ['label' => 'Pages', 'route_name' => 'panel.pages', 'path' => ['CMS', 'Content']],
+     * ]);
+     */
+    function register_menu(array $items, string|int|null $navigationId = null, ?string $source = null): void
+    {
+        app(\Upsoftware\Svarium\Menu\MenuRegistry::class)->register($items, [
+            'navigation_id' => $navigationId,
+            'source' => $source ?? 'helper',
+        ]);
+    }
+}

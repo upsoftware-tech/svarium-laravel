@@ -2,7 +2,9 @@
 
 namespace Upsoftware\Svarium\Services;
 
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Collection;
+use Upsoftware\Svarium\Menu\MenuRegistry;
 
 class NavigationService
 {
@@ -43,9 +45,34 @@ class NavigationService
 
         $item = $this->resolveItemByIdentifier($query, $id);
 
-        return $item
-            ? $this->formatItem($item)
-            : [];
+        if ($item) {
+            $tree = $this->formatItem($item);
+
+            return $this->mergeRegisteredItems($tree, $id);
+        }
+
+        $staticChildren = $this->buildRegisteredChildren($id);
+
+        if ($staticChildren === []) {
+            return [];
+        }
+
+        return [
+            'id' => 'navigation-static-root:'.(string) $id,
+            'label' => is_scalar($id) ? (string) $id : 'navigation',
+            'children' => $staticChildren,
+        ];
+    }
+
+    public function getRegisteredTree(string|int|null $navigationId = null): array
+    {
+        $children = $this->buildRegisteredChildren($navigationId);
+
+        return [
+            'id' => 'navigation-runtime-root:'.(string) ($this->normalizeNavigationId($navigationId) ?? 'default'),
+            'label' => 'Panel',
+            'children' => $children,
+        ];
     }
 
     protected function resolveItemByIdentifier($query, string|int $id): mixed
@@ -99,6 +126,175 @@ class NavigationService
                     ->toArray(),
             ];
         }
+    }
+
+    protected function mergeRegisteredItems(array $tree, string|int|null $navigationId): array
+    {
+        $children = is_array($tree['children'] ?? null)
+            ? $tree['children']
+            : [];
+
+        $children = $this->appendRegisteredItems($children, $navigationId);
+
+        $tree['children'] = $children;
+
+        return $tree;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $children
+     * @return array<int, array<string, mixed>>
+     */
+    protected function appendRegisteredItems(array $children, string|int|null $navigationId): array
+    {
+        $registered = app(MenuRegistry::class)->allForNavigation($navigationId);
+
+        foreach ($registered as $item) {
+            $path = is_array($item['path'] ?? null) ? $item['path'] : [];
+            $branch = &$children;
+
+            foreach ($path as $index => $segment) {
+                $branch = &$this->findOrCreateGroupNode(
+                    $branch,
+                    (string) $segment,
+                    array_slice($path, 0, $index + 1),
+                    $navigationId
+                );
+            }
+
+            $this->appendLeafNode($branch, $item, $navigationId);
+        }
+
+        return $children;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $children
+     * @return array<int, array<string, mixed>>
+     */
+    protected function buildRegisteredChildren(string|int|null $navigationId): array
+    {
+        return $this->appendRegisteredItems([], $navigationId);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $nodes
+     * @param array<int, string> $path
+     * @return array<int, array<string, mixed>>
+     */
+    protected function &findOrCreateGroupNode(array &$nodes, string $label, array $path, string|int|null $navigationId): array
+    {
+        foreach ($nodes as $index => $node) {
+            if (($node['type'] ?? 'item') === 'item'
+                && ($node['label'] ?? null) === $label
+                && is_array($node['children'] ?? null)
+                && (($node['url'] ?? null) === null || ($node['url'] ?? null) === '')
+            ) {
+                return $nodes[$index]['children'];
+            }
+        }
+
+        $nodes[] = [
+            'id' => 'navigation-static-group:'.sha1((string) $this->normalizeNavigationId($navigationId).'|'.implode('/', $path)),
+            'label' => $label,
+            'icon' => null,
+            'url' => null,
+            'children' => [],
+        ];
+
+        $lastIndex = array_key_last($nodes);
+
+        return $nodes[$lastIndex]['children'];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $nodes
+     * @param array<string, mixed> $item
+     */
+    protected function appendLeafNode(array &$nodes, array $item, string|int|null $navigationId): void
+    {
+        $type = (string) ($item['type'] ?? 'item');
+        $signature = (string) ($item['key'] ?? '');
+
+        foreach ($nodes as $node) {
+            if (($node['__menu_key'] ?? null) === $signature) {
+                return;
+            }
+        }
+
+        if ($type === 'separator') {
+            $nodes[] = [
+                'type' => 'separator',
+                '__menu_key' => $signature,
+            ];
+
+            return;
+        }
+
+        if ($type === 'label') {
+            $nodes[] = [
+                'type' => 'label',
+                'label' => (string) ($item['label'] ?? ''),
+                '__menu_key' => $signature,
+            ];
+
+            return;
+        }
+
+        $iconValue = (string) ($item['icon'] ?? '');
+
+        $nodes[] = [
+            'id' => 'navigation-static-item:'.sha1((string) $this->normalizeNavigationId($navigationId).'|'.$signature),
+            'label' => (string) ($item['label'] ?? ''),
+            'icon' => $iconValue !== ''
+                ? ['type' => $this->resolveIconType($iconValue), 'value' => $iconValue]
+                : null,
+            'url' => $this->resolveItemUrl($item),
+            'children' => [],
+            '__menu_key' => $signature,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    protected function resolveItemUrl(array $item): ?string
+    {
+        $routeName = isset($item['route_name']) ? trim((string) $item['route_name']) : '';
+
+        if ($routeName !== '') {
+            if (Route::has($routeName)) {
+                return route($routeName, [], false);
+            }
+
+            return null;
+        }
+
+        $url = isset($item['url']) ? trim((string) $item['url']) : '';
+
+        return $url !== '' ? $url : null;
+    }
+
+    protected function normalizeNavigationId(string|int|null $navigationId): string|int|null
+    {
+        if ($navigationId === null) {
+            return null;
+        }
+
+        if (is_int($navigationId)) {
+            return $navigationId;
+        }
+
+        $trimmed = trim((string) $navigationId);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (ctype_digit($trimmed)) {
+            return (int) $trimmed;
+        }
+
+        return $trimmed;
     }
 
     public function root() {

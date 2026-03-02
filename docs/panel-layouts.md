@@ -92,6 +92,20 @@ return [
 ];
 ```
 
+## PanelNavigation in layouts
+
+If you want menu generated automatically from modules/pages (without `navigations` table), use `PanelNavigation` in panel slots:
+
+```php
+use Upsoftware\Svarium\UI\Components\PanelNavigation;
+
+Panel::make('app')
+    ->layout(AdminLayout::class)
+    ->sidebar(PanelNavigation::make()->vertical())
+    ->header(PanelNavigation::make()->horizontal());
+```
+
 ## Related docs
 
 - Registration page layout options: `docs/register-panel-config.md`
+- Runtime menu registration: `docs/menu-registration.md`
