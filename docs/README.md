@@ -1,4 +1,7 @@
-# Svarium Laravel docs
+# Dokumentacja Svarium Laravel
 
-- [Resource field access (`access()`)](./resource-access.md)
-- [Table footer (`Column::footer()`)](./table-footer.md)
+- [Layouty panelu](./panel-layouts.md)
+- [Layouty i konfiguracja rejestracji](./register-panel-config.md)
+- [Tenancy (wbudowane): konfiguracja, migracje, seedery, `svarium:make.tenant`, `$table->tenant_id()`](./tenancy.md)
+- [Dostęp do pól zasobu (`access()`)](./resource-access.md)
+- [Stopka tabeli (`Column::footer()`)](./table-footer.md)

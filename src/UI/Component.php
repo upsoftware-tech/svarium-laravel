@@ -102,8 +102,20 @@ abstract class Component
         return $this;
     }
 
-    public function appearance(array|Appearance $appearance): static
+    public function appearance(array|Appearance|string $appearance): static
     {
+        if (is_string($appearance)) {
+            $classes = trim($appearance);
+
+            if ($classes === '') {
+                return $this;
+            }
+
+            $appearance = Appearance::make()
+                ->class($classes)
+                ->toArray();
+        }
+
         if ($appearance instanceof Appearance) {
             $appearance = $appearance->toArray();
         }
@@ -112,6 +124,16 @@ abstract class Component
 
         if (! is_array($current)) {
             $current = [];
+        }
+
+        $mergedClass = $this->mergeAppearanceClasses(
+            $current['class'] ?? '',
+            $appearance['class'] ?? ''
+        );
+
+        if ($mergedClass !== '') {
+            $current['class'] = $mergedClass;
+            unset($appearance['class']);
         }
 
         return $this->prop('appearance', [
@@ -202,6 +224,28 @@ abstract class Component
                 }, $nodes)
             )
         );
+    }
+
+    protected function mergeAppearanceClasses(mixed $current, mixed $incoming): string
+    {
+        $currentTokens = preg_split('/\s+/', trim((string) $current)) ?: [];
+        $incomingTokens = preg_split('/\s+/', trim((string) $incoming)) ?: [];
+
+        $tokens = [];
+
+        foreach (array_merge($currentTokens, $incomingTokens) as $token) {
+            $token = trim($token);
+
+            if ($token === '') {
+                continue;
+            }
+
+            if (! in_array($token, $tokens, true)) {
+                $tokens[] = $token;
+            }
+        }
+
+        return implode(' ', $tokens);
     }
 
     protected function slotOrChildren(string $name): array

@@ -27,7 +27,7 @@ class ResetController extends Controller
                 $tenant_id = tenant()->id;
             }
             $queryRole = get_model('model_has_role')::where('model_id', $user->id)->where('model_type', 'App\Models\User')->where('status', 1);
-            if (config('tenancy.enabled', false)) {
+            if (svarium_tenancy_column_mode()) {
                 $queryRole->where('tenant_id', $tenant_id);
             }
             $has_role = $queryRole->count() > 0;

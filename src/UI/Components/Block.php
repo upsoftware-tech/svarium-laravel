@@ -21,6 +21,24 @@ class Block extends Component
         ]);
     }
 
+    public function flex(bool $enabled = true): static
+    {
+        if (! $enabled) {
+            return $this;
+        }
+
+        return $this->appearance('flex');
+    }
+
+    public function grid(bool $enabled = true): static
+    {
+        if (! $enabled) {
+            return $this;
+        }
+
+        return $this->appearance('grid');
+    }
+
     public function style(array $style): static
     {
         $currentAppearance = $this->getProp('appearance', []);

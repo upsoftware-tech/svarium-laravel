@@ -138,6 +138,36 @@ class Appearance
         return $this->textColor($fontColor);
     }
 
+    public function textAlign(string $textAlign): static
+    {
+        $value = strtolower(trim($textAlign));
+
+        if ($value === '') {
+            return $this;
+        }
+
+        $map = [
+            'left' => 'text-left',
+            'start' => 'text-start',
+            'center' => 'text-center',
+            'right' => 'text-right',
+            'end' => 'text-end',
+            'justify' => 'text-justify',
+        ];
+
+        if (isset($map[$value])) {
+            return $this->appendClass($map[$value]);
+        }
+
+        if (str_starts_with($value, 'text-')) {
+            return $this->appendClass($value);
+        }
+
+        return $this->style([
+            'textAlign' => $textAlign,
+        ]);
+    }
+
     public function bgColor(string $light, ?string $dark = null): static
     {
         $light = trim($light);
@@ -191,6 +221,11 @@ class Appearance
         }
 
         return $this->prop('borderRadius', $value);
+    }
+
+    public function rounded(string|int|float $rounded): static
+    {
+        return $this->borderRadius($rounded);
     }
 
     public function borderColor(string $light, ?string $dark = null): static
@@ -291,22 +326,22 @@ class Appearance
 
     public function width(string|int|float $width): static
     {
-        if (is_int($width) || is_float($width)) {
-            return $this->style([
-                'width' => $width.'px',
-            ]);
-        }
+        return $this->applyTailwindSize($width, 'w', 'width');
+    }
 
-        $value = trim($width);
-        if ($value === '') {
-            return $this;
-        }
+    public function maxWidth(string|int|float $maxWidth): static
+    {
+        return $this->applyTailwindSize($maxWidth, 'max-w', 'maxWidth');
+    }
 
-        if (str_starts_with($value, 'w-')) {
-            return $this->appendClass($value);
-        }
+    public function height(string|int|float $height): static
+    {
+        return $this->applyTailwindSize($height, 'h', 'height');
+    }
 
-        return $this->appendClass('w-'.$value);
+    public function maxHeight(string|int|float $maxHeight): static
+    {
+        return $this->applyTailwindSize($maxHeight, 'max-h', 'maxHeight');
     }
 
     public function display(string $display): static
@@ -347,6 +382,34 @@ class Appearance
         return $this->appendClass('gap-'.$value);
     }
 
+    public function space(string|int|float $space): static
+    {
+        if (is_int($space) || is_float($space)) {
+            return $this->appendClass('space-y-'.$space);
+        }
+
+        $value = trim($space);
+        if ($value === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($value);
+
+        if (str_starts_with($normalized, 'space-')) {
+            return $this->appendClass($normalized);
+        }
+
+        if (preg_match('/^(x|y)-.+$/', $normalized)) {
+            return $this->appendClass('space-'.$normalized);
+        }
+
+        if (is_numeric($normalized)) {
+            return $this->appendClass('space-y-'.$normalized);
+        }
+
+        return $this->appendClass('space-'.$normalized);
+    }
+
     public function padding(string|int|float $padding): static
     {
         if (is_int($padding)) {
@@ -371,7 +434,7 @@ class Appearance
         }
 
         if (preg_match('/^(x|y|t|r|b|l|s|e)-.+$/', $normalized)) {
-            return $this->appendClass('p-'.$normalized);
+            return $this->appendClass('p'.$normalized);
         }
 
         if (is_numeric($normalized)) {
@@ -385,6 +448,62 @@ class Appearance
         }
 
         return $this->appendClass('p-'.$normalized);
+    }
+
+    public function flex(string|int|float|bool $flex = true): static
+    {
+        if (is_bool($flex)) {
+            return $this->appendClass($flex ? 'flex-1' : 'flex-none');
+        }
+
+        if (is_int($flex)) {
+            return $this->appendClass('flex-'.$flex);
+        }
+
+        if (is_float($flex)) {
+            return $this->appendClass('flex-['.$flex.']');
+        }
+
+        $raw = trim($flex);
+        if ($raw === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($raw);
+
+        if (str_starts_with($normalized, 'flex-')) {
+            return $this->appendClass($normalized);
+        }
+
+        $aliases = [
+            'auto' => 'flex-auto',
+            'initial' => 'flex-initial',
+            'none' => 'flex-none',
+        ];
+
+        if (isset($aliases[$normalized])) {
+            return $this->appendClass($aliases[$normalized]);
+        }
+
+        if (preg_match('/^-?\d+(\.\d+)?$/', $normalized)) {
+            if (str_contains($normalized, '.')) {
+                return $this->appendClass('flex-['.$normalized.']');
+            }
+
+            return $this->appendClass('flex-'.$normalized);
+        }
+
+        if ($this->shouldTreatAsCssValue($raw)) {
+            if (! str_contains($raw, ' ')) {
+                return $this->appendClass('flex-['.$raw.']');
+            }
+
+            return $this->style([
+                'flex' => $raw,
+            ]);
+        }
+
+        return $this->appendClass('flex-'.$normalized);
     }
 
     public function justifyContent(string|int|float $value): static
@@ -583,6 +702,43 @@ class Appearance
             || str_starts_with($normalized, 'clamp(')
             || str_starts_with($normalized, 'min(')
             || str_starts_with($normalized, 'max(');
+    }
+
+    protected function applyTailwindSize(
+        string|int|float $value,
+        string $classPrefix,
+        string $styleProperty
+    ): static {
+        if (is_int($value) || is_float($value)) {
+            return $this->appendClass($classPrefix.'-['.$value.'px]');
+        }
+
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($raw);
+
+        if (str_starts_with($normalized, $classPrefix.'-')) {
+            return $this->appendClass($normalized);
+        }
+
+        if (preg_match('/^-?\d+(\.\d+)?$/', $normalized)) {
+            return $this->appendClass($classPrefix.'-'.$normalized);
+        }
+
+        if ($this->shouldTreatAsCssValue($raw)) {
+            if (! str_contains($raw, ' ')) {
+                return $this->appendClass($classPrefix.'-['.$raw.']');
+            }
+
+            return $this->style([
+                $styleProperty => $raw,
+            ]);
+        }
+
+        return $this->appendClass($classPrefix.'-'.$normalized);
     }
 
     public function style(array $style): static

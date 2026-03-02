@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
+use Illuminate\Support\Facades\File;
 use Upsoftware\Svarium\Traits\HasTailwindColor;
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\select;
@@ -297,15 +298,31 @@ class InitCommand extends CoreCommand
         $this->addConfigKey('activitylog.php', 'activity_model', '\Upsoftware\Svarium\Models\Activity::class', true);
         $this->addConfigKey('browser-detect.php', 'cache.interval', 0, true);
 
-        if ($this->confirm('Czy opublikować zasoby konfiguracyjne Tenancy?', false)) {
-            $this->info('Publikowanie Hashids...');
-            $this->call('vendor:publish', [
-                '--provider' => "Stancl\Tenancy\TenancyServiceProvider"
-            ]);
+        if ($this->confirm('Czy włączyć wbudowany multi-tenant Svarium?', false)) {
+            $mode = $this->choice(
+                'Wybierz tryb tenancy',
+                ['column', 'database'],
+                'column'
+            );
 
-            if ($this->addConfigKey('tenancy.php', 'enabled', true)) {
-                $this->info('Dodano klucz "enabled" => true do config/tenancy.php');
+            $this->addConfigKey('upsoftware.php', 'tenancy.enabled', true, true);
+            $this->addConfigKey('upsoftware.php', 'tenancy.mode', $mode, true);
+            $this->addConfigKey('upsoftware.php', 'tenancy.paths.migrations', app_path('Svarium/Tenancy/Migrations'), true);
+            $this->addConfigKey('upsoftware.php', 'tenancy.paths.seeders', app_path('Svarium/Tenancy/Seeders'), true);
+            $this->addConfigKey('upsoftware.php', 'tenancy.seeders.namespace', 'App\\Svarium\\Tenancy\\Seeders', true);
+
+            $migrationsDir = app_path('Svarium/Tenancy/Migrations');
+            $seedersDir = app_path('Svarium/Tenancy/Seeders');
+
+            if (! File::isDirectory($migrationsDir)) {
+                File::makeDirectory($migrationsDir, 0755, true, true);
             }
+
+            if (! File::isDirectory($seedersDir)) {
+                File::makeDirectory($seedersDir, 0755, true, true);
+            }
+
+            $this->info('Włączono tenancy w config/upsoftware.php');
         }
 
 

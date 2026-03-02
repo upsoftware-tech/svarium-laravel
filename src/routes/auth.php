@@ -1,18 +1,16 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
-use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;
+use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
 
 $middleware = ['web'];
 $middleware[] = LocaleMiddleware::class;
 $middleware[] = HandleInertiaRequests::class;
 
-if (config('tenancy.enabled', false)) {
-    $middleware[] = InitializeTenancyByDomain::class;
-    $middleware[] = PreventAccessFromCentralDomains::class;
+if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
+    $middleware[] = InitializeTenancy::class;
 }
 
 Route::prefix(config('upsoftware.panel.prefix'))->as('panel.')->middleware('auth.panel')->group(function() use ($middleware) {
@@ -54,8 +52,8 @@ Route::prefix(config('upsoftware.panel.prefix'))->as('panel.')->middleware('auth
         })->where(['social' => ['google|facebook|apple|microsoft|facebook|linkedin|zoom']]);
 
         Route::prefix('register')->group(function() {
-            Route::get('/', 'ResetController@init')->name('register');
-            Route::post('/', 'ResetController@reset')->name('register.set');
+            Route::get('/', 'RegisterController@init')->name('register');
+            Route::post('/', 'RegisterController@register')->name('register.set');
         });
 
         Route::get('logout', LogoutController::class)->middleware('auth')->name('logout');

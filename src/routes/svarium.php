@@ -1,19 +1,17 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use Stancl\Tenancy\Middleware\InitializeTenancyByDomain;
-use Stancl\Tenancy\Middleware\PreventAccessFromCentralDomains;
 use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;
+use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 
 $middleware = ['web'];
 $middleware[] = LocaleMiddleware::class;
 $middleware[] = HandleInertiaRequests::class;
 
-if (config('tenancy.enabled', false)) {
-    $middleware[] = InitializeTenancyByDomain::class;
-    $middleware[] = PreventAccessFromCentralDomains::class;
+if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
+    $middleware[] = InitializeTenancy::class;
 }
 
 $resourceDir = svarium_resources();
@@ -72,5 +70,4 @@ if (File::exists($resourceDir)) {
         }
     }
 }
-
 

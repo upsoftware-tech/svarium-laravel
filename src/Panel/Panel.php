@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Panel;
 
 use Upsoftware\Svarium\Enums\TableActionDisplay;
+use Upsoftware\Svarium\Panel\Layout as RegisterLayout;
 
 class Panel
 {
@@ -15,6 +16,7 @@ class Panel
     public ?\Closure $layoutBuilder = null;
     protected array $layoutSlots = [];
     protected array $middleware = [];
+    protected array $registration = [];
     protected TableActionDisplay|string|null $tableActionDisplay = null;
 
     public function layout(string $class): static
@@ -99,6 +101,21 @@ class Panel
         return $this;
     }
 
+    public function registration(array|RegisterLayout $config): static
+    {
+        if ($config instanceof RegisterLayout) {
+            $config = $config->toArray();
+        }
+
+        $this->registration = array_replace_recursive($this->registration, $config);
+        return $this;
+    }
+
+    public function register(array|RegisterLayout $config): static
+    {
+        return $this->registration($config);
+    }
+
     public function tableActionDisplay(): TableActionDisplay|string|null
     {
         return $this->tableActionDisplay;
@@ -112,5 +129,10 @@ class Panel
     public function getMiddleware(): array
     {
         return $this->middleware;
+    }
+
+    public function getRegistrationConfig(): array
+    {
+        return $this->registration;
     }
 }

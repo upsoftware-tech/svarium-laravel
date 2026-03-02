@@ -31,6 +31,22 @@ class VerificationController extends Controller
             return $loginController->loginUser($request, $userAuthItem->user);
         } else if ($type === 'reset') {
             return redirect()->route('panel.auth.reset.password', ['userAuth' => $userAuthItem->hash]);
+        } else if ($type === 'register') {
+            $user = $userAuthItem->user;
+
+            if ($user && method_exists($user, 'forceFill') && method_exists($user, 'save')) {
+                try {
+                    if (property_exists($user, 'email_verified_at') || isset($user->email_verified_at)) {
+                        $user->forceFill(['email_verified_at' => now()]);
+                        $user->save();
+                    }
+                } catch (\Throwable) {
+                    // ignore verification timestamp errors
+                }
+            }
+
+            $loginController = new LoginController();
+            return $loginController->loginUser($request, $userAuthItem->user);
         }
     }
 }

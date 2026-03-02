@@ -115,7 +115,7 @@ class LoginController extends Controller
                     $tenant_id = tenant()->id;
                 }
                 $queryRole = get_model('model_has_role')::where('model_id', $user->id)->where('model_type', 'App\Models\User')->where('status', 1);
-                if (config('tenancy.enabled', false)) {
+                if (svarium_tenancy_column_mode()) {
                     $queryRole->where('tenant_id', $tenant_id);
                 }
                 $has_role = $queryRole->count() > 0;
@@ -127,8 +127,8 @@ class LoginController extends Controller
             }
 
             $connection = null;
-            if (config('tenancy.enabled', false)) {
-                $connection = 'central';
+            if (svarium_tenancy_database_mode()) {
+                $connection = central_connection();
             }
 
             $cookie_name = Str::of(env('APP_NAME'))->slug('_') . '_browser_id';

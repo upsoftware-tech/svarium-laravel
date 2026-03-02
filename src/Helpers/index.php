@@ -48,6 +48,10 @@ function central_connection() {
         return $forcedConnection;
     }
 
+    if (config()->has('upsoftware.tenancy.database.central_connection')) {
+        return config('upsoftware.tenancy.database.central_connection');
+    }
+
     if (config()->has('tenancy.database.central_connection')) {
         return config('tenancy.database.central_connection');
     }
@@ -57,6 +61,58 @@ function central_connection() {
     }
 
     return config('database.default');
+}
+
+if (! function_exists('svarium_tenancy_enabled')) {
+    function svarium_tenancy_enabled(): bool
+    {
+        return (bool) config('upsoftware.tenancy.enabled', config('tenancy.enabled', false));
+    }
+}
+
+if (! function_exists('svarium_tenancy_mode')) {
+    function svarium_tenancy_mode(): string
+    {
+        $mode = strtolower(trim((string) config('upsoftware.tenancy.mode', 'column')));
+
+        return in_array($mode, ['column', 'database'], true)
+            ? $mode
+            : 'column';
+    }
+}
+
+if (! function_exists('svarium_tenancy_column_mode')) {
+    function svarium_tenancy_column_mode(): bool
+    {
+        return svarium_tenancy_enabled() && svarium_tenancy_mode() === 'column';
+    }
+}
+
+if (! function_exists('svarium_tenancy_database_mode')) {
+    function svarium_tenancy_database_mode(): bool
+    {
+        return svarium_tenancy_enabled() && svarium_tenancy_mode() === 'database';
+    }
+}
+
+if (! function_exists('tenant')) {
+    /**
+     * Compatibility helper previously provided by stancl/tenancy.
+     */
+    function tenant(?string $key = null, mixed $default = null): mixed
+    {
+        $tenant = app(\Upsoftware\Svarium\Tenancy\TenancyManager::class)->tenant();
+
+        if ($key === null) {
+            return $tenant;
+        }
+
+        if ($tenant === null) {
+            return $default;
+        }
+
+        return data_get($tenant, $key, $default);
+    }
 }
 
 function device(): array {

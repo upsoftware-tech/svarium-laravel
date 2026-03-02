@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\UI\Components;
 
+use Upsoftware\Svarium\UI\Appearance;
 use Upsoftware\Svarium\UI\Component;
 use Upsoftware\Svarium\UI\Concerns\Props\HasChildren;
 
@@ -12,6 +13,13 @@ class Flex extends Component
     public static function make(?string $name = null): static
     {
         return parent::make($name)->appendAppearanceClass('flex');
+    }
+
+    public function appearance(array|Appearance|string $appearance): static
+    {
+        parent::appearance($appearance);
+
+        return $this->appendAppearanceClass('flex');
     }
 
     public function class(string $class): static

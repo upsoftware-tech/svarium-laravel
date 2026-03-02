@@ -15,11 +15,7 @@ class AuthenticateMiddleware
      */
     public function handle(Request $request, Closure $next)
     {
-// Pobieramy bazę nazwy trasy z configu (np. "panel.auth")
-        $authRoutePrefix = config('upsoftware.panel.route_prefix', 'panel.auth');
-
-        // Sprawdzamy, czy obecna trasa zaczyna się od tego prefiksu (używamy gwiazdki *)
-        if ($request->routeIs($authRoutePrefix . '.*')) {
+        if ($this->isPublicAuthRequest($request)) {
             return $next($request);
         }
 
@@ -28,10 +24,64 @@ class AuthenticateMiddleware
                 return response()->json(['message' => 'Unauthenticated.'], 401);
             }
 
-            // Przekierowanie na konkretną stronę logowania (np. panel.auth.login)
+            $authRoutePrefix = config('upsoftware.panel.route_prefix', 'panel.auth');
             return redirect()->guest(route($authRoutePrefix . '.login'));
         }
 
         return $next($request);
+    }
+
+    protected function isPublicAuthRequest(Request $request): bool
+    {
+        $defaultRoutePatterns = [
+            'panel.auth.login',
+            'panel.auth.login.*',
+            'panel.auth.reset',
+            'panel.auth.reset.*',
+            'panel.auth.register',
+            'panel.auth.register.*',
+            'panel.auth.method',
+            'panel.auth.method.*',
+            'panel.auth.verification',
+            'panel.auth.verification.*',
+            'panel.auth.redirect',
+            'panel.auth.callback',
+        ];
+
+        $routePatterns = config('upsoftware.panel.public_auth_route_patterns', $defaultRoutePatterns);
+        if (! is_array($routePatterns)) {
+            $routePatterns = $defaultRoutePatterns;
+        }
+
+        foreach ($routePatterns as $pattern) {
+            if (is_string($pattern) && $pattern !== '' && $request->routeIs($pattern)) {
+                return true;
+            }
+        }
+
+        $panelPrefix = trim((string) config('upsoftware.panel.prefix', ''), '/');
+        $base = $panelPrefix !== '' ? $panelPrefix.'/' : '';
+
+        $defaultPathPatterns = [
+            $base.'auth/login',
+            $base.'auth/login/*',
+            $base.'auth/reset',
+            $base.'auth/reset/*',
+            $base.'auth/register',
+            $base.'auth/register/*',
+        ];
+
+        $pathPatterns = config('upsoftware.panel.public_auth_path_patterns', $defaultPathPatterns);
+        if (! is_array($pathPatterns)) {
+            $pathPatterns = $defaultPathPatterns;
+        }
+
+        foreach ($pathPatterns as $pattern) {
+            if (is_string($pattern) && $pattern !== '' && $request->is($pattern)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -15,6 +15,10 @@ trait UsesConnection
             return $forcedConnection;
         }
 
+        if (config()->has('upsoftware.tenancy.database.central_connection')) {
+            return config('upsoftware.tenancy.database.central_connection');
+        }
+
         if (config()->has('tenancy.database.central_connection')) {
             return config('tenancy.database.central_connection');
         }

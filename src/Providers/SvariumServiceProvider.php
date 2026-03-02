@@ -4,6 +4,7 @@ namespace Upsoftware\Svarium\Providers;
 
 use App\Models\Page;
 use Illuminate\Console\Command;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,7 @@ use Upsoftware\Svarium\Panel\PanelRegistry;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 use Upsoftware\Svarium\Services\DeviceTracking\DeviceTracking;
 use Upsoftware\Svarium\Services\LayoutService;
+use Upsoftware\Svarium\Tenancy\TenancyManager;
 
 class SvariumServiceProvider extends ServiceProvider
 {
@@ -38,6 +40,7 @@ class SvariumServiceProvider extends ServiceProvider
 
         $this->app->singleton('layout', fn () => new LayoutService);
         $this->app->singleton('device-tracking', fn () => new DeviceTracking);
+        $this->app->singleton(TenancyManager::class, fn () => new TenancyManager);
 
         $this->app->singleton('auth-manager', fn () => (new AuthManager)->resolveHandler()
         );
@@ -85,6 +88,8 @@ class SvariumServiceProvider extends ServiceProvider
     */
     public function boot(Router $router): void
     {
+        $this->registerSchemaMacros();
+
         /*
         |-----------------------------
         | Middleware
@@ -358,5 +363,26 @@ class SvariumServiceProvider extends ServiceProvider
         }
 
         return Panel::make($name)->prefix($prefix);
+    }
+
+    protected function registerSchemaMacros(): void
+    {
+        if (! Blueprint::hasMacro('tenant_id')) {
+            Blueprint::macro('tenant_id', function (
+                string $column = 'tenant_id',
+                string $tenantTable = 'tenants',
+                string $tenantKey = 'id'
+            ) {
+                /** @var Blueprint $this */
+                $definition = $this->string($column);
+
+                $this->foreign($column)
+                    ->references($tenantKey)
+                    ->on($tenantTable)
+                    ->cascadeOnDelete();
+
+                return $definition;
+            });
+        }
     }
 }
