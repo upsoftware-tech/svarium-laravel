@@ -7,15 +7,19 @@ use Upsoftware\Svarium\UI\Component;
 
 class PanelNavigation extends Component
 {
-    public static function make(
-        string $variant = 'vertical',
-        string|int|null $navigationId = null
-    ): static {
-        $instance = parent::make()
-            ->variant($variant);
+    public static function make(?string $name = null): static
+    {
+        $instance = parent::make($name)
+            ->variant('vertical');
 
-        if ($navigationId !== null) {
-            $instance->navigationId($navigationId);
+        if (is_string($name)) {
+            $normalized = strtolower(trim($name));
+
+            if (in_array($normalized, ['vertical', 'horizontal'], true)) {
+                $instance->variant($normalized);
+            } elseif ($normalized !== '' && ctype_digit($normalized)) {
+                $instance->navigationId((int) $normalized);
+            }
         }
 
         return $instance;

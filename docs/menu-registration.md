@@ -29,7 +29,7 @@ PanelNavigation::make()->horizontal();
 Możesz też wskazać konkretny root navigation id:
 
 ```php
-PanelNavigation::make('vertical', 1);
+PanelNavigation::make()->vertical()->navigationId(1);
 ```
 
 Komponent automatycznie renderuje:
