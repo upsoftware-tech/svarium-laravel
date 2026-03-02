@@ -181,6 +181,35 @@ Tworzenie migracji tenant w folderze z konfiguracji:
 php artisan svarium:make.migrate create_invoices_table --create=invoices
 ```
 
+## Instalacja połączeń DB dla tenancy
+
+Aby automatycznie dopisać połączenia `central` i `tenant` do `config/database.php`, użyj:
+
+```bash
+php artisan svarium:install:tenant
+```
+
+Komenda:
+- kopiuje wskazane połączenie bazowe (domyślnie `database.default`),
+- tworzy/aktualizuje połączenia `central` i `tenant`,
+- zapisuje referencje do ENV (np. `SVARIUM_CENTRAL_DB_HOST`, `SVARIUM_TENANT_DB_HOST`),
+- aktualizuje klucze:
+  - `upsoftware.tenancy.database.central_connection`
+  - `upsoftware.tenancy.database.tenant_connection`
+  - `upsoftware.tenancy.database.template_connection`
+
+Opcje:
+
+```bash
+php artisan svarium:install:tenant --central=central --tenant=tenant --template=mysql
+```
+
+Po wykonaniu:
+
+```bash
+php artisan optimize:clear
+```
+
 Uruchomienie migracji tenant:
 
 ```bash

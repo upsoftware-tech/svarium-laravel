@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
+use Upsoftware\Svarium\Casts\EncryptedOrPlainText;
 use Upsoftware\Svarium\Traits\UsesConnection;
 
 class Tenant extends Model
@@ -32,9 +33,9 @@ class Tenant extends Model
 
     protected $casts = [
         'status' => 'boolean',
-        'tenancy_db_name' => 'encrypted',
-        'tenancy_db_username' => 'encrypted',
-        'tenancy_db_password' => 'encrypted',
+        'tenancy_db_name' => EncryptedOrPlainText::class,
+        'tenancy_db_username' => EncryptedOrPlainText::class,
+        'tenancy_db_password' => EncryptedOrPlainText::class,
     ];
 
     protected static function booted(): void
