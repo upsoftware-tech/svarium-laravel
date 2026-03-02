@@ -1,10 +1,10 @@
 <?php
 
 use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -42,6 +42,10 @@ return new class extends Migration
         try {
             DB::statement("ALTER TABLE `$table` DROP COLUMN `$column`");
         } catch (QueryException $exception) {
+            if ($this->isMissingColumnError($exception, $column)) {
+                return;
+            }
+
             // Jeżeli kolumna zniknęła w międzyczasie (stan częściowej migracji),
             // nie blokujemy całej migracji.
             if (! $this->columnExists($table, $column)) {
@@ -50,6 +54,20 @@ return new class extends Migration
 
             throw $exception;
         }
+    }
+
+    private function isMissingColumnError(QueryException $exception, string $column): bool
+    {
+        $errorInfo = $exception->errorInfo ?? [];
+        $driverCode = (int) ($errorInfo[1] ?? 0);
+        $message = strtolower($exception->getMessage());
+
+        if (in_array($driverCode, [1072, 1091], true)) {
+            return true;
+        }
+
+        return str_contains($message, strtolower($column))
+            && str_contains($message, "doesn't exist");
     }
 
     public function up(): void
@@ -89,7 +107,7 @@ return new class extends Migration
                     DB::table('roles')
                         ->where('id', $role->id)
                         ->update([
-                            'name_json' => json_encode([$locale => $role->name], JSON_UNESCAPED_UNICODE)
+                            'name_json' => json_encode([$locale => $role->name], JSON_UNESCAPED_UNICODE),
                         ]);
                 }
             });
@@ -99,14 +117,14 @@ return new class extends Migration
         $this->dropColumnIfExists('roles', 'name');
 
         // 5. rename json → name
-        if ($this->columnExists('roles', 'name_json') && !$this->columnExists('roles', 'name')) {
+        if ($this->columnExists('roles', 'name_json') && ! $this->columnExists('roles', 'name')) {
             Schema::table('roles', function (Blueprint $table) {
                 $table->renameColumn('name_json', 'name');
             });
         }
 
         // 6. generated column (dla indeksu spatie)
-        if (!$this->columnExists('roles', 'name_locale') && $this->columnExists('roles', 'name')) {
+        if (! $this->columnExists('roles', 'name_locale') && $this->columnExists('roles', 'name')) {
             DB::statement("
                 ALTER TABLE roles
                 ADD COLUMN name_locale VARCHAR(191)
@@ -115,7 +133,7 @@ return new class extends Migration
         }
 
         // 7. odtwórz unique index
-        if (!$this->indexExists('roles', 'roles_name_guard_name_unique') && $this->columnExists('roles', 'name_locale')) {
+        if (! $this->indexExists('roles', 'roles_name_guard_name_unique') && $this->columnExists('roles', 'name_locale')) {
             Schema::table('roles', function (Blueprint $table) {
                 $table->unique(['name_locale', 'guard_name'], 'roles_name_guard_name_unique');
             });
@@ -132,7 +150,7 @@ return new class extends Migration
          |-------------------------------------------------
          */
         if ($this->indexExists('roles', 'roles_name_guard_name_unique')) {
-            DB::statement("ALTER TABLE `roles` DROP INDEX `roles_name_guard_name_unique`");
+            DB::statement('ALTER TABLE `roles` DROP INDEX `roles_name_guard_name_unique`');
         }
 
         /*
@@ -141,7 +159,7 @@ return new class extends Migration
          |-------------------------------------------------
          */
         if ($this->columnExists('roles', 'name_locale')) {
-            DB::statement("ALTER TABLE `roles` DROP COLUMN `name_locale`");
+            DB::statement('ALTER TABLE `roles` DROP COLUMN `name_locale`');
         }
 
         /*
@@ -149,7 +167,7 @@ return new class extends Migration
          | 3. Dodaj kolumnę string
          |-------------------------------------------------
          */
-        if (!$this->columnExists('roles', 'name_string')) {
+        if (! $this->columnExists('roles', 'name_string')) {
             Schema::table('roles', function (Blueprint $table) {
                 $table->string('name_string')->nullable()->after('name');
             });
@@ -167,7 +185,7 @@ return new class extends Migration
                 DB::table('roles')
                     ->where('id', $role->id)
                     ->update([
-                        'name_string' => $json[$locale] ?? (is_array($json) ? reset($json) : null)
+                        'name_string' => $json[$locale] ?? (is_array($json) ? reset($json) : null),
                     ]);
             }
         });
@@ -197,7 +215,7 @@ return new class extends Migration
          | 7. Odtwórz oryginalny index Spatie
          |-------------------------------------------------
          */
-        if (!$this->indexExists('roles', 'roles_name_guard_name_unique')) {
+        if (! $this->indexExists('roles', 'roles_name_guard_name_unique')) {
             Schema::table('roles', function (Blueprint $table) {
                 $table->unique(['name', 'guard_name'], 'roles_name_guard_name_unique');
             });
