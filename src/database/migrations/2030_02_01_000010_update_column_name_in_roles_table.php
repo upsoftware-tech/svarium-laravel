@@ -4,6 +4,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Database\QueryException;
 
 return new class extends Migration
 {
@@ -29,6 +30,25 @@ return new class extends Migration
     {
         if ($this->indexExists($table, $index)) {
             DB::statement("ALTER TABLE `$table` DROP INDEX `$index`");
+        }
+    }
+
+    private function dropColumnIfExists(string $table, string $column): void
+    {
+        if (! $this->columnExists($table, $column)) {
+            return;
+        }
+
+        try {
+            DB::statement("ALTER TABLE `$table` DROP COLUMN `$column`");
+        } catch (QueryException $exception) {
+            // Jeżeli kolumna zniknęła w międzyczasie (stan częściowej migracji),
+            // nie blokujemy całej migracji.
+            if (! $this->columnExists($table, $column)) {
+                return;
+            }
+
+            throw $exception;
         }
     }
 
@@ -64,11 +84,7 @@ return new class extends Migration
         }
 
         // 4. usuń starą kolumnę
-        if ($this->columnExists('roles', 'name')) {
-            Schema::table('roles', function (Blueprint $table) {
-                $table->dropColumn('name');
-            });
-        }
+        $this->dropColumnIfExists('roles', 'name');
 
         // 5. rename json → name
         if ($this->columnExists('roles', 'name_json') && !$this->columnExists('roles', 'name')) {
@@ -150,9 +166,7 @@ return new class extends Migration
          |-------------------------------------------------
          */
         if ($this->columnExists('roles', 'name')) {
-            Schema::table('roles', function (Blueprint $table) {
-                $table->dropColumn('name');
-            });
+            $this->dropColumnIfExists('roles', 'name');
         }
 
         /*
