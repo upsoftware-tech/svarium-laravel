@@ -162,8 +162,10 @@ class NavigationService
                 );
             }
 
-            $this->appendLeafNode($branch, $item, $navigationId);
+            $this->appendLeafNode($branch, $item, $navigationId, $path);
         }
+
+        $children = $this->sortNodesByOrder($children);
 
         return $children;
     }
@@ -210,11 +212,19 @@ class NavigationService
     /**
      * @param array<int, array<string, mixed>> $nodes
      * @param array<string, mixed> $item
+     * @param array<int, string> $path
      */
-    protected function appendLeafNode(array &$nodes, array $item, string|int|null $navigationId): void
+    protected function appendLeafNode(array &$nodes, array $item, string|int|null $navigationId, array $path = []): void
     {
         $type = (string) ($item['type'] ?? 'item');
         $signature = (string) ($item['key'] ?? '');
+        $label = (string) ($item['label'] ?? '');
+        $resolvedUrl = $this->resolveItemUrl($item);
+        $order = (int) ($item['order'] ?? 0);
+
+        $isGroupDeclaration = $type === 'item'
+            && $label !== ''
+            && $resolvedUrl === null;
 
         foreach ($nodes as $node) {
             if (($node['__menu_key'] ?? null) === $signature) {
@@ -222,9 +232,23 @@ class NavigationService
             }
         }
 
+        if ($isGroupDeclaration) {
+            $this->upsertGroupDeclarationNode(
+                $nodes,
+                $label,
+                $item,
+                $navigationId,
+                [...$path, $label],
+                $signature
+            );
+
+            return;
+        }
+
         if ($type === 'separator') {
             $nodes[] = [
                 'type' => 'separator',
+                'order' => $order,
                 '__menu_key' => $signature,
             ];
 
@@ -235,6 +259,7 @@ class NavigationService
             $nodes[] = [
                 'type' => 'label',
                 'label' => (string) ($item['label'] ?? ''),
+                'order' => $order,
                 '__menu_key' => $signature,
             ];
 
@@ -245,14 +270,116 @@ class NavigationService
 
         $nodes[] = [
             'id' => 'navigation-static-item:'.sha1((string) $this->normalizeNavigationId($navigationId).'|'.$signature),
-            'label' => (string) ($item['label'] ?? ''),
+            'label' => $label,
             'icon' => $iconValue !== ''
                 ? ['type' => $this->resolveIconType($iconValue), 'value' => $iconValue]
                 : null,
-            'url' => $this->resolveItemUrl($item),
+            'url' => $resolvedUrl,
             'children' => [],
+            'order' => $order,
             '__menu_key' => $signature,
         ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $nodes
+     * @param array<string, mixed> $item
+     * @param array<int, string> $fullPath
+     */
+    protected function upsertGroupDeclarationNode(
+        array &$nodes,
+        string $label,
+        array $item,
+        string|int|null $navigationId,
+        array $fullPath,
+        string $signature
+    ): void {
+        $iconValue = isset($item['icon']) ? trim((string) $item['icon']) : '';
+        $order = isset($item['order']) ? (int) $item['order'] : 0;
+
+        foreach ($nodes as $index => $node) {
+            if (($node['type'] ?? 'item') === 'item'
+                && ($node['label'] ?? null) === $label
+                && is_array($node['children'] ?? null)
+                && (($node['url'] ?? null) === null || ($node['url'] ?? null) === '')
+            ) {
+                if ($iconValue !== '') {
+                    $nodes[$index]['icon'] = [
+                        'type' => $this->resolveIconType($iconValue),
+                        'value' => $iconValue,
+                    ];
+                }
+
+                $nodes[$index]['order'] = $order;
+
+                $nodes[$index]['__menu_key'] = $signature;
+
+                return;
+            }
+        }
+
+        $nodes[] = [
+            'id' => 'navigation-static-group:'.sha1((string) $this->normalizeNavigationId($navigationId).'|'.implode('/', $fullPath)),
+            'label' => $label,
+            'icon' => $iconValue !== ''
+                ? ['type' => $this->resolveIconType($iconValue), 'value' => $iconValue]
+                : null,
+            'url' => null,
+            'children' => [],
+            'order' => $order,
+            '__menu_key' => $signature,
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $nodes
+     * @return array<int, array<string, mixed>>
+     */
+    protected function sortNodesByOrder(array $nodes): array
+    {
+        $indexed = [];
+
+        foreach ($nodes as $index => $node) {
+            $node['__index'] = $index;
+
+            if (is_array($node['children'] ?? null)) {
+                $node['children'] = $this->sortNodesByOrder($node['children']);
+            }
+
+            $indexed[] = $node;
+        }
+
+        usort($indexed, function (array $left, array $right): int {
+            $leftHasOrder = array_key_exists('order', $left);
+            $rightHasOrder = array_key_exists('order', $right);
+
+            if ($leftHasOrder && $rightHasOrder) {
+                $leftOrder = (int) $left['order'];
+                $rightOrder = (int) $right['order'];
+
+                if ($leftOrder !== $rightOrder) {
+                    return $leftOrder <=> $rightOrder;
+                }
+
+                $leftLabel = (string) ($left['label'] ?? '');
+                $rightLabel = (string) ($right['label'] ?? '');
+                $labelComparison = strcmp($leftLabel, $rightLabel);
+
+                if ($labelComparison !== 0) {
+                    return $labelComparison;
+                }
+            } elseif ($leftHasOrder !== $rightHasOrder) {
+                return $leftHasOrder ? -1 : 1;
+            }
+
+            return ((int) ($left['__index'] ?? 0)) <=> ((int) ($right['__index'] ?? 0));
+        });
+
+        foreach ($indexed as &$node) {
+            unset($node['__index']);
+        }
+
+        return $indexed;
     }
 
     /**
