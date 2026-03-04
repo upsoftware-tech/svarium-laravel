@@ -15,6 +15,7 @@ use Upsoftware\Svarium\Bundles\Bundle;
 use Upsoftware\Svarium\Bundles\BundleRegistry;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Http\Middleware\AuthenticateMiddleware;
+use Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;
 use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
 use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\Middleware\ResolveDomainContext;
@@ -242,6 +243,8 @@ class SvariumServiceProvider extends ServiceProvider
             if (config('upsoftware.tenancy.domains.enabled', true)) {
                 $fallbackMiddleware[] = ResolveDomainContext::class;
             }
+
+            $fallbackMiddleware[] = HandleInertiaRequests::class;
 
             Route::middleware($fallbackMiddleware)->group(function (): void {
                 Route::any('{path?}', SvariumHttpKernel::class)
