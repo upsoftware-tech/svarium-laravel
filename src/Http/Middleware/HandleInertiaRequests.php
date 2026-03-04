@@ -69,10 +69,20 @@ class HandleInertiaRequests extends Middleware
 
     protected function resolveSettings(): mixed
     {
-        return $this->safe(
-            fn () => $this->hydrateNavigationComponentProps(Setting::getSettingGlobal('layout')),
-            (object) []
-        );
+        return $this->safe(function () {
+            $layout = Setting::getSettingGlobal('layout');
+            $layout = is_array($layout) ? $layout : [];
+
+            $configLogo = config('upsoftware.logo', []);
+            if (is_array($configLogo) && $configLogo !== []) {
+                // Source of truth for logo paths is config/upsoftware.php.
+                $layout['logo'] = $configLogo;
+            } elseif (! array_key_exists('logo', $layout)) {
+                $layout['logo'] = [];
+            }
+
+            return $this->hydrateNavigationComponentProps($layout);
+        }, (object) []);
     }
 
     protected function hydrateNavigationComponentProps(mixed $value): mixed
