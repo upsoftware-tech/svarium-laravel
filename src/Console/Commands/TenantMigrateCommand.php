@@ -21,13 +21,24 @@ class TenantMigrateCommand extends CoreCommand
 
     public function handle(): int
     {
-        $paths = $this->tenantMigrationsPaths((array) $this->option('path'));
+        $overridePaths = (array) $this->option('path');
+        $userPaths = $this->userTenantMigrationsPaths($overridePaths);
 
-        foreach ($paths as $path) {
+        foreach ($userPaths as $path) {
             $this->ensureDirectory($path);
         }
 
         $mode = $this->tenantMode();
+        $paths = $this->tenantMigrationsPaths(
+            $overridePaths,
+            includeSystem: true,
+            includeUser: $mode === 'database'
+        );
+
+        if ($mode !== 'database' && $userPaths !== []) {
+            $this->warn('Pominięto migracje użytkownika tenant (paths.tenant_migrations), bo tryb tenancy nie jest database.');
+        }
+
         $fresh = (bool) $this->option('fresh');
         $seed = (bool) $this->option('seed');
         $seederInput = array_values(array_filter((array) $this->option('seeder')));

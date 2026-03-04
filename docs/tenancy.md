@@ -39,7 +39,23 @@ Skonfiguruj w `config/upsoftware.php`:
         'namespace' => 'App\\Svarium\\Tenancy\\Seeders',
     ],
     'domains' => [
+        'enabled' => env('SVARIUM_TENANCY_DOMAINS_ENABLED', true),
         'central_domains' => ['app.example.com'],
+    ],
+    'owner' => [
+        'enabled' => false,
+        'type_column' => 'owner_type',
+        'id_column' => 'owner_id',
+        'map' => [
+            'customer' => App\Models\Customer::class,
+            'company' => App\Models\UserCompany::class,
+        ],
+    ],
+    'profile' => [
+        'enabled' => true,
+        'table' => 'tenant_profiles',
+        'foreign_key' => 'tenant_id',
+        'model' => \Upsoftware\Svarium\Models\TenantProfile::class,
     ],
     'database' => [
         'central_connection' => env('SVARIUM_TENANCY_CENTRAL_CONNECTION', 'central'),
@@ -61,8 +77,19 @@ Skonfiguruj w `config/upsoftware.php`:
   - `database`: osobna baza dla każdego tenanta.
 - `tenancy.paths.migrations`: folder (lub foldery) używany przez `svarium:tenant.migrate`.
 - `tenancy.paths.seeders`: folder używany przez `svarium:tenant.seed` i `svarium:make.seeder`.
+- `tenancy.paths.tenant_migrations`: preferowany folder migracji tenant użytkownika (legacy: `tenancy.paths.migrations`).
+- `tenancy.paths.tenant_seeders`: preferowany folder seederów tenant użytkownika (legacy: `tenancy.paths.seeders`).
 - `tenancy.seeders.namespace`: bazowy namespace klas seederów tenant.
+- `tenancy.domains.enabled`: włącza/wyłącza rozpoznawanie tenantów po host/domenie.
 - `tenancy.domains.central_domains`: domeny, które nie powinny rozpoznawać tenanta.
+- `tenancy.owner.enabled`: włącza mapowanie tenanta na encję biznesową (`owner_type`/`owner_id`).
+- `tenancy.owner.type_column`: kolumna typu właściciela w tabeli `tenants`.
+- `tenancy.owner.id_column`: kolumna identyfikatora właściciela w tabeli `tenants`.
+- `tenancy.owner.map`: mapowanie aliasu na klasę modelu, np. `customer => App\Models\Customer`.
+- `tenancy.profile.enabled`: włącza tabelę rozszerzającą dane tenanta.
+- `tenancy.profile.table`: nazwa tabeli profilu tenanta (domyślnie `tenant_profiles`).
+- `tenancy.profile.foreign_key`: kolumna FK do `tenants.id` w tabeli profilu.
+- `tenancy.profile.model`: model obsługujący tabelę profilu.
 - `tenancy.database.central_connection`: połączenie centralne (dane wspólne).
 - `tenancy.database.tenant_connection`: nazwa runtime connection dla trybu `database`.
 - `tenancy.database.template_connection`: połączenie bazowe kopiowane przed podmianą host/db/user/pass.
@@ -91,6 +118,9 @@ Trait `BelongsToTenant`:
 protected string $tenantColumn = 'tenant_id';
 ```
 
+Jeśli chcesz ograniczać rekordy do wybranych domen jednego tenanta, zobacz:
+- [Tenancy per domena](./tenancy-domain-visibility.md)
+
 ## Tryb `database` (osobna baza per tenant)
 
 Tenant jest rozpoznawany po domenie, a następnie Svarium przełącza połączenie na `tenancy.database.tenant_connection`.
@@ -106,15 +136,87 @@ Dane dostępowe do bazy tenanta są brane z pól rekordu tenanta:
 
 Wbudowane modele:
 - `Upsoftware\Svarium\Models\Tenant`
-- `Upsoftware\Svarium\Models\TenantDomain`
+- `Upsoftware\Svarium\Models\Domain` (alias legacy: `TenantDomain`)
 
 Domyślne tabele:
 - `tenants`
-- `tenant_domains`
+- `tenant_domains` gdy `tenancy.enabled=true`
+- `domains` gdy `tenancy.enabled=false`
+- `model_has_tenants` (relacja wiele-do-wielu: model ↔ tenant)
+- `model_has_domains` (relacja per domena: model ↔ domena)
 
-Tworzone przez migracje:
-- `2030_02_02_000001_create_tenants_table.php`
-- `2030_02_02_000002_create_tenant_domains_table.php`
+Tworzone przez migracje tenancy (ładowane tylko gdy `upsoftware.tenancy.enabled=true`):
+- `database/migrations/tenancy/2030_02_02_000001_create_tenants_table.php`
+- `database/migrations/tenancy/2030_02_02_000002_create_tenant_domains_table.php`
+- `database/migrations/tenancy/2030_02_02_000003_create_model_has_tenants_table.php`
+- `database/migrations/tenancy/2030_02_02_000004_create_model_has_domain_tenants_table.php`
+- `database/migrations/tenancy/2030_02_03_000005_rename_tenant_domain_tables.php` (upgrade do nowych nazw)
+- `database/migrations/tenancy/2030_02_03_000006_add_domain_context_columns.php`
+- `database/migrations/tenancy/2030_02_03_000007_add_tenant_owner_columns.php`
+- `database/migrations/tenancy/2030_02_03_000008_create_tenant_profiles_table.php`
+
+Kompatybilność:
+- stare nazwy (`tenant_domains`, `model_has_domain_tenants`) są nadal wspierane przez warstwę kompatybilności,
+- po migracji upgrade zalecane jest używanie nowych nazw (`domains`, `model_has_domains`).
+
+Tabela `model_has_tenants`:
+- `tenant_id`
+- `model_type` (np. `App\Models\Product`)
+- `model_id`
+
+Pozwala przypisać jeden rekord do wielu tenantów bez trzymania wyłącznie jednego `tenant_id` w rekordzie.
+
+Tabela `model_has_domains`:
+- `domain_id` (FK do `domains.id`)
+- `model_type`
+- `model_id`
+
+Pozwala ograniczyć widoczność rekordu do konkretnych domen w ramach jednego tenanta.
+
+## Scope tenant przez pivoty
+
+Trait `Upsoftware\Svarium\Tenancy\Concerns\BelongsToTenant` wspiera teraz dwa mechanizmy jednocześnie:
+- klasyczny `tenant_id` w tabeli modelu,
+- mapowanie wiele-do-wielu przez `model_has_tenants`,
+- mapowanie per domena przez `model_has_domains`.
+
+Jeśli model ma kolumnę `tenant_id` i wpisy w pivotach, scope dopuści rekord gdy spełniony jest co najmniej jeden warunek tenantowy.
+Gdy rekord ma wpisy w `model_has_domains`, zostanie dodatkowo ograniczony do aktualnej domeny tenanta.
+
+Dostępne metody w modelu:
+- `$model->tenants()` – relacja morphToMany,
+- `$model->attachTenant('tenant_xxx')`,
+- `$model->syncTenants(['tenant_a', 'tenant_b'])`.
+- `$model->attachTenantDomain($domainId)`,
+- `$model->syncTenantDomains([1, 2, 5])`.
+
+Przykład: 1 tenant ma 16 domen, apartament ma być widoczny tylko na 4 domenach:
+
+```php
+$apartment->attachTenant('tenant_01');
+$apartment->syncTenantDomains([3, 7, 11, 15]);
+```
+
+Konfiguracja:
+
+```php
+'tenancy' => [
+    'column' => [
+        'column' => 'tenant_id',
+        'model_maps' => [
+            'tenants' => [
+                'enabled' => true,
+                'table' => 'model_has_tenants',
+            ],
+            'domains' => [
+                'enabled' => true,
+                'table' => 'model_has_domains',
+                'domain_key' => 'domain_id',
+            ],
+        ],
+    ],
+],
+```
 
 ## Przykładowa konfiguracja danych
 
@@ -122,14 +224,14 @@ Tworzenie tenanta i domeny:
 
 ```php
 use Upsoftware\Svarium\Models\Tenant;
-use Upsoftware\Svarium\Models\TenantDomain;
+use Upsoftware\Svarium\Models\Domain;
 
 $tenant = Tenant::create([
     'name' => 'ACME',
     'slug' => 'acme',
 ]);
 
-TenantDomain::create([
+Domain::create([
     'tenant_id' => $tenant->id,
     'domain' => 'acme.example.test',
     'is_primary' => true,
@@ -140,6 +242,8 @@ TenantDomain::create([
 
 Dostępne helpery runtime:
 - `tenant($key = null, $default = null)`
+- `tenant_domain($key = null, $default = null)`
+- `tenant_owner($key = null, $default = null)`
 - `svarium_tenancy_enabled()`
 - `svarium_tenancy_mode()`
 - `svarium_tenancy_column_mode()`
@@ -151,11 +255,152 @@ Przykład:
 ```php
 $tenant = tenant();
 $tenantId = tenant('id');
+$owner = tenant_owner();
+$ownerEmail = tenant_owner('email');
 
 if (svarium_tenancy_column_mode()) {
     // logika tenant_id dla konkretnych operacji
 }
 ```
+
+## Powiązanie tenanta z tabelą biznesową
+
+Masz dwa wygodne warianty:
+
+1. Encja biznesowa jako właściciel tenanta (np. `customers`, `user_companies`):
+   - ustawiasz `tenants.owner_type` + `tenants.owner_id`,
+   - konfigurujesz mapę `tenancy.owner.map`,
+   - pobierasz właściciela przez `tenant_owner()`.
+2. Dodatkowy profil tenanta:
+   - trzymasz rozszerzone dane w tabeli `tenant_profiles` (lub własnej),
+   - relacja `Tenant::profile()` daje 1:1 do danych konfiguracyjnych.
+
+Przykład mapowania:
+
+```php
+'tenancy' => [
+    'owner' => [
+        'enabled' => true,
+        'map' => [
+            'customer' => App\Models\Customer::class,
+            'company' => App\Models\UserCompany::class,
+        ],
+    ],
+],
+```
+
+Przykład zapisu:
+
+```php
+use Upsoftware\Svarium\Models\Tenant;
+
+$tenant = Tenant::create([
+    'name' => 'Hotel Prime',
+    'owner_type' => 'company',
+    'owner_id' => '15',
+]);
+
+$tenant->profile()->updateOrCreate([], [
+    'payload' => [
+        'billing_email' => 'office@example.com',
+        'currency' => 'PLN',
+    ],
+]);
+```
+
+## Automatyczne wiązanie z `user_company` (bez ręcznego owner_type/owner_id)
+
+Krok po kroku:
+
+1. Włącz owner binding i mapowanie aliasu:
+
+```php
+// config/upsoftware.php
+'tenancy' => [
+    'owner' => [
+        'enabled' => true,
+        'type_column' => 'owner_type',
+        'id_column' => 'owner_id',
+        'map' => [
+            'company' => App\Models\UserCompany::class,
+        ],
+    ],
+],
+```
+
+2. Uruchom migracje tenancy (żeby mieć kolumny `owner_type` i `owner_id`):
+
+```bash
+php artisan svarium:tenant.install --migrate-tenancy
+```
+
+3. Dodaj trait do modelu `UserCompany`:
+
+```php
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Upsoftware\Svarium\Tenancy\Concerns\OwnsTenants;
+
+class UserCompany extends Model
+{
+    use OwnsTenants;
+}
+```
+
+4. Tenant tworzy się automatycznie po utworzeniu firmy:
+
+```php
+$company = UserCompany::create([
+    'name' => 'Demo Company',
+]);
+
+// tenant został utworzony automatycznie, jeśli nie istniał
+$tenant = $company->tenants()->first();
+```
+
+5. (Opcjonalnie) ręczne utworzenie przez relację właściciela:
+
+```php
+$company = UserCompany::findOrFail(15);
+
+$tenant = $company->createTenant([
+    'name' => 'Demo Company',
+    'slug' => 'demo-company',
+]);
+```
+
+6. Odczyt właściciela z poziomu requestu:
+
+```php
+$owner = tenant_owner(); // App\Models\UserCompany|null
+$ownerName = tenant_owner('name');
+```
+
+Jeśli chcesz wyłączyć auto-tworzenie w konkretnym modelu, nadpisz metodę:
+
+```php
+protected function shouldAutoCreateTenant(): bool
+{
+    return false;
+}
+```
+
+Możesz też użyć helpera na modelu `Tenant`:
+
+```php
+use Upsoftware\Svarium\Models\Tenant;
+
+$tenant = Tenant::createForOwner($company, [
+    'name' => 'Demo Company',
+    'slug' => 'demo-company',
+]);
+```
+
+Mechanizmy (auto i ręczne):
+- same ustawiają `owner_type` i `owner_id`,
+- respektują `tenancy.owner.map` (gdy alias istnieje, zapisze alias, np. `company`),
+- nie wymagają ręcznego dopisywania tych pól przy każdym create/update.
 
 ## Integracja z auth/panelem
 
@@ -168,6 +413,11 @@ Logowanie/reset i sprawdzanie ról w Svarium korzystają z helperów tenancy:
 `php artisan svarium:init` wspiera tenancy i:
 - pyta, czy włączyć multi-tenant Svarium,
 - pyta o tryb (`column` lub `database`),
+- pyta, czy włączyć domeny tenantów (tabele `domains` / `model_has_domains`),
+- pyta, czy tenant ma być rozpoznawany po domenie (`tenancy.domains.enabled`),
+- ustawia mapowanie domen w kolumnowym tenancy na nowe nazwy:
+  - `tenancy.column.model_maps.domains.table = model_has_domains`
+  - `tenancy.column.model_maps.domains.domain_key = domain_id`
 - zapisuje klucze w `config/upsoftware.php`,
 - tworzy foldery:
   - `app/Svarium/Tenancy/Migrations`
@@ -175,10 +425,18 @@ Logowanie/reset i sprawdzanie ról w Svarium korzystają z helperów tenancy:
 
 ## Komendy migracji tenant
 
+`svarium:tenant.migrate` działa warstwowo:
+- migracje systemowe paczki: `packages/svarium-laravel/src/database/migrations/tenants` (fallback: `.../migrations/tenancy`),
+- migracje użytkownika: `tenancy.paths.tenant_migrations`.
+
+Ważne:
+- migracje użytkownika tenant są uruchamiane na bazach tenantów (tryb `database`),
+- w trybie `column` migracje użytkownika tenant są pomijane (nie idą do bazy centralnej).
+
 Tworzenie migracji tenant w folderze z konfiguracji:
 
 ```bash
-php artisan svarium:make.migrate create_invoices_table --create=invoices
+php artisan svarium:tenant.migration create_invoices_table --create=invoices
 ```
 
 ## Instalacja połączeń DB dla tenancy
@@ -186,12 +444,20 @@ php artisan svarium:make.migrate create_invoices_table --create=invoices
 Aby automatycznie dopisać połączenia `central` i `tenant` do `config/database.php`, użyj:
 
 ```bash
-php artisan svarium:install:tenant
+php artisan svarium:tenant.install
 ```
 
 Komenda:
 - kopiuje wskazane połączenie bazowe (domyślnie `database.default`),
 - tworzy/aktualizuje połączenia `central` i `tenant`,
+- pyta, czy włączyć tenancy,
+- pyta, czy utworzyć tabele tenancy,
+- pyta, czy włączyć domeny tenancy i czy utworzyć tabele domen,
+- pyta, czy włączyć owner binding (`owner_type`/`owner_id`) i mapę ownerów,
+- pyta, czy włączyć profil tenanta i pozwala ustawić tabelę/FK/model,
+- automatycznie synchronizuje nazwę tabeli domen:
+  - `tenant_domains` dla `tenancy.enabled=true`
+  - `domains` dla `tenancy.enabled=false`,
 - zapisuje referencje do ENV (np. `SVARIUM_CENTRAL_DB_HOST`, `SVARIUM_TENANT_DB_HOST`),
 - aktualizuje klucze:
   - `upsoftware.tenancy.database.central_connection`
@@ -201,8 +467,66 @@ Komenda:
 Opcje:
 
 ```bash
-php artisan svarium:install:tenant --central=central --tenant=tenant --template=mysql
+php artisan svarium:tenant.install --central=central --tenant=tenant --template=mysql
 ```
+
+Tryb bez pytań (np. CI):
+
+```bash
+php artisan svarium:tenant.install --enable-tenancy=true --enable-domains=true --migrate-tenancy --migrate-domains --no-interaction
+```
+
+Pełny przykład z owner/profile:
+
+```bash
+php artisan svarium:tenant.install \
+  --enable-tenancy=true \
+  --enable-domains=true \
+  --owner-enabled=true \
+  --owner-map="customer=App\\Models\\Customer,company=App\\Models\\UserCompany" \
+  --profile-enabled=true \
+  --profile-table=tenant_profiles \
+  --profile-foreign-key=tenant_id \
+  --profile-model="\\Upsoftware\\Svarium\\Models\\TenantProfile" \
+  --migrate-tenancy \
+  --migrate-domains
+```
+
+Odinstalowanie tenancy:
+
+```bash
+php artisan svarium:tenant.uninstall
+```
+
+Komenda `svarium:tenant.uninstall`:
+- usuwa tabele tenancy (`tenants`, `model_has_tenants`, `model_has_domains`, tabela profilu tenanta),
+- synchronizuje tabelę domen do nazwy `domains`,
+- ustawia:
+  - `tenancy.enabled = false`
+  - `tenancy.column.model_maps.tenants.enabled = false`
+- zachowuje ustawienie domen (`tenancy.domains.enabled`) i map domen zgodnie z wcześniejszą konfiguracją,
+- oraz aktualizuje ENV:
+  - `SVARIUM_TENANCY_ENABLED=false`
+  - `SVARIUM_TENANCY_DOMAINS_ENABLED` zgodnie z konfiguracją domen.
+
+## Pola domeny i middleware domenowy
+
+Tabela domen (`tenant_domains` / `domains`) wspiera pola:
+- `is_primary`
+- `locale`
+- `theme`
+- `status`
+- `redirect_to_primary`
+- `force_https`
+
+Middleware domeny:
+- rozpoznaje domenę requestu,
+- opcjonalnie robi `301` do domeny głównej (`redirect_to_primary`),
+- wymusza HTTPS (`force_https`),
+- ustawia `locale` i `theme` z domeny,
+- ustawia SEO:
+  - canonical na domenę główną,
+  - `noindex,follow` dla domen aliasowych.
 
 Po wykonaniu:
 
@@ -326,7 +650,8 @@ php artisan svarium:make.tenant "Acme" "acme.example.com" --db-host=127.0.0.1 --
 
 - Tenant jest zawsze `null`:
   - sprawdź `tenancy.enabled = true`,
-  - sprawdź, czy domena istnieje w `tenant_domains`,
+  - sprawdź, czy domena istnieje w `domains`,
+  - sprawdź, czy `tenancy.domains.enabled = true` (jeśli tenant ma być rozpoznawany po host),
   - sprawdź, czy host nie jest na liście `central_domains`.
 - Brak danych w trybie `column`:
   - jeśli `strict = true`, nierozpoznany tenant daje puste wyniki,
@@ -340,6 +665,6 @@ php artisan svarium:make.tenant "Acme" "acme.example.com" --db-host=127.0.0.1 --
 
 Do budowy zakładki domen możesz użyć bezpośrednio modeli:
 - `Tenant`
-- `TenantDomain`
+- `Domain`
 
 Modele są gotowe pod CRUD i przypisywanie domen.

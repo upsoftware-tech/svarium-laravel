@@ -4,12 +4,16 @@ namespace Upsoftware\Svarium\Panel;
 
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
+use Illuminate\Support\Str;
 use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionUnionType;
 use Symfony\Component\HttpFoundation\Response;
+use Upsoftware\Svarium\Http\Middleware\AuthenticateMiddleware;
+use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\ComponentResult;
 use Upsoftware\Svarium\Http\OperationResult;
+use Illuminate\Auth\Middleware\Authenticate as LaravelAuthenticateMiddleware;
 use Upsoftware\Svarium\Security\RecordIdentifier;
 
 class OperationRouter
@@ -193,11 +197,17 @@ class OperationRouter
         $args = app(OperationParameterResolver::class)
             ->resolve($operation, $context);
 
+        $panelMiddleware = $panel?->getMiddleware() ?? [];
+        if ($this->isPublicAuthRequest($request)) {
+            $panelMiddleware = $this->withoutAuthMiddleware($panelMiddleware);
+        }
+
         $middleware = array_merge(
             config('svarium.middleware.web', []),
-            $panel?->getMiddleware() ?? [],
+            $panelMiddleware,
             $operation::middleware()
         );
+        $middleware = $this->ensureMiddlewarePresent($middleware, LocaleMiddleware::class);
 
         $result = app(\Illuminate\Pipeline\Pipeline::class)
             ->send($request)
@@ -225,5 +235,104 @@ class OperationRouter
         }
 
         return $result;
+    }
+
+    protected function isPublicAuthRequest(Request $request): bool
+    {
+        $defaultRoutePatterns = [
+            'panel.auth.login',
+            'panel.auth.login.*',
+            'panel.auth.reset',
+            'panel.auth.reset.*',
+            'panel.auth.register',
+            'panel.auth.register.*',
+            'panel.auth.method',
+            'panel.auth.method.*',
+            'panel.auth.verification',
+            'panel.auth.verification.*',
+            'panel.auth.redirect',
+            'panel.auth.callback',
+        ];
+
+        $routePatterns = config('upsoftware.panel.public_auth_route_patterns', $defaultRoutePatterns);
+        if (! is_array($routePatterns)) {
+            $routePatterns = $defaultRoutePatterns;
+        }
+
+        foreach ($routePatterns as $pattern) {
+            if (is_string($pattern) && $pattern !== '' && $request->routeIs($pattern)) {
+                return true;
+            }
+        }
+
+        $panelPrefix = trim((string) config('upsoftware.panel.prefix', ''), '/');
+        $base = $panelPrefix !== '' ? $panelPrefix.'/' : '';
+
+        $defaultPathPatterns = [
+            $base.'auth/login',
+            $base.'auth/login/*',
+            $base.'auth/reset',
+            $base.'auth/reset/*',
+            $base.'auth/register',
+            $base.'auth/register/*',
+        ];
+
+        $pathPatterns = config('upsoftware.panel.public_auth_path_patterns', $defaultPathPatterns);
+        if (! is_array($pathPatterns)) {
+            $pathPatterns = $defaultPathPatterns;
+        }
+
+        foreach ($pathPatterns as $pattern) {
+            if (is_string($pattern) && $pattern !== '' && $request->is($pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function withoutAuthMiddleware(array $middleware): array
+    {
+        $filtered = [];
+
+        foreach ($middleware as $definition) {
+            if (! is_string($definition)) {
+                $filtered[] = $definition;
+                continue;
+            }
+
+            $normalized = trim($definition);
+            if ($normalized === '') {
+                continue;
+            }
+
+            if (
+                $normalized === 'auth'
+                || Str::startsWith($normalized, 'auth:')
+                || $normalized === 'auth.panel'
+                || Str::startsWith($normalized, 'auth.panel:')
+                || $normalized === LaravelAuthenticateMiddleware::class
+                || $normalized === AuthenticateMiddleware::class
+            ) {
+                continue;
+            }
+
+            $filtered[] = $definition;
+        }
+
+        return $filtered;
+    }
+
+    protected function ensureMiddlewarePresent(array $middleware, string $middlewareClass): array
+    {
+        foreach ($middleware as $definition) {
+            if ($definition === $middlewareClass) {
+                return $middleware;
+            }
+        }
+
+        array_unshift($middleware, $middlewareClass);
+
+        return $middleware;
     }
 }

@@ -5,6 +5,7 @@ namespace Upsoftware\Svarium\Panel\Resource\Operations;
 use Illuminate\Database\Eloquent\Model;
 use Upsoftware\Svarium\Enums\ExecutionMode;
 use Upsoftware\Svarium\Http\RedirectResult;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
 
@@ -42,12 +43,18 @@ class ResourceEditOperation extends Operation
         $context->setOperationType('edit');
         $resource = $this->resource();
         $this->applyTitleIfEmpty($resource->editTitle($context, $record));
+        $fieldRegistry = app(FieldAttributesRegistry::class);
+        $fieldRegistry->setDefinitions($resource->fields());
 
-        if (method_exists($resource, 'editForm')) {
-            return $resource->editForm($record);
+        try {
+            if (method_exists($resource, 'editForm')) {
+                return $resource->editForm($record);
+            }
+
+            return $resource->form($record);
+        } finally {
+            $fieldRegistry->clear();
         }
-
-        return $resource->form($record);
     }
 
     protected function applyTitleIfEmpty(string $title): void

@@ -8,8 +8,17 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    private function isSqlite(): bool
+    {
+        return DB::getDriverName() === 'sqlite';
+    }
+
     private function columnExists(string $table, string $column): bool
     {
+        if ($this->isSqlite()) {
+            return Schema::hasColumn($table, $column);
+        }
+
         return DB::table('information_schema.COLUMNS')
             ->where('TABLE_SCHEMA', DB::getDatabaseName())
             ->where('TABLE_NAME', $table)
@@ -19,6 +28,18 @@ return new class extends Migration
 
     private function indexExists(string $table, string $index): bool
     {
+        if ($this->isSqlite()) {
+            $indexes = DB::select(sprintf('PRAGMA index_list("%s")', $table));
+
+            foreach ($indexes as $sqliteIndex) {
+                if ((string) ($sqliteIndex->name ?? '') === $index) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         return DB::table('information_schema.STATISTICS')
             ->where('TABLE_SCHEMA', DB::getDatabaseName())
             ->where('TABLE_NAME', $table)

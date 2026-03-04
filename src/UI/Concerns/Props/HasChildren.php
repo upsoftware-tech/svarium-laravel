@@ -14,8 +14,13 @@ trait HasChildren
         return $this;
     }
 
-    public function children(array $components): static
+    public function children(array|Component $components): static
     {
+        if ($components instanceof Component) {
+            $this->child($components);
+            return $this;
+        }
+
         foreach ($components as $component) {
             $this->child($component);
         }

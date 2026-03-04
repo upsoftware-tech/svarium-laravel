@@ -188,6 +188,51 @@ class Flex extends Component
         return $this->items('center')->justify('center');
     }
 
+    public function header(
+        Component|array|string|\Closure|null $content,
+        string $position = 'after'
+    ): static
+    {
+        if (strtolower(trim($position)) === 'before') {
+            return $this->slot('header_before', $content, 'header', 'before');
+        }
+
+        return $this->slot('header', $content);
+    }
+
+    public function body(Component|array|string|\Closure|null $content): static
+    {
+        return $this->slot('body', $content);
+    }
+
+    public function footer(
+        Component|array|string|\Closure|null $content,
+        string $position = 'after'
+    ): static
+    {
+        if (strtolower(trim($position)) === 'before') {
+            return $this->slot('footer_before', $content, 'footer', 'before');
+        }
+
+        return $this->slot('footer', $content);
+    }
+
+    public function top(
+        Component|array|string|\Closure|null $content,
+        string $position = 'after'
+    ): static
+    {
+        return $this->slot('top', $content, 'header', $position);
+    }
+
+    public function bottom(
+        Component|array|string|\Closure|null $content,
+        string $position = 'before'
+    ): static
+    {
+        return $this->slot('bottom', $content, 'footer', $position);
+    }
+
     protected function appendScaleClass(string $prefix, string|int|float $value): static
     {
         $normalized = trim((string) $value);

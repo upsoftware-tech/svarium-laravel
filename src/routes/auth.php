@@ -1,32 +1,35 @@
 <?php
 
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;
 use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
+use Upsoftware\Svarium\Http\Middleware\ResolveDomainContext;
+use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 
 $middleware = ['web'];
-$middleware[] = LocaleMiddleware::class;
-$middleware[] = HandleInertiaRequests::class;
 
 if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
     $middleware[] = InitializeTenancy::class;
 }
 
+$middleware[] = LocaleMiddleware::class;
+
+if (config('upsoftware.tenancy.domains.enabled', true)) {
+    $middleware[] = ResolveDomainContext::class;
+}
+
+$middleware[] = HandleInertiaRequests::class;
+
 Route::prefix(config('upsoftware.panel.prefix'))->as('panel.')->middleware('auth.panel')->group(function() use ($middleware) {
     Route::prefix('auth')->as('auth.')->middleware($middleware)->group(function() {
-        Route::prefix('login')->group(function() {
-            Route::get('/', 'LoginController@init')->name('login');
-            Route::post('/', 'LoginController@login')->name('login');
-        });
+
 
         Route::prefix('{type}')->group(function() {
-            Route::prefix('method')->group(function() {
-                Route::prefix('{userAuth}')->group(function() {
-                    Route::get('/', 'MethodController@init')->name('method');
-                    Route::post('/', 'MethodController@set')->name('method.set');
-                });
-            });
+            Route::match(['get', 'post'], 'method/{userAuth}', function (Request $request) {
+                return app(SvariumHttpKernel::class)($request);
+            })->name('method');
 
             Route::prefix('verification')->group(function() {
                 Route::prefix('{userAuth}')->group(function() {

@@ -4,6 +4,7 @@ namespace Upsoftware\Svarium\Http\Middleware;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Database\Eloquent\Model;
 use Inertia\Middleware;
 use Inertia\Inertia;
 use Throwable;
@@ -24,6 +25,9 @@ class HandleInertiaRequests extends Middleware
         return array_merge(parent::share($request), [
             'locale' => session()->has('locale') ? session()->get('locale') : app()->getLocale(),
             'locales' => Inertia::once(fn () => locales()),
+            'theme' => fn () => $request->attributes->get('svarium.theme'),
+            'seo' => fn () => $request->attributes->get('svarium.seo', []),
+            'domain' => fn () => $this->resolveDomainContext($request),
             'workspaces' => $this->resolveWorkspaces($request, $user),
             'title' => fn () => get_title(),
             'layout' => [
@@ -168,6 +172,36 @@ class HandleInertiaRequests extends Middleware
                 ];
             });
         }, []);
+    }
+
+    protected function resolveDomainContext(Request $request): array
+    {
+        $domain = $request->attributes->get('svarium.domain');
+        $primary = $request->attributes->get('svarium.domain.primary');
+
+        return [
+            'current' => $this->serializeDomain($domain),
+            'primary' => $this->serializeDomain($primary),
+        ];
+    }
+
+    protected function serializeDomain(mixed $domain): ?array
+    {
+        if (! $domain instanceof Model) {
+            return null;
+        }
+
+        return [
+            'id' => $domain->getAttribute('id'),
+            'tenant_id' => $domain->getAttribute('tenant_id'),
+            'domain' => $domain->getAttribute('domain'),
+            'is_primary' => (bool) $domain->getAttribute('is_primary'),
+            'locale' => $domain->getAttribute('locale'),
+            'theme' => $domain->getAttribute('theme'),
+            'status' => (bool) $domain->getAttribute('status'),
+            'redirect_to_primary' => (bool) $domain->getAttribute('redirect_to_primary'),
+            'force_https' => (bool) $domain->getAttribute('force_https'),
+        ];
     }
 
     protected function safeLayout(): mixed

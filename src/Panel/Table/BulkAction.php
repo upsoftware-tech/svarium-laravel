@@ -36,25 +36,25 @@ class BulkAction
     public static function delete(): static
     {
         return static::make('delete')
-            ->label(__('Usuń'))
+            ->label(__('Delete'))
             ->icon('lucide:trash')
             ->variant('destructive')
             ->confirm([
-                'title' => __('Czy na pewno?'),
-                'description' => __('Tej operacji nie można cofnąć.'),
-                'cancel' => __('Anuluj'),
-                'ok' => __('Usuń'),
+                'title' => __('Are you sure?'),
+                'description' => __('This operation cannot be undone.'),
+                'cancel' => __('Cancel'),
+                'ok' => __('Delete'),
             ])
-            ->successMessage(fn (int $count) => __('Usunięto :count rekordów', ['count' => $count]));
+            ->successMessage(fn (int $count) => __('Deleted :count records', ['count' => $count]));
     }
 
     public static function duplicate(): static
     {
         return static::make('duplicate')
-            ->label(__('Duplikuj'))
+            ->label(__('Duplicate'))
             ->icon('lucide:copy')
             ->variant('outline')
-            ->successMessage(fn (int $count) => __('Zduplikowano :count rekordów', ['count' => $count]));
+            ->successMessage(fn (int $count) => __('Duplicated :count records', ['count' => $count]));
     }
 
     public static function fromArray(array $definition): static

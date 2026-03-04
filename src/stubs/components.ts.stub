@@ -1,5 +1,4 @@
-import { Link } from '@inertiajs/vue3';
-import { Div, Grid, Button, Card, SidebarUser, NavigationVertical, Icon, SidebarHeader, ComponentRender } from '@upsoftware_tech/svarium';
+import { Div, Grid, Button, Card, SidebarUser, NavigationVertical, Icon, SidebarHeader, ComponentRender, Link } from '@upsoftware_tech/svarium';
 
 export const globalComponents = {
     Div,

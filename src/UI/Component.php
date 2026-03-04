@@ -9,6 +9,8 @@ abstract class Component
     protected array $children = [];
 
     protected array $slots = [];
+    protected array $slotPlacement = [];
+    protected int $slotPlacementOrder = 0;
 
     protected ?array $onlyOn = null;
 
@@ -20,6 +22,7 @@ abstract class Component
 
     protected ?string $name = null;
     protected ?string $value = null;
+    protected bool $phpIf = true;
 
     public static function make(?string $name = null): static
     {
@@ -49,6 +52,7 @@ abstract class Component
     public function type(string $type): static
     {
         $this->type = $type;
+        $this->prop('type', $type);
 
         return $this;
     }
@@ -87,6 +91,40 @@ abstract class Component
         $this->props[$key] = $value;
 
         return $this;
+    }
+
+    public function if(bool|\Closure $condition): static
+    {
+        $this->phpIf = $this->evaluateCondition($condition);
+
+        return $this;
+    }
+
+    public function phpIf(bool|\Closure $condition): static
+    {
+        return $this->if($condition);
+    }
+
+    public function unless(bool|\Closure $condition): static
+    {
+        $this->phpIf = ! $this->evaluateCondition($condition);
+
+        return $this;
+    }
+
+    public function phpUnless(bool|\Closure $condition): static
+    {
+        return $this->unless($condition);
+    }
+
+    public function vIf(string|bool|int|float|null $condition): static
+    {
+        return $this->prop('vIf', $condition);
+    }
+
+    public function shouldRender(): bool
+    {
+        return $this->phpIf;
     }
 
     public function getProp(string $key, mixed $default = null): mixed {
@@ -142,10 +180,100 @@ abstract class Component
         ]);
     }
 
-    public function slot(string $name, Component|array|string|\Closure|null $content): static
+    public function __call(string $method, array $arguments): mixed
     {
-        $this->slots[$name] = $content;
+        if (! method_exists(Appearance::class, $method)) {
+            throw new \BadMethodCallException(sprintf(
+                'Call to undefined method %s::%s()',
+                static::class,
+                $method
+            ));
+        }
+
+        $reflectionMethod = new \ReflectionMethod(Appearance::class, $method);
+
+        if (! $reflectionMethod->isPublic() || $reflectionMethod->isStatic()) {
+            throw new \BadMethodCallException(sprintf(
+                'Call to undefined method %s::%s()',
+                static::class,
+                $method
+            ));
+        }
+
+        $appearance = Appearance::make();
+        $appearance->{$method}(...$arguments);
+
+        return $this->appearance($appearance);
+    }
+
+    public function slot(
+        string $name,
+        Component|array|string|\Closure|null $content,
+        ?string $anchor = null,
+        string $position = 'after',
+        int|string|null $priority = null
+    ): static
+    {
+        if ($anchor === null) {
+            $this->slots[$name] = $content;
+            unset($this->slotPlacement[$name]);
+            return $this;
+        }
+
+        $slotName = $this->resolvePlacedSlotName($name);
+        $this->slots[$slotName] = $content;
+
+        $normalizedAnchor = strtolower(trim($anchor));
+        if (! in_array($normalizedAnchor, ['header', 'footer'], true)) {
+            $normalizedAnchor = 'header';
+        }
+
+        $normalizedPosition = strtolower(trim($position));
+        if (! in_array($normalizedPosition, ['before', 'after'], true)) {
+            $normalizedPosition = 'after';
+        }
+
+        $normalizedPriority = null;
+        if (is_int($priority)) {
+            $normalizedPriority = $priority;
+        } elseif (is_string($priority)) {
+            $trimmedPriority = trim($priority);
+            if ($trimmedPriority !== '' && is_numeric($trimmedPriority)) {
+                $normalizedPriority = (int) $trimmedPriority;
+            }
+        }
+
+        $order = $this->slotPlacementOrder;
+        $this->slotPlacementOrder++;
+
+        $this->slotPlacement[$slotName] = [
+            'anchor' => $normalizedAnchor,
+            'position' => $normalizedPosition,
+            'priority' => $normalizedPriority,
+            'order' => $order,
+        ];
+
         return $this;
+    }
+
+    protected function resolvePlacedSlotName(string $name): string
+    {
+        $base = trim($name);
+        if ($base === '') {
+            $base = 'slot';
+        }
+
+        if (! array_key_exists($base, $this->slots)) {
+            return $base;
+        }
+
+        $counter = 1;
+        do {
+            $candidate = "{$base}_{$counter}";
+            $counter++;
+        } while (array_key_exists($candidate, $this->slots));
+
+        return $candidate;
     }
 
 
@@ -185,6 +313,10 @@ abstract class Component
 
         // pojedynczy komponent
         if ($content instanceof Component) {
+            if (! $content->shouldRender()) {
+                return [];
+            }
+
             $array = $content->toArray();
 
             // jeżeli komponent ma slot 'content' i brak children → traktuj jak wrapper
@@ -209,6 +341,10 @@ abstract class Component
             array_filter(
                 array_map(function ($node) {
                     if ($node instanceof Component) {
+                        if (! $node->shouldRender()) {
+                            return null;
+                        }
+
                         return $node->toArray();
                     }
 
@@ -259,14 +395,24 @@ abstract class Component
 
     public function toArray(): array
     {
+        $props = $this->props;
+
+        if ($this->slotPlacement !== []) {
+            $props['__slotPlacement'] = $this->slotPlacement;
+        }
+
         return [
             'type' => class_basename(static::class),
-            'props' => $this->props,
+            'props' => $props,
             'children' => array_values(
                 array_filter(
                     array_map(function ($child) {
 
                         if ($child instanceof Component) {
+                            if (! $child->shouldRender()) {
+                                return null;
+                            }
+
                             return $child->toArray();
                         }
 
@@ -283,5 +429,14 @@ abstract class Component
                 fn ($content) => $this->resolveSlot($content)
             )->toArray(),
         ];
+    }
+
+    protected function evaluateCondition(bool|\Closure $condition): bool
+    {
+        if ($condition instanceof \Closure) {
+            return (bool) $condition($this);
+        }
+
+        return (bool) $condition;
     }
 }

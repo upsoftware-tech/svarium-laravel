@@ -51,6 +51,11 @@ abstract class Resource
 
     abstract public function table(): TableBuilder;
 
+    public function fields(): array
+    {
+        return [];
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Hooks (optional)

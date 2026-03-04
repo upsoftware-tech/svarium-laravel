@@ -806,7 +806,7 @@ class RegisterController extends Controller
             $nodes = [$registerNode];
 
             if (trim($rootLayoutRaw) !== '') {
-                $mainLayoutNode = $this->makeLayoutNode($rootLayoutRaw);
+                $mainLayoutNode = $this->makeLayoutNode($rootLayoutRaw, $pageProps);
                 $this->injectRegisterNodeIntoLayoutSlot($mainLayoutNode, $rootSlot, $registerNode);
                 $extractedNodes = $this->extractLayoutTargetNodes($mainLayoutNode, $rootSlot);
 
@@ -816,7 +816,7 @@ class RegisterController extends Controller
             }
 
             if ($wrapperLayoutRaw !== '') {
-                $wrapperNode = $this->makeLayoutNode($wrapperLayoutRaw);
+                $wrapperNode = $this->makeLayoutNode($wrapperLayoutRaw, $pageProps);
                 $this->attachNodesToWrapper($wrapperNode, $nodes, $wrapperSlot);
                 $nodes = [$wrapperNode];
             }
@@ -824,7 +824,7 @@ class RegisterController extends Controller
             return $this->applyWrapDefinitions($nodes, $pageProps['wrap'] ?? null);
         }
 
-        $rootNode = $this->makeLayoutNode($rootLayoutRaw);
+        $rootNode = $this->makeLayoutNode($rootLayoutRaw, $pageProps);
 
         if ($wrapperLayoutRaw === '' && $this->layoutTargetHasContent($rootNode, $rootSlot)) {
             $this->injectRegisterNodeIntoLayoutSlot($rootNode, $rootSlot, $registerNode);
@@ -832,7 +832,7 @@ class RegisterController extends Controller
         }
 
         if ($wrapperLayoutRaw !== '') {
-            $wrapperNode = $this->makeLayoutNode($wrapperLayoutRaw);
+            $wrapperNode = $this->makeLayoutNode($wrapperLayoutRaw, $pageProps);
             $this->attachNodeToLayout($wrapperNode, $registerNode, $wrapperSlot);
             $this->attachNodeToLayout($rootNode, $wrapperNode, $rootSlot);
         } else {
@@ -935,17 +935,24 @@ class RegisterController extends Controller
         return $normalized;
     }
 
-    protected function makeLayoutNode(string $layout): array
+    protected function makeLayoutNode(string $layout, array $pageProps = []): array
     {
         $componentName = $this->resolveLayoutComponentName($layout);
+        $layoutProps = $this->extractLayoutPropsFromPageProps($pageProps);
 
         if ($layout !== '' && str_contains($layout, '\\') && class_exists($layout)) {
             $instance = app($layout);
 
             if ($instance instanceof Component) {
+                foreach ($layoutProps as $key => $value) {
+                    $instance->prop($key, $value);
+                }
+
                 $node = $instance->toArray();
                 $node['type'] = $node['type'] ?? $componentName;
-                $node['props'] = is_array($node['props'] ?? null) ? $node['props'] : [];
+                $node['props'] = is_array($node['props'] ?? null)
+                    ? [...$node['props'], ...$layoutProps]
+                    : $layoutProps;
                 $node['children'] = is_array($node['children'] ?? null) ? $node['children'] : [];
                 $node['slots'] = is_array($node['slots'] ?? null) ? $node['slots'] : [];
 
@@ -955,10 +962,25 @@ class RegisterController extends Controller
 
         return [
             'type' => $componentName,
-            'props' => [],
+            'props' => $layoutProps,
             'children' => [],
             'slots' => [],
         ];
+    }
+
+    protected function extractLayoutPropsFromPageProps(array $pageProps): array
+    {
+        $result = [];
+
+        if (isset($pageProps['title']) && is_string($pageProps['title']) && trim($pageProps['title']) !== '') {
+            $result['title'] = trim($pageProps['title']);
+        }
+
+        if (isset($pageProps['subtitle']) && is_string($pageProps['subtitle']) && trim($pageProps['subtitle']) !== '') {
+            $result['subtitle'] = trim($pageProps['subtitle']);
+        }
+
+        return $result;
     }
 
     protected function attachNodeToLayout(array &$layoutNode, array $childNode, string $slot): void

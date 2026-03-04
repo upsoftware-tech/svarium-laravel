@@ -2,6 +2,8 @@
 
 namespace Upsoftware\Svarium\UI\Components;
 
+use ReflectionMethod;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\UI\Component;
 use Upsoftware\Svarium\UI\Concerns\HasValidation;
 
@@ -19,6 +21,7 @@ abstract class FieldComponent extends Component
 
         if ($name) {
             $this->props['name'] = $name;
+            $this->applyRegisteredAttributes($name);
         }
     }
 
@@ -27,7 +30,7 @@ abstract class FieldComponent extends Component
         return new static($name);
     }
 
-    public function __call(string $method, array $arguments)
+    public function __call(string $method, array $arguments): mixed
     {
         if (str_contains($method, '_')) {
 
@@ -38,9 +41,7 @@ abstract class FieldComponent extends Component
             }
         }
 
-        throw new \BadMethodCallException(
-            "Method {$method} does not exist on ".static::class
-        );
+        return parent::__call($method, $arguments);
     }
 
     public function value(mixed $value): static
@@ -75,5 +76,75 @@ abstract class FieldComponent extends Component
         }
 
         return $array;
+    }
+
+    protected function applyRegisteredAttributes(string $name): void
+    {
+        $attributes = app(FieldAttributesRegistry::class)->input($name);
+
+        foreach ($attributes as $attribute => $value) {
+            $this->applyRegisteredAttribute((string) $attribute, $value);
+        }
+    }
+
+    protected function applyRegisteredAttribute(string $attribute, mixed $value): void
+    {
+        $attribute = trim($attribute);
+
+        if ($attribute === '' || $attribute === 'name') {
+            return;
+        }
+
+        $method = $attribute;
+
+        if (! method_exists($this, $method) && str_contains($method, '_')) {
+            $method = lcfirst(str_replace(' ', '', ucwords(str_replace('_', ' ', $method))));
+        }
+
+        if (! method_exists($this, $method)) {
+            $this->prop($attribute, $value);
+            return;
+        }
+
+        $reflection = new ReflectionMethod($this, $method);
+        $required = $reflection->getNumberOfRequiredParameters();
+
+        if (is_bool($value) && $required === 0) {
+            if ($value) {
+                $this->{$method}();
+            }
+
+            return;
+        }
+
+        if (is_array($value) && ! $this->isAssoc($value)) {
+            $parameters = $reflection->getParameters();
+            $isVariadic = isset($parameters[0]) && $parameters[0]->isVariadic();
+            $requiredCount = $reflection->getNumberOfRequiredParameters();
+
+            if ($isVariadic || $requiredCount > 1) {
+                $this->{$method}(...$value);
+            } else {
+                $this->{$method}($value);
+            }
+
+            return;
+        }
+
+        if ($required === 0 && $value === null) {
+            $this->{$method}();
+            return;
+        }
+
+        $this->{$method}($value);
+    }
+
+    protected function isAssoc(array $value): bool
+    {
+        if ($value === []) {
+            return false;
+        }
+
+        return array_keys($value) !== range(0, count($value) - 1);
     }
 }

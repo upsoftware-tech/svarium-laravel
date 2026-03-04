@@ -16,11 +16,14 @@ use Upsoftware\Svarium\Bundles\BundleRegistry;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Http\Middleware\AuthenticateMiddleware;
 use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
+use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
+use Upsoftware\Svarium\Http\Middleware\ResolveDomainContext;
 use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Modules\ActivationRegistry;
 use Upsoftware\Svarium\Modules\DependencyResolver;
 use Upsoftware\Svarium\Modules\ModuleRegistry;
 use Upsoftware\Svarium\Panel\BindingRegistry;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Panel\OperationRegistry;
 use Upsoftware\Svarium\Panel\Panel;
 use Upsoftware\Svarium\Panel\PanelRegistry;
@@ -80,6 +83,7 @@ class SvariumServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(BindingRegistry::class);
+        $this->app->singleton(FieldAttributesRegistry::class);
 
         $this->registerHelpers();
     }
@@ -119,6 +123,13 @@ class SvariumServiceProvider extends ServiceProvider
         ], 'upsoftware');
 
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+
+        if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
+            $tenantsMigrationsPath = __DIR__.'/../database/migrations/tenants';
+            $this->loadMigrationsFrom(is_dir($tenantsMigrationsPath)
+                ? $tenantsMigrationsPath
+                : __DIR__.'/../database/migrations/tenancy');
+        }
 
         /*
         |-----------------------------
@@ -216,7 +227,7 @@ class SvariumServiceProvider extends ServiceProvider
 
         /*
         |-----------------------------
-        | Fallback router Svarium
+        | Catch-all router Svarium (must be last)
         |-----------------------------
         */
         $this->app->booted(function (): void {
@@ -226,8 +237,15 @@ class SvariumServiceProvider extends ServiceProvider
                 $fallbackMiddleware[] = InitializeTenancy::class;
             }
 
+            $fallbackMiddleware[] = LocaleMiddleware::class;
+
+            if (config('upsoftware.tenancy.domains.enabled', true)) {
+                $fallbackMiddleware[] = ResolveDomainContext::class;
+            }
+
             Route::middleware($fallbackMiddleware)->group(function (): void {
-                Route::fallback(SvariumHttpKernel::class);
+                Route::any('{path?}', SvariumHttpKernel::class)
+                    ->where('path', '.*');
             });
         });
 

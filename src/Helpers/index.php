@@ -115,6 +115,49 @@ if (! function_exists('tenant')) {
     }
 }
 
+if (! function_exists('tenant_domain')) {
+    function tenant_domain(?string $key = null, mixed $default = null): mixed
+    {
+        $domain = app(\Upsoftware\Svarium\Tenancy\TenancyManager::class)->domain();
+        if ($domain === null) {
+            $domain = request()?->attributes?->get('svarium.domain');
+        }
+
+        if ($key === null) {
+            return $domain;
+        }
+
+        if ($domain === null) {
+            return $default;
+        }
+
+        return data_get($domain, $key, $default);
+    }
+}
+
+if (! function_exists('tenant_owner')) {
+    function tenant_owner(?string $key = null, mixed $default = null): mixed
+    {
+        $tenant = tenant();
+
+        if (! $tenant || ! method_exists($tenant, 'ownerEntity')) {
+            return $default;
+        }
+
+        $owner = $tenant->ownerEntity();
+
+        if ($key === null) {
+            return $owner ?? $default;
+        }
+
+        if ($owner === null) {
+            return $default;
+        }
+
+        return data_get($owner, $key, $default);
+    }
+}
+
 function device(): array {
     $agent = new Agent();
     $array = [];
@@ -196,7 +239,72 @@ if (! function_exists('module_route')) {
         string|int|null $id = null,
         ?string $panel = null
     ): string {
-        $panelSegment = trim((string) ($panel ?? config('upsoftware.panel.name', 'admin')), '/');
+        $panelSegment = '';
+        $registry = app(\Upsoftware\Svarium\Panel\PanelRegistry::class);
+        $panels = $registry->all();
+
+        $resolvePanelFromPath = static function (array $availablePanels): ?\Upsoftware\Svarium\Panel\Panel {
+            $path = trim((string) request()->path(), '/');
+            $firstSegment = explode('/', $path)[0] ?? null;
+
+            foreach ($availablePanels as $candidate) {
+                if (! $candidate instanceof \Upsoftware\Svarium\Panel\Panel) {
+                    continue;
+                }
+
+                if ($candidate->prefix !== null && trim($candidate->prefix, '/') === (string) $firstSegment) {
+                    return $candidate;
+                }
+            }
+
+            return null;
+        };
+
+        $resolvedPanel = null;
+
+        if ($panel !== null) {
+            $panelName = trim((string) $panel);
+            if ($panelName !== '') {
+                $resolvedPanel = $registry->get($panelName);
+
+                if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+                    $panelSegment = trim($panelName, '/');
+                }
+            }
+        }
+
+        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            $resolvedPanel = $resolvePanelFromPath($panels);
+        }
+
+        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            $noPrefixPanels = array_values(array_filter(
+                $panels,
+                fn ($candidate) => $candidate instanceof \Upsoftware\Svarium\Panel\Panel && $candidate->prefix === null
+            ));
+
+            if (count($noPrefixPanels) === 1) {
+                $resolvedPanel = $noPrefixPanels[0];
+            }
+        }
+
+        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            $configuredName = trim((string) config('upsoftware.panel.name', ''));
+
+            if ($configuredName !== '') {
+                $configuredPanel = $registry->get($configuredName);
+                if ($configuredPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+                    $resolvedPanel = $configuredPanel;
+                }
+            }
+        }
+
+        if ($resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            $panelSegment = trim((string) $resolvedPanel->prefix, '/');
+        } elseif ($panelSegment === '') {
+            $panelSegment = trim((string) config('upsoftware.panel.prefix', ''), '/');
+        }
+
         $moduleName = trim($module);
 
         if ($moduleName === '') {
@@ -250,6 +358,72 @@ if (! function_exists('module_helper')) {
         ?string $panel = null
     ): string {
         return module_route($module, $action, $id, $panel);
+    }
+}
+
+if (! function_exists('panel_route_name')) {
+    /**
+     * Resolve panel route name with configured prefixes.
+     *
+     * Examples:
+     * - panel_route_name('login') => "panel.auth.login"
+     * - panel_route_name('auth.login') => "panel.auth.login"
+     * - panel_route_name('panel.auth.login') => "panel.auth.login"
+     */
+    function panel_route_name(string $name): string
+    {
+        $value = trim($name);
+        $authPrefix = trim((string) config('upsoftware.panel.route_prefix', 'panel.auth'), '.');
+
+        if ($value === '') {
+            return $authPrefix;
+        }
+
+        if (str_starts_with($value, 'panel.')) {
+            return $value;
+        }
+
+        if (str_starts_with($value, 'auth.')) {
+            return $authPrefix.'.'.substr($value, 5);
+        }
+
+        return $authPrefix.'.'.ltrim($value, '.');
+    }
+}
+
+if (! function_exists('route_panel')) {
+    /**
+     * Build URL for panel auth routes.
+     *
+     * Examples:
+     * - route_panel('login') => route('panel.auth.login')
+     * - route_panel('register') => route('panel.auth.register')
+     */
+    function route_panel(
+        string $name,
+        array $parameters = [],
+        bool $absolute = true
+    ): string {
+        return route(panel_route_name($name), $parameters, $absolute);
+    }
+}
+
+if (! function_exists('panel_href')) {
+    /**
+     * Build panel URL path with panel prefix resolution.
+     *
+     * Examples:
+     * - panel_href('auth/login') => "/admin/auth/login" or "/auth/login" for noPrefix()
+     * - panel_href('pages') => "/admin/pages"
+     */
+    function panel_href(string $path = '', ?string $panel = null): string
+    {
+        $normalizedPath = trim($path, '/');
+        $panelBase = trim(module_route('', null, null, $panel), '/');
+
+        $fullPath = trim(implode('/', array_filter([$panelBase, $normalizedPath])), '/');
+
+        return '/'.$fullPath;
     }
 }
 

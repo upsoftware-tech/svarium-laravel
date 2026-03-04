@@ -3,6 +3,8 @@
 namespace Upsoftware\Svarium\UI\Components\Table;
 
 use Illuminate\Support\Carbon;
+use ReflectionMethod;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\UI\Appearance;
 use Upsoftware\Svarium\UI\Component;
 use Upsoftware\Svarium\UI\Concerns\Props\HasDefault;
@@ -57,6 +59,7 @@ class Column extends Component
 
         if ($name !== null && trim($name) !== '') {
             $instance->key = trim($name);
+            $instance->applyRegisteredAttributes($instance->key);
         }
 
         return $instance;
@@ -794,5 +797,75 @@ class Column extends Component
             'filter' => $this->toFilterDefinition(),
             'footer' => $this->footerDefinition,
         ];
+    }
+
+    protected function applyRegisteredAttributes(string $name): void
+    {
+        $attributes = app(FieldAttributesRegistry::class)->column($name);
+
+        foreach ($attributes as $attribute => $value) {
+            $this->applyRegisteredAttribute((string) $attribute, $value);
+        }
+    }
+
+    protected function applyRegisteredAttribute(string $attribute, mixed $value): void
+    {
+        $attribute = trim($attribute);
+
+        if ($attribute === '' || $attribute === 'key') {
+            return;
+        }
+
+        $method = $attribute;
+
+        if (! method_exists($this, $method) && str_contains($method, '_')) {
+            $method = lcfirst(str_replace(' ', '', ucwords(str_replace('_', ' ', $method))));
+        }
+
+        if (! method_exists($this, $method)) {
+            $this->prop($attribute, $value);
+            return;
+        }
+
+        $reflection = new ReflectionMethod($this, $method);
+        $required = $reflection->getNumberOfRequiredParameters();
+
+        if (is_bool($value) && $required === 0) {
+            if ($value) {
+                $this->{$method}();
+            }
+
+            return;
+        }
+
+        if (is_array($value) && ! $this->isAssoc($value)) {
+            $parameters = $reflection->getParameters();
+            $isVariadic = isset($parameters[0]) && $parameters[0]->isVariadic();
+            $requiredCount = $reflection->getNumberOfRequiredParameters();
+
+            if ($isVariadic || $requiredCount > 1) {
+                $this->{$method}(...$value);
+            } else {
+                $this->{$method}($value);
+            }
+
+            return;
+        }
+
+        if ($required === 0 && $value === null) {
+            $this->{$method}();
+            return;
+        }
+
+        $this->{$method}($value);
+    }
+
+    protected function isAssoc(array $value): bool
+    {
+        if ($value === []) {
+            return false;
+        }
+
+        return array_keys($value) !== range(0, count($value) - 1);
     }
 }

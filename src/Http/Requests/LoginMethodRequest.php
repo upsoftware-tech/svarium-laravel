@@ -23,7 +23,7 @@ class LoginMethodRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'method' => ['required'],
+            'method' => ['required', 'string', Rule::in(['app', 'sms', 'email'])],
         ];
     }
 

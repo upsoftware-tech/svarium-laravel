@@ -6,8 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
+use Upsoftware\Svarium\Models\Domain;
 use Upsoftware\Svarium\Models\Tenant;
-use Upsoftware\Svarium\Models\TenantDomain;
 
 class MakeTenantCommand extends CoreCommand
 {
@@ -28,7 +28,7 @@ class MakeTenantCommand extends CoreCommand
     {
         try {
             $tenantModel = $this->resolveModel('upsoftware.models.tenant', Tenant::class);
-            $tenantDomainModel = $this->resolveModel('upsoftware.models.tenant_domain', TenantDomain::class);
+            $tenantDomainModel = $this->resolveDomainModel();
 
             $name = $this->resolveTenantName();
             $domain = $this->resolveTenantDomain();
@@ -81,6 +81,28 @@ class MakeTenantCommand extends CoreCommand
         return in_array($mode, ['column', 'database'], true)
             ? $mode
             : 'column';
+    }
+
+    /**
+     * @return class-string<Model>
+     */
+    protected function resolveDomainModel(): string
+    {
+        $domainModel = config('upsoftware.models.domain');
+
+        if (! is_string($domainModel) || ! class_exists($domainModel)) {
+            $domainModel = config('upsoftware.models.tenant_domain', Domain::class);
+        }
+
+        if (! is_string($domainModel) || ! class_exists($domainModel)) {
+            $domainModel = Domain::class;
+        }
+
+        if (! is_subclass_of($domainModel, Model::class)) {
+            throw new RuntimeException("Model domeny [{$domainModel}] nie dziedziczy po Eloquent Model.");
+        }
+
+        return $domainModel;
     }
 
     /**

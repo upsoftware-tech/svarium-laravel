@@ -116,6 +116,7 @@ class TableBuilder
     protected bool $tabsFromViews = false;
 
     protected array $columnObjects = [];
+    protected array $columnAttributes = [];
 
     protected array $footerTotalAggregatesCache = [];
 
@@ -251,8 +252,27 @@ class TableBuilder
     public function columns(array $columns): static
     {
         $this->columnObjects = $columns;
+        $this->applyConfiguredColumnAttributes();
 
         return $this;
+    }
+
+    public function columnAttributes(array $attributes): static
+    {
+        $this->columnAttributes = $attributes;
+        $this->applyConfiguredColumnAttributes();
+
+        return $this;
+    }
+
+    public function columnsAttributes(array $attributes): static
+    {
+        return $this->columnAttributes($attributes);
+    }
+
+    public function attrs(array $attributes): static
+    {
+        return $this->columnAttributes($attributes);
     }
 
     public function filterColumns(callable $callback): static
@@ -2687,6 +2707,8 @@ class TableBuilder
 
     public function build(LengthAwarePaginator $paginator): Table
     {
+        $this->applyConfiguredColumnAttributes();
+
         $actionDisplay = $this->actionDisplay ?? config('svarium.table.action_display', 'inline');
         $bulkMode = $this->resolveBulkMode();
         $numberingMode = $this->resolveNumberingMode();
@@ -2766,5 +2788,150 @@ class TableBuilder
         }
 
         return $table;
+    }
+
+    protected function applyConfiguredColumnAttributes(): void
+    {
+        if ($this->columnAttributes === []) {
+            return;
+        }
+
+        foreach ($this->columnObjects as $index => $column) {
+            $key = null;
+
+            if ($column instanceof Column) {
+                $key = $column->getKey();
+            } elseif (is_array($column)) {
+                $key = isset($column['key']) && is_string($column['key'])
+                    ? trim($column['key'])
+                    : (isset($column['field']) && is_string($column['field']) ? trim($column['field']) : null);
+            }
+
+            if (! is_string($key) || $key === '' || ! array_key_exists($key, $this->columnAttributes)) {
+                continue;
+            }
+
+            $attributes = $this->columnAttributes[$key];
+
+            if (is_string($attributes)) {
+                $attributes = ['label' => $attributes];
+            }
+
+            if (! is_array($attributes)) {
+                continue;
+            }
+
+            if ($column instanceof Column) {
+                $this->applyAttributesToColumnObject($column, $attributes);
+                continue;
+            }
+
+            if (is_array($column)) {
+                $this->columnObjects[$index] = [
+                    ...$attributes,
+                    ...$column,
+                ];
+            }
+        }
+    }
+
+    protected function applyAttributesToColumnObject(Column $column, array $attributes): void
+    {
+        foreach ($attributes as $name => $value) {
+            if (! is_string($name) || trim($name) === '') {
+                continue;
+            }
+
+            $attribute = trim($name);
+
+            switch ($attribute) {
+                case 'label':
+                    if (is_string($value) && trim($value) !== '') {
+                        $column->label($value);
+                    }
+                    break;
+
+                case 'sortable':
+                    $column->sortable((bool) $value);
+                    break;
+
+                case 'searchable':
+                    $column->searchable((bool) $value);
+                    break;
+
+                case 'selected':
+                    $column->selected((bool) $value);
+                    break;
+
+                case 'visible':
+                    if ($value === false) {
+                        $column->hide();
+                    }
+                    break;
+
+                case 'filter':
+                case 'filterable':
+                    if (is_bool($value)) {
+                        $column->filter($value);
+                    } elseif (is_array($value)) {
+                        $column->filter($value);
+                    } elseif (is_string($value)) {
+                        $column->filter($value);
+                    }
+                    break;
+
+                case 'operators':
+                    if (is_array($value)) {
+                        $column->operators($value);
+                    }
+                    break;
+
+                case 'type':
+                    if (is_string($value) && trim($value) !== '') {
+                        $column->type($value);
+                    }
+                    break;
+
+                case 'footer':
+                    if (is_string($value)) {
+                        $column->footer($value);
+                    }
+                    break;
+
+                case 'appearanceHeader':
+                case 'headerAppearance':
+                    if (is_array($value) || $value instanceof Appearance) {
+                        $column->appearanceHeader($value);
+                    }
+                    break;
+
+                case 'appearanceSearch':
+                case 'searchAppearance':
+                    if (is_array($value) || $value instanceof Appearance) {
+                        $column->appearanceSearch($value);
+                    }
+                    break;
+
+                case 'appearanceFooter':
+                case 'footerAppearance':
+                    if (is_array($value) || $value instanceof Appearance) {
+                        $column->appearanceFooter($value);
+                    }
+                    break;
+
+                case 'appearance':
+                case 'bodyAppearance':
+                    if (is_string($value)) {
+                        $column->appearance($value);
+                    } elseif (is_array($value) || $value instanceof Appearance) {
+                        $column->bodyAppearance($value);
+                    }
+                    break;
+
+                default:
+                    $column->prop($attribute, $value);
+                    break;
+            }
+        }
     }
 }

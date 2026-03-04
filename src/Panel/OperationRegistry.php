@@ -72,8 +72,12 @@ class OperationRegistry
             $this->registerOperationsFromPath($module->path('Panel'));
         }
 
-        // Backward compatible path for non-module operations.
+        // Preferred path for non-module operations.
+        $this->registerOperationsFromPath(svarium_path('Operations'));
+        // Backward compatible path for existing projects.
         $this->registerOperationsFromPath(svarium_path('Panel/Operations'));
+        // Built-in operations provided by the package.
+        $this->registerOperationsFromPath(__DIR__.'/Operations');
     }
 
     protected function registerOperationsFromPath(string $path): void
@@ -136,6 +140,14 @@ class OperationRegistry
         $panels = $this->readStaticProperty($class, 'panels');
         $normalizedPanels = $this->normalizePanels($panels);
 
+        if (in_array('*', $normalizedPanels, true)) {
+            $panelNames = array_keys(app(PanelRegistry::class)->all());
+
+            if ($panelNames !== []) {
+                return $panelNames;
+            }
+        }
+
         return $normalizedPanels !== []
             ? $normalizedPanels
             : ['admin'];
@@ -190,6 +202,22 @@ class OperationRegistry
 
     protected function classFromFile(string $path): string
     {
+        $contents = (string) File::get($path);
+
+        $namespace = null;
+        if (preg_match('/^\s*namespace\s+([^;]+);/m', $contents, $namespaceMatch)) {
+            $namespace = trim((string) ($namespaceMatch[1] ?? ''));
+        }
+
+        $class = null;
+        if (preg_match('/^\s*(?:final\s+|abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)/m', $contents, $classMatch)) {
+            $class = trim((string) ($classMatch[1] ?? ''));
+        }
+
+        if ($namespace !== null && $namespace !== '' && $class !== null && $class !== '') {
+            return $namespace.'\\'.$class;
+        }
+
         $relative = str_replace(app_path().DIRECTORY_SEPARATOR, '', $path);
         $relative = str_replace(['/', '.php'], ['\\', ''], $relative);
 

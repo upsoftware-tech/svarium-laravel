@@ -4,15 +4,22 @@ use Illuminate\Support\Facades\Route;
 use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;
 use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
+use Upsoftware\Svarium\Http\Middleware\ResolveDomainContext;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 
 $middleware = ['web'];
-$middleware[] = LocaleMiddleware::class;
-$middleware[] = HandleInertiaRequests::class;
 
 if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
     $middleware[] = InitializeTenancy::class;
 }
+
+$middleware[] = LocaleMiddleware::class;
+
+if (config('upsoftware.tenancy.domains.enabled', true)) {
+    $middleware[] = ResolveDomainContext::class;
+}
+
+$middleware[] = HandleInertiaRequests::class;
 
 $resourceDir = svarium_resources();
 if (File::exists($resourceDir)) {
@@ -70,4 +77,3 @@ if (File::exists($resourceDir)) {
         }
     }
 }
-

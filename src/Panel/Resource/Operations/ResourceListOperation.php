@@ -7,6 +7,7 @@ use Upsoftware\Svarium\Http\OperationResult;
 use Upsoftware\Svarium\Http\RedirectResult;
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Panel\Table\BulkAction;
 use Upsoftware\Svarium\Panel\Table\TableBuilder;
 
@@ -43,7 +44,17 @@ class ResourceListOperation extends Operation
     {
         $resource = $this->resource();
         $this->applyTitleIfEmpty($resource->listTitle($context));
-        $builder = $resource->table();
+        $fieldRegistry = app(FieldAttributesRegistry::class);
+        $fieldRegistry->setDefinitions($resource->fields());
+        $columnAttributes = $fieldRegistry->columnAttributes();
+
+        try {
+            $builder = $resource->table();
+        } finally {
+            $fieldRegistry->clear();
+        }
+
+        $builder->columnAttributes($columnAttributes);
 
         if (method_exists($resource, 'canPreview') && ! $resource->canPreview($context)) {
             $builder->disableDefaultActions(['view']);
@@ -112,7 +123,7 @@ class ResourceListOperation extends Operation
 
         if (! isset($actionsByKey[$bulkActionKey])) {
             return RedirectResult::to($this->listUrl($context))
-                ->error(__('Nieznana akcja masowa.'));
+                ->error(__('Unknown bulk action.'));
         }
 
         $selection = $this->normalizeSelection(
@@ -121,19 +132,19 @@ class ResourceListOperation extends Operation
 
         if ($selection === []) {
             return RedirectResult::to($this->listUrl($context))
-                ->warning(__('Zaznacz co najmniej jeden rekord.'));
+                ->warning(__('Select at least one record.'));
         }
 
         $resource = $this->resource();
 
         if ($bulkActionKey === 'delete' && method_exists($resource, 'canDelete') && ! $resource->canDelete($context)) {
             return RedirectResult::to($this->listUrl($context))
-                ->error(__('Brak uprawnień do usuwania rekordów.'));
+                ->error(__('No permission to delete selected records.'));
         }
 
         if ($bulkActionKey === 'duplicate' && method_exists($resource, 'canDuplicate') && ! $resource->canDuplicate($context)) {
             return RedirectResult::to($this->listUrl($context))
-                ->error(__('Brak uprawnień do duplikowania rekordów.'));
+                ->error(__('No permission to duplicate selected records.'));
         }
 
         $action = $actionsByKey[$bulkActionKey];

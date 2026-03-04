@@ -6,12 +6,13 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Throwable;
+use Upsoftware\Svarium\Models\Domain;
 use Upsoftware\Svarium\Models\Tenant;
-use Upsoftware\Svarium\Models\TenantDomain;
 
 class TenancyManager
 {
     protected ?Model $tenant = null;
+    protected ?Model $domain = null;
 
     protected ?string $originalConnection = null;
 
@@ -39,9 +40,19 @@ class TenancyManager
         return $this->mode() === 'column';
     }
 
+    public function domainsEnabled(): bool
+    {
+        return (bool) config('upsoftware.tenancy.domains.enabled', true);
+    }
+
     public function tenant(): ?Model
     {
         return $this->tenant;
+    }
+
+    public function domain(): ?Model
+    {
+        return $this->domain;
     }
 
     public function initialize(Request $request): void
@@ -54,7 +65,15 @@ class TenancyManager
 
         $host = $this->normalizeHost((string) $request->getHost());
 
-        if ($host === '' || $this->isCentralDomain($host)) {
+        if ($host === '') {
+            return;
+        }
+
+        if (! $this->domainsEnabled()) {
+            return;
+        }
+
+        if ($this->isCentralDomain($host)) {
             return;
         }
 
@@ -74,6 +93,7 @@ class TenancyManager
     public function terminate(): void
     {
         $this->tenant = null;
+        $this->domain = null;
 
         if ($this->originalConnection !== null) {
             DB::setDefaultConnection($this->originalConnection);
@@ -83,6 +103,11 @@ class TenancyManager
 
     protected function resolveTenantByHost(string $host): ?Model
     {
+        if (! $this->domainsEnabled()) {
+            return null;
+        }
+
+        $this->domain = null;
         $domainModelClass = $this->resolveDomainModelClass();
 
         if ($domainModelClass !== null) {
@@ -94,6 +119,11 @@ class TenancyManager
                     ->first();
 
                 if ($domain instanceof Model) {
+                    if ($domain->getAttribute('status') !== null && ! (bool) $domain->getAttribute('status')) {
+                        return null;
+                    }
+
+                    $this->domain = $domain;
                     $tenant = $domain->getAttribute('tenant');
 
                     if ($tenant instanceof Model) {
@@ -189,7 +219,15 @@ class TenancyManager
 
     protected function resolveDomainModelClass(): ?string
     {
-        $domainModel = config('upsoftware.models.tenant_domain', TenantDomain::class);
+        $domainModel = config('upsoftware.models.domain');
+
+        if (! is_string($domainModel) || ! class_exists($domainModel)) {
+            $domainModel = config('upsoftware.models.tenant_domain');
+        }
+
+        if (! is_string($domainModel) || ! class_exists($domainModel)) {
+            $domainModel = Domain::class;
+        }
 
         return is_string($domainModel) && class_exists($domainModel)
             ? $domainModel

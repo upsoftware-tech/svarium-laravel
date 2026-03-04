@@ -8,13 +8,15 @@ class MakeTenantMigrationCommand extends CoreCommand
 {
     use InteractsWithTenantTenancy;
 
-    protected $signature = 'svarium:make.migrate
+    protected $signature = 'svarium:tenant.migration
         {name : Migration name}
         {--create= : The table to be created}
         {--table= : The table to migrate}
-        {--path= : Override tenant migrations path}';
+        {--path= : Override tenant migrations path}
+        {--fullpath : Output the full path of the migration}';
 
     protected $description = 'Create tenant migration in configured tenant migrations directory';
+    protected $aliases = ['svarium:make.migrate'];
 
     public function handle(): int
     {
@@ -26,7 +28,7 @@ class MakeTenantMigrationCommand extends CoreCommand
         }
 
         $pathOption = $this->option('path');
-        $paths = $this->tenantMigrationsPaths(
+        $paths = $this->userTenantMigrationsPaths(
             is_string($pathOption) && trim($pathOption) !== ''
                 ? [trim($pathOption)]
                 : []
@@ -49,6 +51,10 @@ class MakeTenantMigrationCommand extends CoreCommand
         $table = $this->option('table');
         if (is_string($table) && trim($table) !== '') {
             $params['--table'] = trim($table);
+        }
+
+        if ((bool) $this->option('fullpath')) {
+            $params['--fullpath'] = true;
         }
 
         $exitCode = $this->call('make:migration', $params);

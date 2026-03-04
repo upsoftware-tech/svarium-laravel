@@ -4,6 +4,7 @@ namespace Upsoftware\Svarium\Panel\Resource\Operations;
 
 use Illuminate\Database\Eloquent\Model;
 use Upsoftware\Svarium\Enums\ExecutionMode;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
@@ -45,11 +46,17 @@ class ResourcePreviewOperation extends Operation
 
         $resource = $this->resource();
         $this->applyTitleIfEmpty($resource->previewTitle($context, $record));
+        $fieldRegistry = app(FieldAttributesRegistry::class);
+        $fieldRegistry->setDefinitions($resource->fields());
 
-        $schema = $resource->previewForm($record);
-        $schema = is_array($schema) ? $schema : [$schema];
+        try {
+            $schema = $resource->previewForm($record);
+            $schema = is_array($schema) ? $schema : [$schema];
 
-        return $this->markReadonly($schema);
+            return $this->markReadonly($schema);
+        } finally {
+            $fieldRegistry->clear();
+        }
     }
 
     protected function markReadonly(array $components): array

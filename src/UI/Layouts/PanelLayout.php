@@ -9,7 +9,13 @@ class PanelLayout extends Component
     public function __construct()
     {
         $this->prop('layout', 'panel');
+        $this->define();
     }
+
+    /**
+     * Hook for declarative layout definitions without overriding constructor.
+     */
+    protected function define(): void {}
 
     public function body(Component|array|string|\Closure|null $c): static
     {

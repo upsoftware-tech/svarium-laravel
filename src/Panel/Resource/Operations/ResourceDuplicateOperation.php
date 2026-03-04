@@ -5,6 +5,7 @@ namespace Upsoftware\Svarium\Panel\Resource\Operations;
 use Illuminate\Database\Eloquent\Model;
 use Upsoftware\Svarium\Enums\ExecutionMode;
 use Upsoftware\Svarium\Http\RedirectResult;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
 
@@ -41,14 +42,20 @@ class ResourceDuplicateOperation extends Operation
     {
         $resource = $this->resource();
         $this->applyTitleIfEmpty($resource->duplicateTitle($context, $record));
+        $fieldRegistry = app(FieldAttributesRegistry::class);
+        $fieldRegistry->setDefinitions($resource->fields());
 
-        $clone = $record->replicate();
+        try {
+            $clone = $record->replicate();
 
-        if (method_exists($resource, 'duplicateForm')) {
-            return $resource->duplicateForm($clone);
+            if (method_exists($resource, 'duplicateForm')) {
+                return $resource->duplicateForm($clone);
+            }
+
+            return $resource->form($clone);
+        } finally {
+            $fieldRegistry->clear();
         }
-
-        return $resource->form($clone);
     }
 
     protected function applyTitleIfEmpty(string $title): void

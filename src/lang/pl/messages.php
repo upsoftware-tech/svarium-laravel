@@ -8,6 +8,7 @@ return [
     'Email message' => 'Wiadomość e-mail',
     'Email message to the registered email address' => 'Wiadomość e-mail do rejestrowanego adresu e-mail',
     'Invalid verification code' => 'Nieprawidłowy kod weryfikacyjny',
+    'Invalid verification method' => 'Nieprawidłowa metoda weryfikacji',
     'Invalid email address or password' => 'Nieprawidłowy adres e-mail lub hasło',
     'verification method' => 'metoda weryfikacji',
     'firstname' => 'imię',

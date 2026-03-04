@@ -3,33 +3,54 @@
 namespace Upsoftware\Svarium\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use Illuminate\Validation\ValidationException;
+use Throwable;
 use Upsoftware\Svarium\Http\Requests\LoginMethodRequest;
+use Upsoftware\Svarium\Services\Auth\AuthLoginService;
 
 class MethodController extends Controller
 {
-    public function getAvailableMethods(User $user)
+    public function __construct(protected AuthLoginService $authLoginService)
     {
-        return [
-            [
-                'id' => 'app',
-                'disabled' => $user->google2fa_secret ? false : true,
+    }
+
+    public function getAvailableMethods(mixed $user): array
+    {
+        if (! $this->authLoginService->isOtpGloballyEnabled()) {
+            return [];
+        }
+
+        $definitions = [
+            'app' => [
                 'label' => __('svarium::messages.Google Authenticator App'),
                 'description' => __('svarium::messages.The Google Authenticator app is available on all platforms, including iOS and Android'),
             ],
-            [
-                'id' => 'sms',
-                'disabled' => true,
+            'sms' => [
                 'label' => __('svarium::messages.SMS message'),
-                'description' => __('messages.SMS message to the registered phone number'),
+                'description' => __('svarium::messages.SMS message to the registered phone number'),
             ],
-            [
-                'id' => 'email',
-                'disabled' => false,
+            'email' => [
                 'label' => __('svarium::messages.Email message'),
                 'description' => __('svarium::messages.Email message to the registered email address'),
             ],
         ];
+
+        $methods = [];
+
+        foreach ($this->authLoginService->allowedOtpMethods() as $method) {
+            if (! isset($definitions[$method])) {
+                continue;
+            }
+
+            $methods[] = [
+                'id' => $method,
+                'disabled' => ! $this->authLoginService->isOtpMethodAvailableForUser($user, $method),
+                'label' => $definitions[$method]['label'],
+                'description' => $definitions[$method]['description'],
+            ];
+        }
+
+        return $methods;
     }
 
     public function init($type, $userAuth)
@@ -45,10 +66,29 @@ class MethodController extends Controller
     public function set(LoginMethodRequest $request, $type, $userAuth)
     {
         $userAuth = get_model('user_auth')::byHash($userAuth);
-        $methodName = 'send' . ucfirst($request->method);
-        if (method_exists($userAuth, $methodName)) {
-            $userAuth->{$methodName}($type);
+        $method = strtolower(trim((string) $request->method));
+        $availableMethods = array_values(array_map(
+            static fn (array $item): string => (string) ($item['id'] ?? ''),
+            array_filter($this->getAvailableMethods($userAuth->user), static fn (array $item): bool => ($item['disabled'] ?? true) === false)
+        ));
+
+        if ($method === '' || ! in_array($method, $availableMethods, true)) {
+            throw ValidationException::withMessages([
+                'method' => [__('svarium::messages.Invalid verification method')],
+            ]);
         }
+
+        $methodName = 'send' . ucfirst($method);
+        if (method_exists($userAuth, $methodName)) {
+            try {
+                $userAuth->{$methodName}($type);
+            } catch (Throwable) {
+                throw ValidationException::withMessages([
+                    'method' => [__('Selected verification method is not available.')],
+                ]);
+            }
+        }
+
         return redirect()->route('panel.auth.verification', ['type' => $type, 'userAuth' => $userAuth->hash]);
     }
 }

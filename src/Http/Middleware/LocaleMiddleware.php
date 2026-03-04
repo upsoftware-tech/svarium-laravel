@@ -9,7 +9,18 @@ class LocaleMiddleware
 {
     public function handle(Request $request, Closure $next)
     {
-        app()->setLocale(session()->has('locale') ? session()->get('locale') : app()->getLocale(),);
+        $requestedLocale = trim((string) $request->header(
+            'X-Svarium-Locale',
+            $request->query('_locale', (string) $request->input('_locale', ''))
+        ));
+
+        if ($requestedLocale !== '') {
+            session()->put('locale', $requestedLocale);
+            app()->setLocale($requestedLocale);
+        } else {
+            app()->setLocale(session()->has('locale') ? session()->get('locale') : app()->getLocale());
+        }
+
         return $next($request);
     }
 }

@@ -4,6 +4,7 @@ namespace Upsoftware\Svarium\Panel\Resource\Operations;
 
 use Upsoftware\Svarium\Enums\ExecutionMode;
 use Upsoftware\Svarium\Http\RedirectResult;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
 use Upsoftware\Svarium\Security\RecordIdentifier;
@@ -42,12 +43,18 @@ class ResourceCreateOperation extends Operation
         $context->setOperationType('create');
         $resource = $this->resource();
         $this->applyTitleIfEmpty($resource->createTitle($context));
+        $fieldRegistry = app(FieldAttributesRegistry::class);
+        $fieldRegistry->setDefinitions($resource->fields());
 
-        if (method_exists($resource, 'createForm')) {
-            return $resource->createForm();
+        try {
+            if (method_exists($resource, 'createForm')) {
+                return $resource->createForm();
+            }
+
+            return $resource->form(null);
+        } finally {
+            $fieldRegistry->clear();
         }
-
-        return $resource->form(null);
     }
 
     protected function applyTitleIfEmpty(string $title): void

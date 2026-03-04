@@ -9,8 +9,8 @@ use Upsoftware\Svarium\Http\ComponentResult;
 use Upsoftware\Svarium\Http\OperationResult;
 use Upsoftware\Svarium\Panel\Table\TableBuilder;
 use Upsoftware\Svarium\UI\Components\Button;
+use Upsoftware\Svarium\UI\Components\Block;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
-use Upsoftware\Svarium\UI\Components\Flex;
 use Upsoftware\Svarium\UI\Components\Form\Form;
 
 abstract class Operation
@@ -52,6 +52,16 @@ abstract class Operation
     }
 
     protected function formActions(): array
+    {
+        return [];
+    }
+
+    protected function layoutProps(PanelContext $context, ...$args): array
+    {
+        return [];
+    }
+
+    protected function layoutSlots(PanelContext $context, ...$args): array
     {
         return [];
     }
@@ -1037,7 +1047,7 @@ abstract class Operation
         }
 
         $result = new ComponentResult(
-            Flex::make()->content($schema),
+            Block::make()->content($schema),
             static::$layout
         );
 
@@ -1051,7 +1061,41 @@ abstract class Operation
             $result->meta('breadcrumbs', $this->call('breadcrumbs', $context, ...$args));
         }
 
+        $layoutProps = $this->layoutProps($context, ...$args);
+        if (is_array($layoutProps) && $layoutProps !== []) {
+            $result->layoutProps($layoutProps);
+        }
+
+        $layoutSlots = $this->layoutSlots($context, ...$args);
+        if (is_array($layoutSlots) && $layoutSlots !== []) {
+            $this->applyLayoutSlots($result, $layoutSlots);
+        }
+
         return $result;
+    }
+
+    protected function applyLayoutSlots(ComponentResult $result, array $slots): void
+    {
+        foreach ($slots as $slot => $content) {
+            if (! is_string($slot)) {
+                continue;
+            }
+
+            $slot = trim($slot);
+            if ($slot === '') {
+                continue;
+            }
+
+            $method = str_contains($slot, '_')
+                ? lcfirst(str_replace(' ', '', ucwords(str_replace('_', ' ', $slot))))
+                : $slot;
+
+            if (! method_exists($result, $method)) {
+                continue;
+            }
+
+            $result->{$method}($content);
+        }
     }
 
     protected function call(string $method, PanelContext $context, ...$routeArgs)

@@ -19,11 +19,40 @@ trait InteractsWithTenantTenancy
             : 'column';
     }
 
-    protected function tenantMigrationsPaths(array $override = []): array
+    protected function tenantMigrationsPaths(
+        array $override = [],
+        bool $includeSystem = true,
+        bool $includeUser = true
+    ): array
+    {
+        $paths = [];
+
+        if ($includeSystem) {
+            $systemPath = $this->packageTenantMigrationsPath();
+            if ($systemPath !== null) {
+                $paths[] = $systemPath;
+            }
+        }
+
+        if ($includeUser) {
+            foreach ($this->userTenantMigrationsPaths($override) as $path) {
+                if (! in_array($path, $paths, true)) {
+                    $paths[] = $path;
+                }
+            }
+        }
+
+        return $paths;
+    }
+
+    protected function userTenantMigrationsPaths(array $override = []): array
     {
         $paths = $override !== []
             ? $override
-            : (array) config('upsoftware.tenancy.paths.migrations', app_path('Svarium/Tenancy/Migrations'));
+            : (array) (
+                config('upsoftware.tenancy.paths.tenant_migrations')
+                ?? config('upsoftware.tenancy.paths.migrations', app_path('Svarium/Tenancy/Migrations'))
+            );
 
         $resolved = [];
 
@@ -46,11 +75,29 @@ trait InteractsWithTenantTenancy
         return $resolved;
     }
 
+    protected function packageTenantMigrationsPath(): ?string
+    {
+        $tenantsPath = realpath(__DIR__.'/../../../database/migrations/tenants');
+        if (is_string($tenantsPath) && is_dir($tenantsPath)) {
+            return $tenantsPath;
+        }
+
+        $tenancyPath = realpath(__DIR__.'/../../../database/migrations/tenancy');
+        if (is_string($tenancyPath) && is_dir($tenancyPath)) {
+            return $tenancyPath;
+        }
+
+        return null;
+    }
+
     protected function tenantSeedersPath(?string $override = null): string
     {
         $path = $override !== null && trim($override) !== ''
             ? $override
-            : (string) config('upsoftware.tenancy.paths.seeders', app_path('Svarium/Tenancy/Seeders'));
+            : (string) (
+                config('upsoftware.tenancy.paths.tenant_seeders')
+                ?? config('upsoftware.tenancy.paths.seeders', app_path('Svarium/Tenancy/Seeders'))
+            );
 
         return $this->normalizeAbsolutePath($path);
     }

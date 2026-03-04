@@ -5,6 +5,7 @@ namespace Upsoftware\Svarium\Console\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Upsoftware\Svarium\Traits\HasTailwindColor;
+use Winter\LaravelConfigWriter\ArrayFile;
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\text;
@@ -85,14 +86,32 @@ class LayoutCommand extends Command
         }
 
         $setting = $this->settingModel::getSettingGlobal('layout');
+        $configLogo = (array) config('upsoftware.logo', []);
+        $settingLogo = (array) ($setting['logo'] ?? []);
 
         $layout['theme']['enabled'] = confirm('Włączyć tryb jasny i ciemny?', $setting['theme']['enabled'] ?? false, 'Tak', 'Nie');
 
-        $layout['logo']['default']['light'] = text('Ściezka do logo (dla trybu jasnego)', '', $setting['logo']['default']['light'] ?? '');
-        $layout['logo']['default']['dark'] = text('Ściezka do logo (dla trybu ciemnego)', '', $setting['logo']['default']['dark'] ?? $layout['logo']['default']['light']);
+        $layout['logo']['default']['light'] = text(
+            'Ścieżka do logo (dla trybu jasnego)',
+            '',
+            $this->logoValue($settingLogo, $configLogo, 'default', 'light')
+        );
+        $layout['logo']['default']['dark'] = text(
+            'Ścieżka do logo (dla trybu ciemnego)',
+            '',
+            $this->logoValue($settingLogo, $configLogo, 'default', 'dark', $layout['logo']['default']['light'])
+        );
 
-        $layout['logo']['small']['light'] = text('Ściezka do logo pomniejszonego (dla trybu jasnego)', '', $setting['logo']['small']['light'] ?? $layout['logo']['default']['light']);
-        $layout['logo']['small']['dark'] = text('Ściezka do logo pomniejszonego (dla trybu ciemnego)', '', $setting['logo']['small']['dark'] ?? $layout['logo']['default']['dark']);
+        $layout['logo']['small']['light'] = text(
+            'Ścieżka do logo pomniejszonego (dla trybu jasnego)',
+            '',
+            $this->logoValue($settingLogo, $configLogo, 'small', 'light', $layout['logo']['default']['light'])
+        );
+        $layout['logo']['small']['dark'] = text(
+            'Ścieżka do logo pomniejszonego (dla trybu ciemnego)',
+            '',
+            $this->logoValue($settingLogo, $configLogo, 'small', 'dark', $layout['logo']['default']['dark'])
+        );
 
         $layout['sidebar']['enabled'] = confirm('Włączyć sidebar?', $setting['sidebar']['enabled'] ?? true, 'Tak', 'Nie');
 
@@ -145,5 +164,44 @@ class LayoutCommand extends Command
 
         print_r($layout);
         $this->settingModel::setSettingGlobal('layout', $layout);
+        $this->saveLogoToConfig((array) ($layout['logo'] ?? []));
+
+        $this->info('Zapisano układ panelu oraz logo do config/upsoftware.php.');
+    }
+
+    protected function logoValue(
+        array $settingLogo,
+        array $configLogo,
+        string $variant,
+        string $mode,
+        string $fallback = ''
+    ): string {
+        $settingValue = (string) data_get($settingLogo, "{$variant}.{$mode}", '');
+        if ($settingValue !== '') {
+            return $settingValue;
+        }
+
+        $configValue = (string) data_get($configLogo, "{$variant}.{$mode}", '');
+        if ($configValue !== '') {
+            return $configValue;
+        }
+
+        return $fallback;
+    }
+
+    protected function saveLogoToConfig(array $logo): void
+    {
+        $configPath = config_path('upsoftware.php');
+
+        if (! File::exists($configPath)) {
+            return;
+        }
+
+        $writer = ArrayFile::open($configPath);
+        $writer->set('logo.default.light', (string) data_get($logo, 'default.light', ''));
+        $writer->set('logo.default.dark', (string) data_get($logo, 'default.dark', ''));
+        $writer->set('logo.small.light', (string) data_get($logo, 'small.light', ''));
+        $writer->set('logo.small.dark', (string) data_get($logo, 'small.dark', ''));
+        $writer->write();
     }
 }

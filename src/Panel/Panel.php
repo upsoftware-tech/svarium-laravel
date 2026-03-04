@@ -50,7 +50,7 @@ class Panel
 
     public function prefixName(): string
     {
-        return trim($this->name, '/');
+        return trim((string) $this->prefix, '/');
     }
 
     public function noPrefix(): static

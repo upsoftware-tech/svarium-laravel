@@ -133,9 +133,65 @@ class Appearance
         return $this->prop('textColor', $light);
     }
 
+    public function color(string $light, ?string $dark = null): static
+    {
+        return $this->textColor($light, $dark);
+    }
+
     public function fontColor(string $fontColor): static
     {
         return $this->textColor($fontColor);
+    }
+
+    public function textDecoration(string $textDecoration): static
+    {
+        $value = trim($textDecoration);
+        if ($value === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($value);
+        $tokens = preg_split('/\s+/', $normalized) ?: [];
+        $tokens = array_values(array_filter($tokens, static fn (string $token) => $token !== ''));
+
+        $utilityTokens = [
+            'underline',
+            'overline',
+            'line-through',
+            'no-underline',
+            'decoration-solid',
+            'decoration-double',
+            'decoration-dotted',
+            'decoration-dashed',
+            'decoration-wavy',
+            'decoration-auto',
+            'decoration-from-font',
+        ];
+
+        if ($tokens !== []) {
+            $allUtilities = true;
+
+            foreach ($tokens as $token) {
+                if (in_array($token, $utilityTokens, true) || str_starts_with($token, 'decoration-')) {
+                    continue;
+                }
+
+                $allUtilities = false;
+                break;
+            }
+
+            if ($allUtilities) {
+                foreach ($tokens as $token) {
+                    $this->appendClass($token);
+                }
+
+                return $this;
+            }
+        }
+
+        return $this->style([
+            'textDecoration' => $value,
+        ]);
     }
 
     public function textAlign(string $textAlign): static
@@ -412,42 +468,22 @@ class Appearance
 
     public function padding(string|int|float $padding): static
     {
-        if (is_int($padding)) {
-            return $this->appendClass('p-'.$padding);
-        }
+        return $this->applySpacingUtility(
+            $padding,
+            'p',
+            'padding',
+            false
+        );
+    }
 
-        if (is_float($padding)) {
-            return $this->style([
-                'padding' => $padding.'px',
-            ]);
-        }
-
-        $value = trim($padding);
-        if ($value === '') {
-            return $this;
-        }
-
-        $normalized = strtolower($value);
-
-        if (str_starts_with($normalized, 'p-') || preg_match('/^p[trblxyse]-.+$/', $normalized)) {
-            return $this->appendClass($normalized);
-        }
-
-        if (preg_match('/^(x|y|t|r|b|l|s|e)-.+$/', $normalized)) {
-            return $this->appendClass('p'.$normalized);
-        }
-
-        if (is_numeric($normalized)) {
-            return $this->appendClass('p-'.$normalized);
-        }
-
-        if ($this->shouldTreatAsCssValue($value)) {
-            return $this->style([
-                'padding' => $value,
-            ]);
-        }
-
-        return $this->appendClass('p-'.$normalized);
+    public function margin(string|int|float $margin): static
+    {
+        return $this->applySpacingUtility(
+            $margin,
+            'm',
+            'margin',
+            true
+        );
     }
 
     public function flex(string|int|float|bool $flex = true): static
@@ -728,6 +764,12 @@ class Appearance
             return $this->appendClass($classPrefix.'-'.$normalized);
         }
 
+        if (preg_match('/^-?\d+(\.\d+)?px$/i', $normalized)) {
+            return $this->style([
+                $styleProperty => $normalized,
+            ]);
+        }
+
         if ($this->shouldTreatAsCssValue($raw)) {
             if (! str_contains($raw, ' ')) {
                 return $this->appendClass($classPrefix.'-['.$raw.']');
@@ -739,6 +781,120 @@ class Appearance
         }
 
         return $this->appendClass($classPrefix.'-'.$normalized);
+    }
+
+    protected function applySpacingUtility(
+        string|int|float $value,
+        string $classPrefix,
+        string $styleProperty,
+        bool $allowNegative
+    ): static {
+        if (is_int($value)) {
+            if ($allowNegative && $value < 0) {
+                return $this->appendClass('-'.$classPrefix.'-'.abs($value));
+            }
+
+            return $this->appendClass($classPrefix.'-'.$value);
+        }
+
+        if (is_float($value)) {
+            return $this->style([
+                $styleProperty => $value.'px',
+            ]);
+        }
+
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($raw);
+        $parts = preg_split('/\s+/', $normalized) ?: [];
+        $parts = array_values(array_filter($parts, static fn (string $part) => $part !== ''));
+
+        if (count($parts) > 1) {
+            $allTokens = true;
+            foreach ($parts as $part) {
+                $token = $this->resolveSpacingToken($part, $classPrefix, $allowNegative);
+                if ($token === null) {
+                    $allTokens = false;
+                    break;
+                }
+            }
+
+            if ($allTokens) {
+                foreach ($parts as $part) {
+                    $token = $this->resolveSpacingToken($part, $classPrefix, $allowNegative);
+                    if ($token !== null) {
+                        $this->appendClass($token);
+                    }
+                }
+
+                return $this;
+            }
+        }
+
+        $singleToken = $this->resolveSpacingToken($normalized, $classPrefix, $allowNegative);
+        if ($singleToken !== null) {
+            return $this->appendClass($singleToken);
+        }
+
+        if ($this->shouldTreatAsCssValue($raw)) {
+            return $this->style([
+                $styleProperty => $raw,
+            ]);
+        }
+
+        return $this->appendClass($classPrefix.'-'.$normalized);
+    }
+
+    protected function resolveSpacingToken(
+        string $token,
+        string $classPrefix,
+        bool $allowNegative
+    ): ?string {
+        $token = strtolower(trim($token));
+        if ($token === '') {
+            return null;
+        }
+
+        if (
+            str_starts_with($token, $classPrefix.'-')
+            || preg_match('/^'.$classPrefix.'[trblxyse]-.+$/', $token)
+        ) {
+            return $token;
+        }
+
+        if ($allowNegative) {
+            if (
+                str_starts_with($token, '-'.$classPrefix.'-')
+                || preg_match('/^-'.$classPrefix.'[trblxyse]-.+$/', $token)
+            ) {
+                return $token;
+            }
+        }
+
+        if (preg_match('/^(x|y|t|r|b|l|s|e)-.+$/', $token)) {
+            return $classPrefix.$token;
+        }
+
+        if ($allowNegative && preg_match('/^-(x|y|t|r|b|l|s|e)-.+$/', $token)) {
+            return '-'.$classPrefix.substr($token, 1);
+        }
+
+        if (preg_match('/^-?\d+(\.\d+)?$/', $token)) {
+            if (str_starts_with($token, '-')) {
+                if (! $allowNegative) {
+                    return null;
+                }
+
+                return '-'.$classPrefix.'-'.ltrim($token, '-');
+            }
+
+            return $classPrefix.'-'.$token;
+        }
+
+        return null;
     }
 
     public function style(array $style): static
