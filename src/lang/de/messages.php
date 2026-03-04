@@ -25,5 +25,6 @@ return [
     'Password' => 'Passwort',
     'Email address' => 'E-Mail-Adresse',
     'Log in with your email address' => 'Melden Sie sich mit Ihrer E-Mail-Adresse an',
+    'Remember me' => 'Angemeldet bleiben',
     'or' => 'oder',
 ];

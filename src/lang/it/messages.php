@@ -44,6 +44,7 @@ return [
     'Two Factor Auth' => 'Autenticazione a due fattori',
     'My Activity' => 'Registro attività',
     'Dashboard' => 'Dashboard',
+    'Remember me' => 'Ricordami',
     'Remember browser' => 'Ricorda browser',
     'Subsequent logins on the same browser will not require an additional code' => 'Gli accessi successivi sullo stesso browser non richiederanno un codice aggiuntivo'
 ];

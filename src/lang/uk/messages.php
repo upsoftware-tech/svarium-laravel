@@ -44,6 +44,7 @@ return [
     'Two Factor Auth' => 'Двофакторна автентифікація',
     'My Activity' => 'Журнал активності',
     'Dashboard' => 'Панель',
+    'Remember me' => 'Запам’ятати мене',
     'Remember browser' => 'Запам’ятати браузер',
     'Subsequent logins on the same browser will not require an additional code' => 'Наступні входи в цьому браузері не вимагатимуть додаткового коду'
 ];
