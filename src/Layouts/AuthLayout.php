@@ -32,7 +32,7 @@ class AuthLayout extends PanelLayout
                 ->children([
                     Flex::make()
                         ->direction('col')
-                        ->bg('white', 'slate-800')
+                        ->bg('white', 'slate-900')
                         ->rounded('xl')
                         ->appearance('border w-full h-full')
                         ->header($this->defineHeader())

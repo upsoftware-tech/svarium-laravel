@@ -26,5 +26,11 @@ return [
     'Email address' => 'E-Mail-Adresse',
     'Log in with your email address' => 'Melden Sie sich mit Ihrer E-Mail-Adresse an',
     'Remember me' => 'Angemeldet bleiben',
+    'Code did not arrive?' => 'Code nicht erhalten?',
+    'You can generate a new code in {minutes}:{seconds}' => 'Sie können in {minutes}:{seconds} einen neuen Code anfordern',
+    'Generate new code' => 'Neuen Code generieren',
+    'A new verification code has been sent.' => 'Ein neuer Verifizierungscode wurde gesendet.',
+    'Too many resend requests. Try again in :seconds seconds.' => 'Zu viele Anfragen zum erneuten Senden. Versuchen Sie es in :seconds Sekunden erneut.',
+    'Too many invalid attempts. Try again in :seconds seconds.' => 'Zu viele ungültige Versuche. Versuchen Sie es in :seconds Sekunden erneut.',
     'or' => 'oder',
 ];

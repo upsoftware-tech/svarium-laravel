@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Providers;
 
 use App\Models\Page;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Console\Command;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Routing\Router;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 use Inertia\Inertia;
+use Symfony\Component\Console\Exception\RuntimeException as ConsoleRuntimeException;
 use Upsoftware\Svarium\Auth\AuthManager;
 use Upsoftware\Svarium\Bundles\Bundle;
 use Upsoftware\Svarium\Bundles\BundleRegistry;
@@ -96,6 +98,8 @@ class SvariumServiceProvider extends ServiceProvider
     */
     public function boot(Router $router): void
     {
+        $this->registerMigrateInitGuard();
+
         $this->registerSchemaMacros();
 
         /*
@@ -232,6 +236,12 @@ class SvariumServiceProvider extends ServiceProvider
         |-----------------------------
         */
         $this->app->booted(function (): void {
+            if (! $this->routePathExists('login', ['GET', 'HEAD'])) {
+                Route::get('/login', function () {
+                    return redirect()->to(svarium_login_url(false));
+                })->name('login');
+            }
+
             $fallbackMiddleware = ['web'];
 
             if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
@@ -330,6 +340,115 @@ class SvariumServiceProvider extends ServiceProvider
         }
 
         return $classes;
+    }
+
+    protected function registerMigrateInitGuard(): void
+    {
+        if (! $this->app->runningInConsole()) {
+            return;
+        }
+
+        $this->app['events']->listen(CommandStarting::class, function (CommandStarting $event): void {
+            if (! $this->shouldGuardMigrateCommand($event->command)) {
+                return;
+            }
+
+            if ($this->isMigrateBypassEnabled() || $this->isSvariumInitialized()) {
+                return;
+            }
+
+            throw new ConsoleRuntimeException(
+                'Svarium nie jest zainicjalizowany. Najpierw uruchom: php artisan svarium:init'
+            );
+        });
+    }
+
+    protected function shouldGuardMigrateCommand(?string $command): bool
+    {
+        $name = strtolower(trim((string) $command));
+
+        return in_array($name, ['migrate', 'migrate:fresh', 'migrate:refresh'], true);
+    }
+
+    protected function isMigrateBypassEnabled(): bool
+    {
+        $value = strtolower(trim((string) env('SVARIUM_ALLOW_MIGRATE', '')));
+
+        return in_array($value, ['1', 'true', 'yes', 'on'], true);
+    }
+
+    protected function isSvariumInitialized(): bool
+    {
+        $marker = strtolower(trim((string) env('SVARIUM', '')));
+        if ($marker === 'enabled') {
+            return true;
+        }
+
+        $legacy = strtolower(trim((string) env('SVARIUM_ENABLED', '')));
+        if (in_array($legacy, ['1', 'true', 'yes', 'on', 'enabled'], true)) {
+            return true;
+        }
+
+        $fileMarker = strtolower(trim((string) $this->readEnvValueFromFile('SVARIUM')));
+        if ($fileMarker === 'enabled') {
+            return true;
+        }
+
+        $fileLegacy = strtolower(trim((string) $this->readEnvValueFromFile('SVARIUM_ENABLED')));
+
+        return in_array($fileLegacy, ['1', 'true', 'yes', 'on', 'enabled'], true);
+    }
+
+    protected function readEnvValueFromFile(string $key): ?string
+    {
+        $envPath = base_path('.env');
+        if (! is_file($envPath)) {
+            return null;
+        }
+
+        $content = file_get_contents($envPath);
+        if (! is_string($content) || $content === '') {
+            return null;
+        }
+
+        $pattern = '/^'.preg_quote($key, '/').'\s*=\s*(.*)$/mi';
+        if (preg_match($pattern, $content, $matches) !== 1) {
+            return null;
+        }
+
+        $value = trim((string) ($matches[1] ?? ''));
+        if ($value === '') {
+            return '';
+        }
+
+        if (
+            (str_starts_with($value, '"') && str_ends_with($value, '"'))
+            || (str_starts_with($value, "'") && str_ends_with($value, "'"))
+        ) {
+            return trim(substr($value, 1, -1));
+        }
+
+        $value = preg_replace('/\s+#.*$/', '', $value);
+
+        return trim((string) $value);
+    }
+
+    protected function routePathExists(string $path, array $methods = ['GET']): bool
+    {
+        $normalizedPath = trim($path, '/');
+        $routesByMethod = app('router')->getRoutes()->getRoutesByMethod();
+
+        foreach ($methods as $method) {
+            $methodRoutes = $routesByMethod[strtoupper($method)] ?? [];
+
+            foreach ($methodRoutes as $route) {
+                if (trim((string) $route->uri(), '/') === $normalizedPath) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     public function consoleCommands(): void

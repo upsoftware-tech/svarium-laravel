@@ -11,22 +11,31 @@ trait UsesConnection
      */
     public function getConnectionName(): ?string
     {
-        if ($forcedConnection = config('svarium.database_connection')) {
+        $forcedConnection = config('svarium.database_connection');
+        if (is_string($forcedConnection) && $forcedConnection !== '') {
             return $forcedConnection;
         }
 
-        if (config()->has('upsoftware.tenancy.database.central_connection')) {
-            return config('upsoftware.tenancy.database.central_connection');
+        $defaultConnection = (string) config('database.default');
+        $connections = (array) config('database.connections', []);
+        $isConfigured = static fn (?string $name): bool => is_string($name) && $name !== '' && array_key_exists($name, $connections);
+
+        if (! (function_exists('svarium_tenancy_database_mode') && svarium_tenancy_database_mode())) {
+            return $defaultConnection;
         }
 
-        if (config()->has('tenancy.database.central_connection')) {
-            return config('tenancy.database.central_connection');
+        $candidates = [
+            config('upsoftware.tenancy.database.central_connection'),
+            config('tenancy.database.central_connection'),
+            'central',
+        ];
+
+        foreach ($candidates as $candidate) {
+            if ($isConfigured($candidate)) {
+                return $candidate;
+            }
         }
 
-        if (config()->has('database.connections.central')) {
-            return 'central';
-        }
-
-        return config('database.default');
+        return $defaultConnection;
     }
 }

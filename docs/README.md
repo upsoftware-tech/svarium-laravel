@@ -5,6 +5,7 @@
 - [Layouty panelu](./panel-layouts.md)
 - [Komponent Link (PHP + Vue, wrapper Inertia)](./link-component.md)
 - [Komponent Logo (PHP + Vue, light/dark/default/small)](./logo-component.md)
+- [Komponent Pin (PHP + Vue, OTP / verification code)](./pin-component.md)
 - [AuthLoginService (logowanie + OTP)](./auth-login-service.md)
 - [Layouty i konfiguracja rejestracji](./register-panel-config.md)
 - [Rejestracja menu (moduły i strony)](./menu-registration.md)

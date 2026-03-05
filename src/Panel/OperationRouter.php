@@ -14,6 +14,7 @@ use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\ComponentResult;
 use Upsoftware\Svarium\Http\OperationResult;
 use Illuminate\Auth\Middleware\Authenticate as LaravelAuthenticateMiddleware;
+use Upsoftware\Svarium\Layouts\PanelLayout as DefaultPanelLayout;
 use Upsoftware\Svarium\Security\RecordIdentifier;
 
 class OperationRouter
@@ -198,6 +199,7 @@ class OperationRouter
             ->resolve($operation, $context);
 
         $panelMiddleware = $panel?->getMiddleware() ?? [];
+        $panelMiddleware = $this->ensurePanelAuthMiddleware($panelMiddleware);
         if ($this->isPublicAuthRequest($request)) {
             $panelMiddleware = $this->withoutAuthMiddleware($panelMiddleware);
         }
@@ -225,6 +227,7 @@ class OperationRouter
                 $layout = $panelObj?->layout;
             }
 
+            $layout ??= DefaultPanelLayout::class;
             $result->setLayout($layout);
             $result->setView($operation::$view);
         }
@@ -332,6 +335,35 @@ class OperationRouter
         }
 
         array_unshift($middleware, $middlewareClass);
+
+        return $middleware;
+    }
+
+    protected function ensurePanelAuthMiddleware(array $middleware): array
+    {
+        foreach ($middleware as $definition) {
+            if (! is_string($definition)) {
+                continue;
+            }
+
+            $normalized = trim($definition);
+            if ($normalized === '') {
+                continue;
+            }
+
+            if (
+                $normalized === 'auth'
+                || Str::startsWith($normalized, 'auth:')
+                || $normalized === 'auth.panel'
+                || Str::startsWith($normalized, 'auth.panel:')
+                || $normalized === LaravelAuthenticateMiddleware::class
+                || $normalized === AuthenticateMiddleware::class
+            ) {
+                return $middleware;
+            }
+        }
+
+        array_unshift($middleware, 'auth.panel');
 
         return $middleware;
     }

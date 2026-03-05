@@ -1,0 +1,37 @@
+<?php
+
+namespace App\Svarium\Modules\{{ModuleName}}\Panel;
+
+use Upsoftware\Svarium\Panel\Operation;
+use Upsoftware\Svarium\Panel\PanelContext;
+use Upsoftware\Svarium\UI\Components\Block;
+use Upsoftware\Svarium\UI\Components\Text;
+
+class {{ModuleName}}PageOperation extends Operation
+{
+    public static function uri(): string
+    {
+        return '{{ModuleSlug}}/page';
+    }
+
+    public static function methods(): array
+    {
+        return ['GET'];
+    }
+
+    public function title(): string
+    {
+        return __('{{ModuleNamePlural}} page');
+    }
+
+    public function schema(PanelContext $context): array
+    {
+        return [
+            Block::make(
+                Text::make(__('{{ModuleNamePlural}} page'))
+                    ->headline('h2')
+                    ->appearance('text-xl font-semibold')
+            ),
+        ];
+    }
+}

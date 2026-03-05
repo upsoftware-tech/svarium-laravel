@@ -9,7 +9,7 @@ import mappedComponents from '@/resolver';
 
 import { globalComponents } from './components';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Extra Poradnia';
+const appName = import.meta.env.VITE_APP_NAME || 'APP_NAME';
 
 interface PageModule {
     default: DefineComponent<{}, {}, any> & {
@@ -45,7 +45,6 @@ createInertiaApp({
             throw new Error(`Svarium: Page [${name}] not found in any location.`);
         }
 
-        page.default.layout = page.default.layout || AppLayout;
         return page.default;;
     },
     setup({ el, App, props, plugin }) {
@@ -53,7 +52,7 @@ createInertiaApp({
 
         vueApp.use(plugin)
             .use(Svarium, {
-                prefix: 'Ep',
+                prefix: '{{PREFIX}}',
                 i18n: {
                     lang: props.initialPage.props.locale || 'pl',
                     resolve: (lang: string) => import(`../../lang/${lang}.json`),

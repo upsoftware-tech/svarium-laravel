@@ -45,6 +45,12 @@ return [
     'My Activity' => 'Registro attività',
     'Dashboard' => 'Dashboard',
     'Remember me' => 'Ricordami',
+    'Code did not arrive?' => 'Il codice non è arrivato?',
     'Remember browser' => 'Ricorda browser',
-    'Subsequent logins on the same browser will not require an additional code' => 'Gli accessi successivi sullo stesso browser non richiederanno un codice aggiuntivo'
+    'Subsequent logins on the same browser will not require an additional code' => 'Gli accessi successivi sullo stesso browser non richiederanno un codice aggiuntivo',
+    'You can generate a new code in {minutes}:{seconds}' => 'Puoi generare un nuovo codice tra {minutes}:{seconds}',
+    'Generate new code' => 'Genera un nuovo codice',
+    'A new verification code has been sent.' => 'È stato inviato un nuovo codice di verifica.',
+    'Too many resend requests. Try again in :seconds seconds.' => 'Troppe richieste di reinvio. Riprova tra :seconds secondi.',
+    'Too many invalid attempts. Try again in :seconds seconds.' => 'Troppi tentativi non validi. Riprova tra :seconds secondi.',
 ];

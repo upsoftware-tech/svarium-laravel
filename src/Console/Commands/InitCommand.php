@@ -5,6 +5,7 @@ namespace Upsoftware\Svarium\Console\Commands;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Upsoftware\Svarium\Traits\HasTailwindColor;
 use function Laravel\Prompts\confirm;
@@ -18,6 +19,182 @@ class InitCommand extends CoreCommand
     protected $signature = 'svarium:init';
 
     protected $description = 'Iniciuje aplikację (dodaje niezbędną konfigurację)';
+
+    protected function readEnvValue(string $key): ?string
+    {
+        $envPath = base_path('.env');
+        if (! is_file($envPath)) {
+            return null;
+        }
+
+        $content = file_get_contents($envPath);
+        if (! is_string($content) || $content === '') {
+            return null;
+        }
+
+        $pattern = '/^'.preg_quote($key, '/').'\s*=\s*(.*)$/mi';
+        if (preg_match($pattern, $content, $matches) !== 1) {
+            return null;
+        }
+
+        $value = trim((string) ($matches[1] ?? ''));
+        if ($value === '') {
+            return '';
+        }
+
+        if (
+            (str_starts_with($value, '"') && str_ends_with($value, '"'))
+            || (str_starts_with($value, "'") && str_ends_with($value, "'"))
+        ) {
+            $value = substr($value, 1, -1);
+        } else {
+            $value = trim((string) Str::before($value, ' #'));
+        }
+
+        return trim((string) $value);
+    }
+
+    protected function isSvariumConfigured(): bool
+    {
+        $marker = strtolower(trim((string) $this->readEnvValue('SVARIUM')));
+        if ($marker === 'enabled') {
+            return true;
+        }
+
+        $legacy = strtolower(trim((string) $this->readEnvValue('SVARIUM_ENABLED')));
+
+        return in_array($legacy, ['1', 'true', 'yes', 'on', 'enabled'], true);
+    }
+
+    protected function markSvariumConfigured(): void
+    {
+        $this->addEnvKey('SVARIUM', 'enabled', false, true);
+    }
+
+    protected function resolveUserModelClass(): string
+    {
+        $configuredUserModel = config('upsoftware.models.user');
+        if (is_string($configuredUserModel) && trim($configuredUserModel) !== '') {
+            return trim($configuredUserModel);
+        }
+
+        $authUserModel = config('auth.providers.users.model');
+        if (is_string($authUserModel) && trim($authUserModel) !== '') {
+            return trim($authUserModel);
+        }
+
+        return \App\Models\User::class;
+    }
+
+    protected function resolveGuardNameForUserModel(string $userModelClass, string $fallbackGuard = 'web'): string
+    {
+        try {
+            $user = new $userModelClass();
+
+            if (method_exists($user, 'getDefaultGuardName')) {
+                // Keep exact guard expected by Spatie (even empty string).
+                return trim((string) $user->getDefaultGuardName());
+            }
+
+            if (property_exists($user, 'guard_name')) {
+                return trim((string) ($user->guard_name ?? $fallbackGuard));
+            }
+        } catch (\Throwable) {
+            // Fallback below.
+        }
+
+        return $fallbackGuard;
+    }
+
+    protected function syncAppTsAppNameFallback(string $appName): void
+    {
+        $appTsPath = resource_path('js/app.ts');
+        if (! is_file($appTsPath)) {
+            return;
+        }
+
+        $content = file_get_contents($appTsPath);
+        if (! is_string($content) || $content === '') {
+            return;
+        }
+
+        $normalizedAppName = str_replace(["\r", "\n"], ' ', trim($appName));
+        if ($normalizedAppName === '') {
+            $normalizedAppName = 'APP_NAME';
+        }
+
+        $escapedAppName = str_replace("'", "\\'", $normalizedAppName);
+        $replacementLine = "const appName = import.meta.env.VITE_APP_NAME || '{$escapedAppName}';";
+
+        $updated = preg_replace(
+            '/^const\s+appName\s*=\s*import\.meta\.env\.VITE_APP_NAME\s*\|\|\s*(?:\'[^\']*\'|\"[^\"]*\")\s*;$/m',
+            $replacementLine,
+            $content,
+            1,
+            $count
+        );
+
+        if (($count ?? 0) < 1 || ! is_string($updated)) {
+            return;
+        }
+
+        file_put_contents($appTsPath, $updated);
+        $this->info('Zaktualizowano fallback APP_NAME w pliku: '.$appTsPath);
+    }
+
+    protected function applyAppTsPrefixFallback(string $content, string $prefix): string
+    {
+        $replacementLine = "prefix: '{$prefix}',";
+
+        $updated = preg_replace(
+            '/^\s*prefix\s*:\s*(?:\'[^\']*\'|"[^"]*")\s*,\s*$/m',
+            '                '.$replacementLine,
+            $content,
+            1,
+            $count
+        );
+
+        if (($count ?? 0) > 0 && is_string($updated)) {
+            return $updated;
+        }
+
+        $updated = preg_replace(
+            '/\.use\(Svarium,\s*\{\s*/',
+            ".use(Svarium, {\n                {$replacementLine}\n                ",
+            $content,
+            1,
+            $insertedCount
+        );
+
+        if (($insertedCount ?? 0) > 0 && is_string($updated)) {
+            return $updated;
+        }
+
+        return $content;
+    }
+
+    protected function syncAppTsPrefixFallback(string $prefix): void
+    {
+        $appTsPath = resource_path('js/app.ts');
+        if (! is_file($appTsPath)) {
+            return;
+        }
+
+        $content = file_get_contents($appTsPath);
+        if (! is_string($content) || $content === '') {
+            return;
+        }
+
+        $escapedPrefix = str_replace("'", "\\'", trim($prefix));
+        $updated = $this->applyAppTsPrefixFallback($content, $escapedPrefix);
+
+        if (! is_string($updated) || $updated === $content) {
+            return;
+        }
+
+        file_put_contents($appTsPath, $updated);
+        $this->info('Zaktualizowano prefix Svarium w pliku: '.$appTsPath);
+    }
 
     public function updateAppBootstrap(): void
     {
@@ -176,8 +353,11 @@ class InitCommand extends CoreCommand
             }
 
             if ($save) {
-                $PREFIX = text('Podaj nazwę prefix dla komponentow', '', 'Sv');
-                $app_ts_content = strtr($app_ts_content, ['{{PREFIX}}' => $PREFIX, '{{APP_NAME}}' => $APP_NAME]);
+                $configuredPrefix = trim((string) config('upsoftware.components.prefix', ''));
+                $escapedPrefix = str_replace("'", "\\'", $configuredPrefix);
+                $escapedAppName = str_replace("'", "\\'", (string) $APP_NAME);
+                $app_ts_content = strtr($app_ts_content, ['{{PREFIX}}' => $escapedPrefix, '{{APP_NAME}}' => $escapedAppName]);
+                $app_ts_content = $this->applyAppTsPrefixFallback($app_ts_content, $escapedPrefix);
                 $this->info('Utworzyłem plik: '.$app_ts_path);
                 file_put_contents($app_ts_path, $app_ts_content);
             }
@@ -304,13 +484,29 @@ class InitCommand extends CoreCommand
             }
         }
 
+        $configuredAuthRoutePrefix = trim((string) config('upsoftware.panel.route_prefix', 'panel.auth'));
+        $suggestedAuthRoutePrefix = trim($panelName) !== ''
+            ? trim($panelName).'.auth'
+            : 'panel.auth';
+
+        $defaultAuthRoutePrefix = $configuredAuthRoutePrefix;
+        if ($defaultAuthRoutePrefix === '' || $defaultAuthRoutePrefix === 'panel.auth') {
+            $defaultAuthRoutePrefix = $suggestedAuthRoutePrefix;
+        }
+
         $authRoutePrefix = trim((string) text(
-            'Prefix nazw rout auth (np. panel.auth)',
-            (string) config('upsoftware.panel.route_prefix', 'panel.auth')
+            'Prefix nazw rout auth (np. app.auth)',
+            $defaultAuthRoutePrefix
         ));
         if ($authRoutePrefix === '') {
-            $authRoutePrefix = 'panel.auth';
+            $authRoutePrefix = $defaultAuthRoutePrefix !== '' ? $defaultAuthRoutePrefix : 'panel.auth';
         }
+
+        $componentPrefix = text(
+            'Prefix komponentów Svarium (puste = bez prefixu)',
+            'np. Sv',
+            (string) config('upsoftware.components.prefix', '')
+        );
 
         $apiEnabled = confirm(
             'Czy włączyć API Svarium?',
@@ -438,6 +634,7 @@ class InitCommand extends CoreCommand
             'panel_name' => $panelName,
             'panel_prefix' => $panelPrefix,
             'auth_route_prefix' => $authRoutePrefix,
+            'component_prefix' => (string) $componentPrefix,
             'api_enabled' => $apiEnabled,
             'api_prefix' => $apiPrefix,
             'api_driver' => $apiDriver,
@@ -491,6 +688,7 @@ PHP;
         $panelPrefix = trim((string) ($config['panel_prefix'] ?? ''), '/');
         $authRoutePrefix = trim((string) ($config['auth_route_prefix'] ?? 'panel.auth'));
         $authRoutePrefix = $authRoutePrefix !== '' ? $authRoutePrefix : 'panel.auth';
+        $componentPrefix = trim((string) ($config['component_prefix'] ?? ''));
 
         $apiEnabled = (bool) ($config['api_enabled'] ?? true);
         $apiPrefix = trim((string) ($config['api_prefix'] ?? 'api/v1'), '/');
@@ -524,6 +722,7 @@ PHP;
         $this->addConfigKey('upsoftware.php', 'panel.name', $panelName, true);
         $this->addConfigKey('upsoftware.php', 'panel.prefix', $panelPrefix, true);
         $this->addConfigKey('upsoftware.php', 'panel.route_prefix', $authRoutePrefix, true);
+        $this->addConfigKey('upsoftware.php', 'components.prefix', $componentPrefix, true);
 
         $this->addConfigKey('upsoftware.php', 'api.enabled', $apiEnabled, true);
         $this->addConfigKey('upsoftware.php', 'api.prefix', $apiPrefix, true);
@@ -664,6 +863,11 @@ PHP;
             $guard = 'web';
         }
 
+        $userModelClass = $this->resolveUserModelClass();
+        if (class_exists($userModelClass)) {
+            $guard = $this->resolveGuardNameForUserModel($userModelClass, $guard);
+        }
+
         $roleModelClass = (string) config('permission.models.role', \Spatie\Permission\Models\Role::class);
         $roleNameIsJson = $this->isRoleNameJsonColumn($roleModelClass);
 
@@ -697,7 +901,6 @@ PHP;
             return;
         }
 
-        $userModelClass = (string) config('auth.providers.users.model', \App\Models\User::class);
         if (! class_exists($userModelClass)) {
             $this->warn("Nie znaleziono modelu użytkownika: {$userModelClass}");
             return;
@@ -752,20 +955,14 @@ PHP;
             $user->password = Hash::make($adminPassword);
             $user->save();
 
-            if (method_exists($user, 'assignRole') || method_exists($user, 'syncRoles')) {
-                [$adminRole] = $this->findOrCreateRole(
-                    $roleModelClass,
-                    'Administrator',
-                    $guard,
-                    $roleNameIsJson
-                );
+            [$adminRole] = $this->findOrCreateRole(
+                $roleModelClass,
+                'Administrator',
+                $guard,
+                $roleNameIsJson
+            );
 
-                if (method_exists($user, 'syncRoles')) {
-                    $user->syncRoles([$adminRole]);
-                } else {
-                    $user->assignRole($adminRole);
-                }
-            }
+            $this->attachRoleToUser($user, $adminRole);
 
             $this->info('Konto administratora jest gotowe.');
             $this->line('Email: '.$adminEmail);
@@ -780,6 +977,80 @@ PHP;
             }
         } catch (\Throwable $e) {
             $this->warn('Nie udało się utworzyć konta administratora: '.$e->getMessage());
+        }
+    }
+
+    protected function attachRoleToUser(object $user, object $role): void
+    {
+        try {
+            if (method_exists($user, 'syncRoles')) {
+                $user->syncRoles([$role]);
+
+                return;
+            }
+
+            if (method_exists($user, 'assignRole')) {
+                $user->assignRole($role);
+
+                return;
+            }
+        } catch (\Throwable $e) {
+            $this->warn('Przypisanie roli przez Spatie nie powiodło się. Używam fallback model_has_roles. Powód: '.$e->getMessage());
+        }
+
+        $this->attachRoleToUserPivot($user, $role);
+    }
+
+    protected function attachRoleToUserPivot(object $user, object $role): void
+    {
+        $table = (string) config('permission.table_names.model_has_roles', 'model_has_roles');
+        $modelKeyColumn = (string) config('permission.column_names.model_morph_key', 'model_id');
+        $userKey = method_exists($user, 'getKey') ? $user->getKey() : ($user->{$modelKeyColumn} ?? $user->id ?? null);
+        $roleId = $role->id ?? null;
+
+        if (! Schema::hasTable($table)) {
+            $this->warn("Brak tabeli {$table}. Nie mogę przypisać roli administratora.");
+
+            return;
+        }
+
+        if ($userKey === null || $roleId === null) {
+            $this->warn('Brak identyfikatora użytkownika lub roli. Pomijam przypisanie roli.');
+
+            return;
+        }
+
+        $attributes = [
+            'role_id' => $roleId,
+            'model_type' => $user::class,
+            $modelKeyColumn => $userKey,
+        ];
+
+        $values = [];
+
+        if (Schema::hasColumn($table, 'status')) {
+            $values['status'] = 1;
+        }
+
+        if (Schema::hasColumn($table, 'tenant_id') && ! array_key_exists('tenant_id', $attributes)) {
+            $values['tenant_id'] = null;
+        }
+
+        $modelHasRoleClass = (string) config('upsoftware.models.model_has_role', \Upsoftware\Svarium\Models\ModelHasRole::class);
+        $connection = null;
+
+        if (class_exists($modelHasRoleClass)) {
+            $connection = (new $modelHasRoleClass())->getConnectionName();
+        }
+
+        $query = is_string($connection) && $connection !== ''
+            ? DB::connection($connection)->table($table)
+            : DB::table($table);
+
+        $query->updateOrInsert($attributes, $values);
+
+        if (class_exists(\Spatie\Permission\PermissionRegistrar::class)) {
+            app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
         }
     }
 
@@ -886,6 +1157,21 @@ PHP;
 
     public function handle()
     {
+        if ($this->isSvariumConfigured()) {
+            $shouldReconfigure = confirm(
+                'Wykryto aktywną konfigurację Svarium (SVARIUM=enabled). Czy chcesz ponownie rekonfigurować?',
+                false,
+                'Tak',
+                'Nie'
+            );
+
+            if (! $shouldReconfigure) {
+                $this->info('Przerwano. Konfiguracja nie została zmieniona.');
+
+                return self::SUCCESS;
+            }
+        }
+
         $this->updateUserModel();
         $this->updateAppBootstrap();
         $this->resources();
@@ -918,9 +1204,10 @@ PHP;
         $this->addConfigKey('browser-detect.php', 'cache.interval', 0, true);
         $coreConfig = $this->configureCoreOptions();
         $this->applyCoreConfiguration($coreConfig);
+        $this->syncAppTsPrefixFallback((string) ($coreConfig['component_prefix'] ?? ''));
 
 
-        passthru('php artisan migrate');
+        passthru('SVARIUM_ALLOW_MIGRATE=1 php artisan migrate');
         passthru("php artisan native:install");
 
         $rolesAndAdminConfig = $this->configureRolesAndAdmin();
@@ -939,7 +1226,7 @@ PHP;
         }
 
         while (true) {
-            if (! $this->confirm('Czy chcesz dodać język (lub kolejny)?', true)) {
+            if (! confirm('Czy chcesz dodać język (lub kolejny)?', true, 'Tak', 'Nie')) {
                 break;
             }
 
@@ -963,8 +1250,12 @@ PHP;
 
         $app_name = $this->ask('Nazwa aplikacji', env('APP_NAME'));
         $this->addEnvKey('APP_NAME', $app_name);
+        $this->syncAppTsAppNameFallback((string) $app_name);
 
         $this->addLoginConfiguration();
+
+        $this->markSvariumConfigured();
+        $this->info('Ustawiono flagę konfiguracji: SVARIUM=enabled');
 
         $this->info('Gotowe!');
     }

@@ -160,6 +160,10 @@ class SvariumConfigurationOperation extends Operation
                                 ->label('OTP methods (comma separated: email,sms,app)')
                                 ->required()
                                 ->value(implode(',', (array) config('upsoftware.auth.otp.methods', ['email', 'sms', 'app']))),
+                            Input::make('otp_show_all_methods')
+                                ->label('OTP show all methods (1|0)')
+                                ->required()
+                                ->value((bool) config('upsoftware.auth.otp.show_all_methods', false) ? '1' : '0'),
                             Input::make('otp_allow_user_disable')
                                 ->label('Allow user disable OTP (1|0)')
                                 ->required()
@@ -168,6 +172,46 @@ class SvariumConfigurationOperation extends Operation
                                 ->label('OTP default enabled for user (1|0)')
                                 ->required()
                                 ->value((bool) config('upsoftware.auth.otp.default_enabled', true) ? '1' : '0'),
+                            Input::make('otp_resend_seconds')
+                                ->label('OTP resend seconds')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.resend_seconds', 60)),
+                            Input::make('otp_resend_max_attempts')
+                                ->label('OTP resend max attempts')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.resend_limit.max_attempts', 5)),
+                            Input::make('otp_resend_decay_minutes')
+                                ->label('OTP resend decay minutes')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.resend_limit.decay_minutes', 15)),
+                            Input::make('otp_token_ttl_minutes')
+                                ->label('OTP token TTL minutes')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.token_ttl_minutes', 10)),
+                            Input::make('otp_code_ttl_minutes')
+                                ->label('OTP code TTL minutes')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.code_ttl_minutes', 10)),
+                            Input::make('otp_code_length')
+                                ->label('OTP code length')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.code_length', 8)),
+                            Input::make('otp_code_pattern')
+                                ->label('OTP code pattern (digits|chars|digits_and_chars)')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.code_pattern', 'digits')),
+                            Input::make('otp_invalidate_previous_codes')
+                                ->label('OTP invalidate previous active codes (1|0)')
+                                ->required()
+                                ->value((bool) config('upsoftware.auth.otp.invalidate_previous_codes', true) ? '1' : '0'),
+                            Input::make('otp_max_failed_attempts')
+                                ->label('OTP max failed attempts')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.verification.max_failed_attempts', 5)),
+                            Input::make('otp_lock_minutes')
+                                ->label('OTP lock minutes after failed attempts')
+                                ->required()
+                                ->value((string) config('upsoftware.auth.otp.verification.lock_minutes', 15)),
                         ]),
                     TabItem::make('Tenant')
                         ->prop('value', 'tenant')
@@ -258,8 +302,19 @@ class SvariumConfigurationOperation extends Operation
             'register_activation_mode' => ['required', 'in:none,email_code,email_link,custom'],
             'otp_enabled' => ['required'],
             'otp_methods' => ['required', 'string'],
+            'otp_show_all_methods' => ['required'],
             'otp_allow_user_disable' => ['required'],
             'otp_default_enabled' => ['required'],
+            'otp_resend_seconds' => ['required', 'integer', 'min:0'],
+            'otp_resend_max_attempts' => ['required', 'integer', 'min:0'],
+            'otp_resend_decay_minutes' => ['required', 'integer', 'min:0'],
+            'otp_token_ttl_minutes' => ['required', 'integer', 'min:1'],
+            'otp_code_ttl_minutes' => ['required', 'integer', 'min:1'],
+            'otp_code_length' => ['required', 'integer', 'min:1', 'max:64'],
+            'otp_code_pattern' => ['required', 'in:digits,chars,digits_and_chars'],
+            'otp_invalidate_previous_codes' => ['required'],
+            'otp_max_failed_attempts' => ['required', 'integer', 'min:0'],
+            'otp_lock_minutes' => ['required', 'integer', 'min:0'],
             'tenancy_enabled' => ['required'],
             'tenancy_mode' => ['required', 'in:column,database'],
             'tenancy_domains_enabled' => ['required'],
@@ -331,8 +386,22 @@ class SvariumConfigurationOperation extends Operation
         }
         $otpEnabled = $this->toBool($data['otp_enabled'] ?? true);
         $otpMethods = $this->parseOtpMethods((string) ($data['otp_methods'] ?? 'email,sms,app'));
+        $otpShowAllMethods = $this->toBool($data['otp_show_all_methods'] ?? false);
         $otpAllowUserDisable = $this->toBool($data['otp_allow_user_disable'] ?? true);
         $otpDefaultEnabled = $this->toBool($data['otp_default_enabled'] ?? true);
+        $otpResendSeconds = max(0, (int) ($data['otp_resend_seconds'] ?? config('upsoftware.auth.otp.resend_seconds', 60)));
+        $otpResendMaxAttempts = max(0, (int) ($data['otp_resend_max_attempts'] ?? config('upsoftware.auth.otp.resend_limit.max_attempts', 5)));
+        $otpResendDecayMinutes = max(0, (int) ($data['otp_resend_decay_minutes'] ?? config('upsoftware.auth.otp.resend_limit.decay_minutes', 15)));
+        $otpTokenTtlMinutes = max(1, (int) ($data['otp_token_ttl_minutes'] ?? config('upsoftware.auth.otp.token_ttl_minutes', 10)));
+        $otpCodeTtlMinutes = max(1, (int) ($data['otp_code_ttl_minutes'] ?? config('upsoftware.auth.otp.code_ttl_minutes', 10)));
+        $otpCodeLength = max(1, min(64, (int) ($data['otp_code_length'] ?? config('upsoftware.auth.otp.code_length', 8))));
+        $otpCodePattern = trim((string) ($data['otp_code_pattern'] ?? config('upsoftware.auth.otp.code_pattern', 'digits')));
+        if (! in_array($otpCodePattern, ['digits', 'chars', 'digits_and_chars'], true)) {
+            $otpCodePattern = 'digits';
+        }
+        $otpInvalidatePreviousCodes = $this->toBool($data['otp_invalidate_previous_codes'] ?? config('upsoftware.auth.otp.invalidate_previous_codes', true));
+        $otpMaxFailedAttempts = max(0, (int) ($data['otp_max_failed_attempts'] ?? config('upsoftware.auth.otp.verification.max_failed_attempts', 5)));
+        $otpLockMinutes = max(0, (int) ($data['otp_lock_minutes'] ?? config('upsoftware.auth.otp.verification.lock_minutes', 15)));
 
         $tenancyEnabled = $this->toBool($data['tenancy_enabled'] ?? false);
         $tenancyMode = trim((string) ($data['tenancy_mode'] ?? 'column'));
@@ -390,8 +459,19 @@ class SvariumConfigurationOperation extends Operation
             $registerActivationMode,
             $otpEnabled,
             $otpMethods,
+            $otpShowAllMethods,
             $otpAllowUserDisable,
             $otpDefaultEnabled,
+            $otpResendSeconds,
+            $otpResendMaxAttempts,
+            $otpResendDecayMinutes,
+            $otpTokenTtlMinutes,
+            $otpCodeTtlMinutes,
+            $otpCodeLength,
+            $otpCodePattern,
+            $otpInvalidatePreviousCodes,
+            $otpMaxFailedAttempts,
+            $otpLockMinutes,
             $tenancyEnabled,
             $tenancyMode,
             $tenancyDomainsEnabled,
@@ -450,8 +530,19 @@ class SvariumConfigurationOperation extends Operation
         string $registerActivationMode,
         bool $otpEnabled,
         array $otpMethods,
+        bool $otpShowAllMethods,
         bool $otpAllowUserDisable,
         bool $otpDefaultEnabled,
+        int $otpResendSeconds,
+        int $otpResendMaxAttempts,
+        int $otpResendDecayMinutes,
+        int $otpTokenTtlMinutes,
+        int $otpCodeTtlMinutes,
+        int $otpCodeLength,
+        string $otpCodePattern,
+        bool $otpInvalidatePreviousCodes,
+        int $otpMaxFailedAttempts,
+        int $otpLockMinutes,
         bool $tenancyEnabled,
         string $tenancyMode,
         bool $tenancyDomainsEnabled,
@@ -483,8 +574,19 @@ class SvariumConfigurationOperation extends Operation
         $config->set('auth.register.login_redirect_route', "{$authRoutePrefix}.login");
         $config->set('auth.otp.enabled', $otpEnabled);
         $config->set('auth.otp.methods', $otpMethods);
+        $config->set('auth.otp.show_all_methods', $otpShowAllMethods);
         $config->set('auth.otp.allow_user_disable', $otpAllowUserDisable);
         $config->set('auth.otp.default_enabled', $otpDefaultEnabled);
+        $config->set('auth.otp.resend_seconds', max(0, $otpResendSeconds));
+        $config->set('auth.otp.resend_limit.max_attempts', max(0, $otpResendMaxAttempts));
+        $config->set('auth.otp.resend_limit.decay_minutes', max(0, $otpResendDecayMinutes));
+        $config->set('auth.otp.token_ttl_minutes', max(1, $otpTokenTtlMinutes));
+        $config->set('auth.otp.code_ttl_minutes', max(1, $otpCodeTtlMinutes));
+        $config->set('auth.otp.code_length', max(1, min(64, $otpCodeLength)));
+        $config->set('auth.otp.code_pattern', in_array($otpCodePattern, ['digits', 'chars', 'digits_and_chars'], true) ? $otpCodePattern : 'digits');
+        $config->set('auth.otp.invalidate_previous_codes', $otpInvalidatePreviousCodes);
+        $config->set('auth.otp.verification.max_failed_attempts', max(0, $otpMaxFailedAttempts));
+        $config->set('auth.otp.verification.lock_minutes', max(0, $otpLockMinutes));
 
         $config->set('tenancy.enabled', $tenancyEnabled);
         $config->set('tenancy.mode', $tenancyMode);

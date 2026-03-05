@@ -21,6 +21,6 @@ class LogoutController extends Controller
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
-        return redirect()->route('panel.auth.login')->with(['success' => 'Zostałeś poprawnie wylogowany']);
+        return redirect()->to(svarium_login_url())->with(['success' => 'Zostałeś poprawnie wylogowany']);
     }
 }

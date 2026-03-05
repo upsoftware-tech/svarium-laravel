@@ -4,8 +4,8 @@ namespace Upsoftware\Svarium\Http;
 
 use Inertia\Inertia;
 use Symfony\Component\HttpFoundation\Response;
+use Upsoftware\Svarium\Layouts\PanelLayout as DefaultPanelLayout;
 use Upsoftware\Svarium\UI\Component;
-use Upsoftware\Svarium\UI\Layouts\PanelLayout;
 
 class ComponentResult implements OperationResult
 {
@@ -112,7 +112,7 @@ class ComponentResult implements OperationResult
 
     public function toResponse(): Response
     {
-        $layoutClass = $this->layoutClass ?? PanelLayout::class;
+        $layoutClass = $this->layoutClass ?? DefaultPanelLayout::class;
 
         $layout = app($layoutClass);
 
@@ -370,7 +370,8 @@ class ComponentResult implements OperationResult
 
         $children = [$layoutTree];
 
-        if (in_array($currentType, $definitionTypes, true)) {
+        $isDefinitionLayout = (bool) ($layoutTree['props']['__definition_layout'] ?? false);
+        if ($isDefinitionLayout || in_array($currentType, $definitionTypes, true)) {
             $flattened = $this->extractLayoutDefinitionNodes($layoutTree);
             if ($flattened !== []) {
                 $children = $flattened;

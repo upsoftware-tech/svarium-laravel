@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\Modules;
 
+use Illuminate\Support\Str;
 use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Panel\ResourceRegistry;
 
@@ -17,6 +18,18 @@ abstract class Module
     public function path(string $append = ''): string
     {
         return $this->path.($append ? DIRECTORY_SEPARATOR.$append : '');
+    }
+
+    public function translationPath(): ?string
+    {
+        $path = $this->path('Lang');
+
+        return is_dir($path) ? $path : null;
+    }
+
+    public function translationNamespace(): string
+    {
+        return (string) Str::of($this->name())->snake()->toString();
     }
 
     public function requires(): array

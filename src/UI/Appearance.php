@@ -261,6 +261,12 @@ class Appearance
             return $this->prop('borderWidth', 'border');
         }
 
+        $normalized = strtolower($value);
+
+        if (in_array($normalized, ['x', 'y', 't', 'r', 'b', 'l'], true)) {
+            return $this->prop('borderWidth', 'border-'.$normalized);
+        }
+
         return $this->prop('borderWidth', $value);
     }
 

@@ -106,10 +106,87 @@ return [
             ],
         ],
         'otp' => [
+            /**************************************************************************
+             * Służy do:
+             * Konfiguracji procesu OTP (kodów jednorazowych) dla logowania i weryfikacji.
+             *
+             * enabled:
+             * Włącza/wyłącza globalnie OTP.
+             *
+             * methods:
+             * Dostępne metody OTP (email, sms, app).
+             *
+             * token_ttl_minutes:
+             * Czas ważności tokenu sesji OTP (hash user_auth w URL method/verification).
+             *
+             * code_ttl_minutes:
+             * Czas ważności kodu OTP.
+             *
+             * code_length:
+             * Długość kodu OTP.
+             *
+             * code_pattern:
+             * Typ znaków w kodzie OTP:
+             * - digits            (tylko cyfry)
+             * - chars             (tylko litery A-Z)
+             * - digits_and_chars  (litery A-Z i cyfry)
+             *
+             * invalidate_previous_codes:
+             * true  -> nowy kod unieważnia poprzednie aktywne kody.
+             * false -> wszystkie aktywne i niewygasłe kody pozostają ważne.
+             *
+             * resend_seconds:
+             * Minimalny odstęp czasu pomiędzy kolejnymi żądaniami resend.
+             *
+             * resend_limit:
+             * Ograniczenie antyspamowe resend (max_attempts / decay_minutes).
+             *
+             * verification:
+             * Blokada po błędnych próbach wpisania kodu.
+             *
+             * show_all_methods:
+             * true  -> pokazuje wszystkie metody (również niedostępne).
+             * false -> pokazuje tylko metody aktywne/dostępne dla użytkownika.
+             *
+             * allow_user_disable:
+             * Czy użytkownik może wyłączyć OTP na swoim koncie.
+             *
+             * default_enabled:
+             * Domyślny stan OTP dla użytkownika, gdy brak ustawienia per user.
+             **************************************************************************/
             // Global OTP toggle for login flow.
             'enabled' => true,
             // Allowed methods: email, sms, app.
             'methods' => ['email', 'sms', 'app'],
+            // OTP session token lifetime in minutes (user_auth hash URL).
+            'token_ttl_minutes' => 10,
+            // OTP code lifetime in minutes.
+            'code_ttl_minutes' => 10,
+            // OTP code length.
+            'code_length' => 8,
+            // OTP code pattern: digits | chars | digits_and_chars.
+            'code_pattern' => 'digits',
+            // true = new code invalidates previous active codes.
+            'invalidate_previous_codes' => true,
+            // Seconds before the "resend code" action becomes available.
+            'resend_seconds' => 60,
+            // Resend anti-spam limiter.
+            'resend_limit' => [
+                // Max resend attempts inside decay window.
+                'max_attempts' => 5,
+                // Decay window in minutes.
+                'decay_minutes' => 15,
+            ],
+            // Verification lock after too many invalid code attempts.
+            'verification' => [
+                // Max invalid attempts before lock.
+                'max_failed_attempts' => 5,
+                // Lock duration in minutes.
+                'lock_minutes' => 15,
+            ],
+            // When true, selection screen shows all configured OTP methods (available and unavailable).
+            // When false, selection screen shows only active/available methods for current user.
+            'show_all_methods' => false,
             // When false, user cannot disable OTP in account settings.
             'allow_user_disable' => true,
             // Default user OTP status when user-specific setting is missing.
@@ -220,7 +297,7 @@ return [
         'user_auth_code' => \Upsoftware\Svarium\Models\UserAuthCode::class,
     ],
     'components' => [
-
+        'prefix' => '',
     ],
     'logo' => []
 ];

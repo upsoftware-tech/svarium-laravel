@@ -44,23 +44,28 @@ function get_title() {
 }
 
 function central_connection() {
-    if ($forcedConnection = config('svarium.database_connection')) {
+    $defaultConnection = (string) config('database.default');
+    $connections = (array) config('database.connections', []);
+    $isConfigured = static fn (?string $name): bool => is_string($name) && $name !== '' && array_key_exists($name, $connections);
+
+    $forcedConnection = config('svarium.database_connection');
+    if (is_string($forcedConnection) && $forcedConnection !== '' && $isConfigured($forcedConnection)) {
         return $forcedConnection;
     }
 
-    if (config()->has('upsoftware.tenancy.database.central_connection')) {
-        return config('upsoftware.tenancy.database.central_connection');
+    $candidates = [
+        config('upsoftware.tenancy.database.central_connection'),
+        config('tenancy.database.central_connection'),
+        'central',
+    ];
+
+    foreach ($candidates as $candidate) {
+        if (is_string($candidate) && $candidate !== '' && $isConfigured($candidate)) {
+            return $candidate;
+        }
     }
 
-    if (config()->has('tenancy.database.central_connection')) {
-        return config('tenancy.database.central_connection');
-    }
-
-    if (config()->has('database.connections.central')) {
-        return 'central';
-    }
-
-    return config('database.default');
+    return $defaultConnection;
 }
 
 if (! function_exists('svarium_tenancy_enabled')) {
@@ -408,6 +413,72 @@ if (! function_exists('route_panel')) {
     }
 }
 
+if (! function_exists('svarium_auth_login_path')) {
+    /**
+     * Resolve panel login path with priority:
+     * 1) explicit panel name,
+     * 2) first noPrefix panel,
+     * 3) first registered panel.
+     */
+    function svarium_auth_login_path(?string $panel = null): string
+    {
+        $registry = app(\Upsoftware\Svarium\Panel\PanelRegistry::class);
+        $panels = array_values(array_filter(
+            $registry->all(),
+            fn ($candidate) => $candidate instanceof \Upsoftware\Svarium\Panel\Panel
+        ));
+
+        $resolvedPanel = null;
+
+        if (is_string($panel)) {
+            $panelName = trim($panel);
+            if ($panelName !== '') {
+                $resolvedPanel = $registry->get($panelName);
+            }
+        }
+
+        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            foreach ($panels as $candidate) {
+                if ($candidate->prefix === null || trim((string) $candidate->prefix, '/') === '') {
+                    $resolvedPanel = $candidate;
+                    break;
+                }
+            }
+        }
+
+        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel && $panels !== []) {
+            $resolvedPanel = $panels[0];
+        }
+
+        $prefix = trim((string) ($resolvedPanel?->prefix ?? ''), '/');
+        $path = trim(implode('/', array_filter([$prefix, 'auth/login'])), '/');
+
+        return '/'.$path;
+    }
+}
+
+if (! function_exists('svarium_login_url')) {
+    /**
+     * Resolve login URL with priority:
+     * 1) app frontend route('login') when preferred,
+     * 2) panel auth named route,
+     * 3) resolved panel auth path.
+     */
+    function svarium_login_url(bool $preferFrontend = true): string
+    {
+        if ($preferFrontend && \Illuminate\Support\Facades\Route::has('login')) {
+            return route('login');
+        }
+
+        $panelLoginRoute = panel_route_name('login');
+        if (\Illuminate\Support\Facades\Route::has($panelLoginRoute)) {
+            return route($panelLoginRoute);
+        }
+
+        return svarium_auth_login_path();
+    }
+}
+
 if (! function_exists('panel_href')) {
     /**
      * Build panel URL path with panel prefix resolution.
@@ -441,6 +512,29 @@ if (! function_exists('register_menu')) {
         app(\Upsoftware\Svarium\Menu\MenuRegistry::class)->register($items, [
             'navigation_id' => $navigationId,
             'source' => $source ?? 'helper',
+        ]);
+    }
+}
+
+if (! function_exists('empty_state')) {
+    /**
+     * Build EmptyState component (maps to Vue Empty component).
+     */
+    function empty_state(
+        \Upsoftware\Svarium\UI\Component|array|string|int|float|bool|null $content = null
+    ): \Upsoftware\Svarium\UI\Components\EmptyState {
+        $component = \Upsoftware\Svarium\UI\Components\EmptyState::make();
+
+        if ($content === null) {
+            return $component;
+        }
+
+        if ($content instanceof \Upsoftware\Svarium\UI\Component || is_array($content)) {
+            return $component->children($content);
+        }
+
+        return $component->children([
+            \Upsoftware\Svarium\UI\Components\Text::make((string) $content),
         ]);
     }
 }

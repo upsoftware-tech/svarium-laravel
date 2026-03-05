@@ -1,0 +1,40 @@
+{
+    "Patient": "Patient",
+    "Patients": "Patients",
+    "Patients calendar": "Patients calendar",
+    "Patients page": "Patients page",
+    "Specialist": "Specialist",
+    "Specialists": "Specialists",
+    "Specialists calendar": "Specialists calendar",
+    "Specialists page": "Specialists page",
+    "module": {
+        "name": "Specialist and Institution",
+        "name_plural": "Specialists and Institutions",
+        "menu": {
+            "group": "Specialists and Institutions",
+            "list": "List",
+            "calendar": "Calendar",
+            "page": "Page"
+        },
+        "title": {
+            "calendar": "Specialists and Institutions calendar",
+            "page": "Specialists and Institutions page"
+        }
+    },
+    "specialist::module.menu.calendar": "Calendar",
+    "specialist::module.menu.group": "Specialists",
+    "specialist::module.menu.list": "List",
+    "specialist::module.menu.page": "Page",
+    "specialist::module.name": "Specialist",
+    "specialist::module.name_plural": "Specialists",
+    "specialist::module.title.calendar": "Specialists calendar",
+    "specialist::module.title.page": "Specialists page",
+    "specialist_institution::module.menu.calendar": "Calendar",
+    "specialist_institution::module.menu.group": "Specialists and Institutions",
+    "specialist_institution::module.menu.list": "List",
+    "specialist_institution::module.menu.page": "Page",
+    "specialist_institution::module.name": "Specialist and Institution",
+    "specialist_institution::module.name_plural": "Specialists and Institutions",
+    "specialist_institution::module.title.calendar": "Specialists and Institutions calendar",
+    "specialist_institution::module.title.page": "Specialists and Institutions page"
+}

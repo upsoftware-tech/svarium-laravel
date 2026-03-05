@@ -1,0 +1,38 @@
+<?php
+
+namespace App\Svarium\Modules\{{ModuleName}}\Panel;
+
+use Upsoftware\Svarium\Panel\Operation;
+use Upsoftware\Svarium\Panel\PanelContext;
+use Upsoftware\Svarium\UI\Components\Date;
+use Upsoftware\Svarium\UI\Components\Text;
+
+class {{ModuleName}}CalendarOperation extends Operation
+{
+    public static function uri(): string
+    {
+        return '{{ModuleSlug}}/calendar';
+    }
+
+    public static function methods(): array
+    {
+        return ['GET'];
+    }
+
+    public function title(): string
+    {
+        return __('{{ModuleNamePlural}} calendar');
+    }
+
+    public function schema(PanelContext $context): array
+    {
+        return [
+            Text::make(__('Calendar view'))
+                ->headline('h2')
+                ->appearance('text-xl font-semibold'),
+
+            Date::make('date')
+                ->label(__('Select date')),
+        ];
+    }
+}

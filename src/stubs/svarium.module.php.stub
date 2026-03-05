@@ -18,16 +18,5 @@ class {{ModuleName}}Module extends Module
         $this->registerResource({{ModuleName}}Resource::class);
     }
 
-    public function menu(): array
-    {
-        return [
-            MenuItem::make('{{ModuleNamePlural}}')
-                ->routeName('panel.{{ModuleNamePluralLower}}')
-                ->icon('lucide:menu')
-                ->path(['Menu 1', 'Podmenu 1.1']),
-            MenuItem::make('{{ModuleNamePlural}}')
-                ->routeName('panel.{{ModuleNamePluralLower}}')
-                ->path(['Menu 2']),
-        ];
-    }
+{{MenuMethod}}
 }

@@ -170,10 +170,12 @@ class LoginOperation extends Operation
                 ->justify('between')
                 ->items('center')
                 ->children([
-                    Block::make()->children(Toggle::make('remeber')->label('Remember me'))->padding('t-1'),
+                    Block::make()->children(Toggle::make('remeber')->label(__('Remember me')))->padding('t-1'),
                     Link::make(__('Password recovery'))->panelHref('auth/reset')->fontWeight('semibold'),
                 ]),
-            Button::make(__('Log in with your email address')),
+            Button::make(__('Log in with your email address'))
+                ->type('submit')
+                ->width('full'),
             Separator::make(__($setting['orLabel']))->margin('t-2')->if($hasSocials),
             $this->buttonGroupSocials($setting)->if($hasSocials),
             Block::make()

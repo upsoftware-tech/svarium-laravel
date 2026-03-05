@@ -21,7 +21,7 @@ class HeaderLayout implements LayoutSection
                 ->padding(4)
                 ->children([
                     Block::make()
-                        ->width('240px')
+                        ->width('168px')
                         ->children([
                             LocaleSelect::make(),
                         ]),

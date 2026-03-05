@@ -3,6 +3,8 @@
 namespace Upsoftware\Svarium\Menu;
 
 use InvalidArgumentException;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\File;
 
 class MenuRegistry
 {
@@ -10,6 +12,10 @@ class MenuRegistry
      * @var array<string, array<string, mixed>>
      */
     protected array $items = [];
+    /**
+     * @var array<string, array<string, string>>
+     */
+    protected array $reverseTranslationCache = [];
 
     /**
      * @param array<int, mixed> $items
@@ -98,6 +104,7 @@ class MenuRegistry
         }
 
         $label = isset($rawItem['label']) ? trim((string) $rawItem['label']) : '';
+        $label = $this->normalizeTranslatedLabel($label);
         $routeName = isset($rawItem['route_name']) ? trim((string) $rawItem['route_name']) : null;
         $url = isset($rawItem['url']) ? trim((string) $rawItem['url']) : null;
         $icon = isset($rawItem['icon']) ? trim((string) $rawItem['icon']) : null;
@@ -114,6 +121,14 @@ class MenuRegistry
             ...$pathPrefix,
             ...$this->normalizePath($rawItem['path'] ?? $rawItem['position'] ?? $rawItem['under'] ?? []),
         ];
+
+        [$label, $path] = $this->normalizeLeafLabelAndPath(
+            $type,
+            $label,
+            $path,
+            $routeName,
+            $url
+        );
 
         $children = isset($rawItem['children']) && is_array($rawItem['children'])
             ? $rawItem['children']
@@ -168,6 +183,47 @@ class MenuRegistry
     }
 
     /**
+     * Normalize common duplicated menu definitions:
+     * - label "Patients" + path ["Patients"] => single leaf "Patients" (no wrapper group)
+     * - label "Patients" + path ["Patients","List"] => group "Patients" + leaf "List"
+     *
+     * @param array<int, string> $path
+     * @return array{0: string, 1: array<int, string>}
+     */
+    protected function normalizeLeafLabelAndPath(
+        string $type,
+        string $label,
+        array $path,
+        ?string $routeName,
+        ?string $url
+    ): array {
+        if ($type !== 'item' || $label === '' || $path === []) {
+            return [$label, $path];
+        }
+
+        $hasTarget = ($routeName !== null && $routeName !== '') || ($url !== null && $url !== '');
+        if (! $hasTarget) {
+            return [$label, $path];
+        }
+
+        $firstSegment = $path[0] ?? null;
+        if (! is_string($firstSegment) || strcasecmp($firstSegment, $label) !== 0) {
+            return [$label, $path];
+        }
+
+        if (count($path) === 1) {
+            return [$label, []];
+        }
+
+        $lastSegment = trim((string) ($path[array_key_last($path)] ?? ''));
+        if ($lastSegment !== '') {
+            return [$lastSegment, array_slice($path, 0, -1)];
+        }
+
+        return [$label, $path];
+    }
+
+    /**
      * @return array<int, string>
      */
     protected function normalizePath(mixed $path): array
@@ -190,11 +246,162 @@ class MenuRegistry
 
             $value = trim((string) $segment);
             if ($value !== '') {
-                $normalized[] = $value;
+                $normalized[] = $this->normalizeTranslatedLabel($value);
             }
         }
 
         return $normalized;
+    }
+
+    protected function normalizeTranslatedLabel(string $label): string
+    {
+        $trimmed = trim($label);
+        if ($trimmed === '') {
+            return $label;
+        }
+
+        $locale = strtolower(trim((string) app()->getLocale()));
+        if ($locale === '') {
+            return $label;
+        }
+
+        $reverse = $this->reverseJsonTranslations($locale);
+        $normalized = $reverse[$trimmed] ?? null;
+
+        if (! is_string($normalized) || trim($normalized) === '') {
+            return $label;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function reverseJsonTranslations(string $locale): array
+    {
+        if (array_key_exists($locale, $this->reverseTranslationCache)) {
+            return $this->reverseTranslationCache[$locale];
+        }
+
+        $paths = array_filter([
+            function_exists('lang_path') ? lang_path("{$locale}.json") : null,
+            __DIR__.'/../lang/'.$locale.'.json',
+        ], static fn ($path): bool => is_string($path) && $path !== '');
+
+        $translations = [];
+
+        foreach ($paths as $path) {
+            if (! File::exists($path)) {
+                continue;
+            }
+
+            $decoded = json_decode((string) File::get($path), true);
+            if (! is_array($decoded)) {
+                continue;
+            }
+
+            foreach ($decoded as $key => $value) {
+                if (! is_string($key) || ! is_string($value)) {
+                    continue;
+                }
+
+                $key = trim($key);
+                $value = trim($value);
+
+                if ($key === '' || $value === '') {
+                    continue;
+                }
+
+                $translations[$value] = $key;
+            }
+        }
+
+        foreach ($this->reversePhpTranslations($locale) as $value => $key) {
+            if (! isset($translations[$value])) {
+                $translations[$value] = $key;
+            }
+        }
+
+        $this->reverseTranslationCache[$locale] = $translations;
+
+        return $translations;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function reversePhpTranslations(string $locale): array
+    {
+        $translations = [];
+
+        foreach ($this->phpTranslationFiles($locale) as $path) {
+            if (! File::exists($path)) {
+                continue;
+            }
+
+            $decoded = include $path;
+            if (! is_array($decoded)) {
+                continue;
+            }
+
+            foreach (Arr::dot($decoded) as $key => $value) {
+                if (! is_string($key) || ! is_string($value)) {
+                    continue;
+                }
+
+                $key = trim($key);
+                $value = trim($value);
+
+                if ($key === '' || $value === '') {
+                    continue;
+                }
+
+                if (! isset($translations[$value])) {
+                    $translations[$value] = $key;
+                }
+            }
+        }
+
+        return $translations;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function phpTranslationFiles(string $locale): array
+    {
+        $files = [];
+
+        $appLocaleDir = function_exists('lang_path') ? lang_path($locale) : null;
+        if (is_string($appLocaleDir) && $appLocaleDir !== '' && File::isDirectory($appLocaleDir)) {
+            foreach (File::files($appLocaleDir) as $file) {
+                if ($file->getExtension() === 'php') {
+                    $files[] = $file->getPathname();
+                }
+            }
+        }
+
+        $packageLocaleDir = __DIR__.'/../lang/'.$locale;
+        if (File::isDirectory($packageLocaleDir)) {
+            foreach (File::files($packageLocaleDir) as $file) {
+                if ($file->getExtension() === 'php') {
+                    $files[] = $file->getPathname();
+                }
+            }
+        }
+
+        $modulesPath = app_path('Svarium/Modules');
+        if (File::isDirectory($modulesPath)) {
+            $pattern = $modulesPath.'/*/Lang/'.$locale.'/*.php';
+            foreach ((array) glob($pattern) as $filePath) {
+                if (is_string($filePath) && $filePath !== '') {
+                    $files[] = $filePath;
+                }
+            }
+        }
+
+        return array_values(array_unique($files));
     }
 
     protected function normalizeNavigationId(string|int|null $navigationId): string|int|null

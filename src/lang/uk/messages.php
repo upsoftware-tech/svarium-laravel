@@ -45,6 +45,12 @@ return [
     'My Activity' => 'Журнал активності',
     'Dashboard' => 'Панель',
     'Remember me' => 'Запам’ятати мене',
+    'Code did not arrive?' => 'Код не надійшов?',
     'Remember browser' => 'Запам’ятати браузер',
-    'Subsequent logins on the same browser will not require an additional code' => 'Наступні входи в цьому браузері не вимагатимуть додаткового коду'
+    'Subsequent logins on the same browser will not require an additional code' => 'Наступні входи в цьому браузері не вимагатимуть додаткового коду',
+    'You can generate a new code in {minutes}:{seconds}' => 'Новий код можна згенерувати за {minutes}:{seconds}',
+    'Generate new code' => 'Згенерувати новий код',
+    'A new verification code has been sent.' => 'Новий код перевірки надіслано.',
+    'Too many resend requests. Try again in :seconds seconds.' => 'Занадто багато запитів на повторне надсилання. Спробуйте знову через :seconds с.',
+    'Too many invalid attempts. Try again in :seconds seconds.' => 'Занадто багато неправильних спроб. Спробуйте знову через :seconds с.',
 ];

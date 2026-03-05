@@ -24,8 +24,7 @@ class AuthenticateMiddleware
                 return response()->json(['message' => 'Unauthenticated.'], 401);
             }
 
-            $authRoutePrefix = config('upsoftware.panel.route_prefix', 'panel.auth');
-            return redirect()->guest(route($authRoutePrefix . '.login'));
+            return redirect()->guest(svarium_login_url());
         }
 
         return $next($request);

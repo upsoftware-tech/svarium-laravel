@@ -4,7 +4,11 @@ namespace Upsoftware\Svarium\Services;
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Upsoftware\Svarium\Menu\MenuRegistry;
+use Upsoftware\Svarium\Modules\ModuleRegistry as SvariumModuleRegistry;
+use Upsoftware\Svarium\Panel\Panel;
+use Upsoftware\Svarium\Panel\PanelRegistry;
 
 class NavigationService
 {
@@ -150,7 +154,12 @@ class NavigationService
         $registered = app(MenuRegistry::class)->allForNavigation($navigationId);
 
         foreach ($registered as $item) {
+            $source = (string) ($item['source'] ?? '');
             $path = is_array($item['path'] ?? null) ? $item['path'] : [];
+            $path = array_values(array_map(
+                fn (mixed $segment): string => $this->translateMenuLabel((string) $segment, $source),
+                $path
+            ));
             $branch = &$children;
 
             foreach ($path as $index => $segment) {
@@ -176,7 +185,87 @@ class NavigationService
      */
     protected function buildRegisteredChildren(string|int|null $navigationId): array
     {
-        return $this->appendRegisteredItems([], $navigationId);
+        $children = $this->appendRegisteredItems([], $navigationId);
+
+        return $this->ensureDashboardNode($children);
+    }
+
+    /**
+     * Ensure dashboard is always present in runtime panel navigation.
+     *
+     * @param array<int, array<string, mixed>> $children
+     * @return array<int, array<string, mixed>>
+     */
+    protected function ensureDashboardNode(array $children): array
+    {
+        $dashboardUrl = $this->resolveDashboardUrl();
+
+        foreach ($children as $index => $node) {
+            $url = trim((string) ($node['url'] ?? ''));
+            if ($url === '' || ! is_array($node['children'] ?? null) || $node['children'] !== []) {
+                continue;
+            }
+
+            if ($url === $dashboardUrl) {
+                $children[$index]['__is_dashboard'] = true;
+
+                return $this->sortNodesByOrder($children);
+            }
+        }
+
+        $children[] = [
+            'id' => 'navigation-static-dashboard:'.sha1($dashboardUrl),
+            'label' => __('Dashboard'),
+            'icon' => ['type' => 'icon', 'value' => 'lucide:layout-dashboard'],
+            'url' => $dashboardUrl,
+            'children' => [],
+            'order' => 0,
+            '__is_dashboard' => true,
+        ];
+
+        return $this->sortNodesByOrder($children);
+    }
+
+    protected function resolveDashboardUrl(): string
+    {
+        $panel = $this->resolveCurrentPanel();
+        $prefix = trim((string) ($panel?->prefix ?? ''), '/');
+
+        if ($prefix !== '') {
+            return '/'.$prefix;
+        }
+
+        return '/';
+    }
+
+    protected function resolveCurrentPanel(): ?Panel
+    {
+        /** @var PanelRegistry $registry */
+        $registry = app(PanelRegistry::class);
+
+        $panelName = request()->attributes->get('panel');
+        if (is_string($panelName) && trim($panelName) !== '') {
+            $panel = $registry->get(trim($panelName));
+            if ($panel instanceof Panel) {
+                return $panel;
+            }
+        }
+
+        $configuredPanelName = trim((string) config('upsoftware.panel.name', ''));
+        if ($configuredPanelName !== '') {
+            $panel = $registry->get($configuredPanelName);
+            if ($panel instanceof Panel) {
+                return $panel;
+            }
+        }
+
+        foreach ($registry->all() as $panel) {
+            if ($panel instanceof Panel) {
+                return $panel;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -218,9 +307,11 @@ class NavigationService
     {
         $type = (string) ($item['type'] ?? 'item');
         $signature = (string) ($item['key'] ?? '');
-        $label = (string) ($item['label'] ?? '');
+        $source = (string) ($item['source'] ?? '');
+        $label = $this->translateMenuLabel((string) ($item['label'] ?? ''), $source);
         $resolvedUrl = $this->resolveItemUrl($item);
         $order = (int) ($item['order'] ?? 0);
+        $isDashboard = $this->isDashboardItem($item, $resolvedUrl);
 
         $isGroupDeclaration = $type === 'item'
             && $label !== ''
@@ -258,7 +349,7 @@ class NavigationService
         if ($type === 'label') {
             $nodes[] = [
                 'type' => 'label',
-                'label' => (string) ($item['label'] ?? ''),
+                'label' => $label,
                 'order' => $order,
                 '__menu_key' => $signature,
             ];
@@ -278,6 +369,7 @@ class NavigationService
             'children' => [],
             'order' => $order,
             '__menu_key' => $signature,
+            '__is_dashboard' => $isDashboard,
         ];
     }
 
@@ -350,6 +442,13 @@ class NavigationService
         }
 
         usort($indexed, function (array $left, array $right): int {
+            $leftIsDashboard = (bool) ($left['__is_dashboard'] ?? false);
+            $rightIsDashboard = (bool) ($right['__is_dashboard'] ?? false);
+
+            if ($leftIsDashboard !== $rightIsDashboard) {
+                return $leftIsDashboard ? -1 : 1;
+            }
+
             $leftHasOrder = array_key_exists('order', $left);
             $rightHasOrder = array_key_exists('order', $right);
 
@@ -377,9 +476,52 @@ class NavigationService
 
         foreach ($indexed as &$node) {
             unset($node['__index']);
+            unset($node['__is_dashboard']);
         }
 
         return $indexed;
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     */
+    protected function isDashboardItem(array $item, ?string $resolvedUrl): bool
+    {
+        $routeName = strtolower(trim((string) ($item['route_name'] ?? '')));
+        if ($routeName !== '' && preg_match('/(^|\\.)dashboard$/', $routeName) === 1) {
+            return true;
+        }
+
+        $source = trim((string) ($item['source'] ?? ''));
+        if ($source !== '' && str_ends_with($source, '\\DashboardOperation')) {
+            return true;
+        }
+
+        $url = trim((string) ($resolvedUrl ?? ''));
+        if ($url === '' || $url === '#') {
+            return false;
+        }
+
+        $label = strtolower(trim((string) ($item['label'] ?? '')));
+        if ($label === '') {
+            $label = strtolower(trim($this->translateMenuLabel((string) ($item['label'] ?? ''), (string) ($item['source'] ?? ''))));
+        }
+        if ($label === '') {
+            return false;
+        }
+
+        $dashboardLabels = array_filter(array_unique([
+            strtolower(trim((string) __('Dashboard'))),
+            'dashboard',
+            'pulpit',
+            'kokpit',
+        ]));
+
+        if (! in_array($label, $dashboardLabels, true)) {
+            return false;
+        }
+
+        return in_array($url, ['/', 'admin', '/admin', 'panel', '/panel'], true);
     }
 
     /**
@@ -400,6 +542,66 @@ class NavigationService
         $url = isset($item['url']) ? trim((string) $item['url']) : '';
 
         return $url !== '' ? $url : null;
+    }
+
+    protected function translateMenuLabel(string $label, string $source = ''): string
+    {
+        $normalized = trim($label);
+        if ($normalized === '') {
+            return $label;
+        }
+
+        $direct = __($normalized);
+        if (is_string($direct) && trim($direct) !== '' && $direct !== $normalized) {
+            return $direct;
+        }
+
+        $moduleNamespace = $this->resolveModuleNamespaceFromSource($source);
+        if ($moduleNamespace !== null) {
+            $moduleKey = $moduleNamespace.'::module.'.$normalized;
+            $moduleTranslated = __($moduleKey);
+
+            if (is_string($moduleTranslated) && trim($moduleTranslated) !== '' && $moduleTranslated !== $moduleKey) {
+                return $moduleTranslated;
+            }
+        }
+
+        return $label;
+    }
+
+    protected function resolveModuleNamespaceFromSource(string $source): ?string
+    {
+        $trimmed = trim($source);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (class_exists($trimmed)) {
+            /** @var SvariumModuleRegistry $moduleRegistry */
+            $moduleRegistry = app(SvariumModuleRegistry::class);
+            $module = $moduleRegistry->getByClass($trimmed);
+
+            if ($module !== null) {
+                $namespace = trim((string) $module->translationNamespace());
+                if ($namespace !== '') {
+                    return $namespace;
+                }
+            }
+        }
+
+        if (! str_ends_with($trimmed, 'Module')) {
+            return null;
+        }
+
+        $classBase = class_basename($trimmed);
+        $moduleBase = preg_replace('/Module$/', '', $classBase) ?? $classBase;
+        $moduleBase = trim($moduleBase);
+
+        if ($moduleBase === '') {
+            return null;
+        }
+
+        return Str::snake($moduleBase);
     }
 
     protected function normalizeNavigationId(string|int|null $navigationId): string|int|null

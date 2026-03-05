@@ -2,7 +2,7 @@
 
 namespace App\Svarium\Modules\{{ModuleName}}\Tables;
 
-use App\Models\{{ModuleName}};
+use App\Svarium\Modules\{{ModuleName}}\Models\{{ModuleName}};
 use Illuminate\Database\Eloquent\Builder;
 use Upsoftware\Svarium\Panel\Table\TableBuilder;
 use Upsoftware\Svarium\UI\Components\ColumnVisibility;
@@ -17,6 +17,7 @@ class {{ModuleName}}Table
         return TableBuilder::make($query ?? static::query())
             ->columns(static::columns())
             ->actions(static::rowActions())
+{{TableDefaultActionsMode}}
             ->actionDisplay('dropdown')
             ->header(static::headerComponents())
             ->searchbar(static::searchbar())
@@ -44,10 +45,22 @@ class {{ModuleName}}Table
             ColumnVisibility::make()
                 ->variant('outline')
                 ->size('sm'),
+{{TableHeaderCreateAction}}
+        ];
+    }
 
-            Action::create()
-                ->variant('outline')
-                ->size('sm'),
+    protected static function rowActions(): array
+    {
+        return [
+{{TableRowActions}}
+        ];
+    }
+
+    protected static function searchbar(): array
+    {
+        return [
+            InputSearch::make('q')
+                ->placeholder(__('Search...')),
         ];
     }
 }

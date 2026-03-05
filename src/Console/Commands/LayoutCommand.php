@@ -39,7 +39,18 @@ class LayoutCommand extends Command
 
         $props = [];
         if ($componentName === 'NavigationVertical') {
-            $navigations = $this->navigationModel::whereNull('parent_id')->orderBy('label')->get()->mapWithKeys(function($item) { return [$item->id => $item->label]; })->toArray();
+            try {
+                $navigations = $this->navigationModel::whereNull('parent_id')
+                    ->orderBy('label')
+                    ->get()
+                    ->mapWithKeys(function ($item) {
+                        return [$item->id => $item->label];
+                    })
+                    ->toArray();
+            } catch (\Throwable) {
+                $navigations = [];
+                $this->warn('Nie udało się pobrać menu nawigacji. Kontynuuję bez listy menu.');
+            }
             $props['navigation_id'] = select('Wybierz menu nawigacyjne', array_merge(['' => 'Pomiń - nie dodawaj menu'], $navigations), $component["props"]["navigation_id"] ?? '');
         }
 

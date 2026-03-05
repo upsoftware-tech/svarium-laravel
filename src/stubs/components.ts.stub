@@ -1,14 +1,1 @@
-import { Div, Grid, Button, Card, SidebarUser, NavigationVertical, Icon, SidebarHeader, ComponentRender, Link } from '@upsoftware_tech/svarium';
-
-export const globalComponents = {
-    Div,
-    Grid,
-    Button,
-    ComponentRender,
-    Link,
-    Icon,
-    Card,
-    SidebarUser,
-    SidebarHeader,
-    NavigationVertical,
-};
+export const globalComponents = {};

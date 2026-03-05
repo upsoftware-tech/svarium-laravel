@@ -133,6 +133,11 @@ class AuthLoginService
         return (bool) config('upsoftware.auth.otp.default_enabled', true);
     }
 
+    public function showAllOtpMethods(): bool
+    {
+        return (bool) config('upsoftware.auth.otp.show_all_methods', false);
+    }
+
     public function allowedOtpMethods(): array
     {
         $configured = config('upsoftware.auth.otp.methods', self::OTP_SUPPORTED_METHODS);
@@ -155,6 +160,11 @@ class AuthLoginService
         }
 
         return array_values($normalized);
+    }
+
+    public function supportedOtpMethods(): array
+    {
+        return self::OTP_SUPPORTED_METHODS;
     }
 
     public function isOtpMethodAllowed(string $method): bool

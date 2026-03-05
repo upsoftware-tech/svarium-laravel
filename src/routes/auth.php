@@ -24,6 +24,9 @@ $middleware[] = HandleInertiaRequests::class;
 
 Route::prefix(config('upsoftware.panel.prefix'))->as('panel.')->middleware('auth.panel')->group(function() use ($middleware) {
     Route::prefix('auth')->as('auth.')->middleware($middleware)->group(function() {
+        Route::match(['get', 'post'], 'login', function (Request $request) {
+            return app(SvariumHttpKernel::class)($request);
+        })->name('login');
 
 
         Route::prefix('{type}')->group(function() {
@@ -33,8 +36,17 @@ Route::prefix(config('upsoftware.panel.prefix'))->as('panel.')->middleware('auth
 
             Route::prefix('verification')->group(function() {
                 Route::prefix('{userAuth}')->group(function() {
-                    Route::get('/', 'VerificationController@init')->name('verification');
-                    Route::post('/', 'VerificationController@set')->name('verification.set');
+                    Route::get('/', function (Request $request) {
+                        return app(SvariumHttpKernel::class)($request);
+                    })->name('verification');
+
+                    Route::post('/', function (Request $request) {
+                        return app(SvariumHttpKernel::class)($request);
+                    })->name('verification.set');
+
+                    Route::get('/resend', function (Request $request) {
+                        return app(SvariumHttpKernel::class)($request);
+                    })->name('verification.resend');
                 });
             });
         });
@@ -64,7 +76,3 @@ Route::prefix(config('upsoftware.panel.prefix'))->as('panel.')->middleware('auth
 });
 
 Route::get('locale/{locale}', LocaleController::class)->name('locale');
-
-Route::get('/login', function() {
-    return redirect()->route('panel.auth.login');
-})->name('login');

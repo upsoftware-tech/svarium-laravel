@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Panel;
 
 use Upsoftware\Svarium\Enums\TableActionDisplay;
+use Upsoftware\Svarium\Layouts\PanelLayout as DefaultPanelLayout;
 use Upsoftware\Svarium\Panel\Layout as RegisterLayout;
 
 class Panel
@@ -12,7 +13,7 @@ class Panel
         public ?string $prefix = null,
     ) {}
 
-    public ?string $layout = null;
+    public ?string $layout = DefaultPanelLayout::class;
     public ?\Closure $layoutBuilder = null;
     protected array $layoutSlots = [];
     protected array $middleware = [];

@@ -58,16 +58,28 @@ class ResourceRegistry
 
     protected function resolvePanelName(): string
     {
-        $configured = config('upsoftware.panel.name');
-
-        if (is_string($configured) && $configured !== '') {
-            return $configured;
-        }
-
         $panels = app(PanelRegistry::class)->all();
+        $configured = trim((string) config('upsoftware.panel.name', ''));
 
         if ($panels !== []) {
+            $noPrefixPanels = array_filter(
+                $panels,
+                static fn ($panel): bool => $panel instanceof Panel && $panel->prefix === null
+            );
+
+            if (count($noPrefixPanels) === 1) {
+                return (string) array_key_first($noPrefixPanels);
+            }
+
+            if ($configured !== '' && array_key_exists($configured, $panels)) {
+                return $configured;
+            }
+
             return array_key_first($panels);
+        }
+
+        if ($configured !== '') {
+            return $configured;
         }
 
         return 'admin';

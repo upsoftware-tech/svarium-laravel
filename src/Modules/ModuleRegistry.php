@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\Modules;
 
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\File;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Menu\MenuRegistry;
@@ -48,9 +49,77 @@ class ModuleRegistry
 
     public function register(Module $module): void
     {
+        $this->registerTranslations($module);
         $this->modules[$module->name()] = $module;
         app(ActivationRegistry::class)
             ->enable(get_class($module));
+    }
+
+    protected function registerTranslations(Module $module): void
+    {
+        $translationPath = $module->translationPath();
+        $namespace = trim($module->translationNamespace());
+
+        if ($translationPath === null) {
+            return;
+        }
+
+        if ($namespace !== '') {
+            app('translator')->addNamespace($namespace, $translationPath);
+        }
+
+        $this->registerGlobalTranslationLines($translationPath);
+    }
+
+    protected function registerGlobalTranslationLines(string $translationPath): void
+    {
+        if (! File::isDirectory($translationPath)) {
+            return;
+        }
+
+        foreach (File::directories($translationPath) as $localeDir) {
+            $locale = trim((string) basename($localeDir));
+            if ($locale === '') {
+                continue;
+            }
+
+            foreach (File::files($localeDir) as $file) {
+                if ($file->getExtension() !== 'php') {
+                    continue;
+                }
+
+                $group = trim((string) pathinfo($file->getFilename(), PATHINFO_FILENAME));
+                if ($group === '') {
+                    continue;
+                }
+
+                $content = include $file->getPathname();
+                if (! is_array($content)) {
+                    continue;
+                }
+
+                $flatLines = [];
+
+                foreach (Arr::dot($content) as $key => $value) {
+                    if (! is_string($key) || trim($key) === '') {
+                        continue;
+                    }
+
+                    if (is_scalar($value) || $value === null) {
+                        $flatKey = $group.'.'.ltrim(trim($key), '.');
+                        if ($flatKey === $group.'.') {
+                            continue;
+                        }
+
+                        $flatLines[$flatKey] = (string) $value;
+                    }
+                }
+
+                if ($flatLines !== []) {
+                    app('translator')->addLines($flatLines, $locale);
+                }
+            }
+        }
     }
 
     public function all(): array

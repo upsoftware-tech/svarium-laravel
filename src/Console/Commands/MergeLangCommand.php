@@ -15,6 +15,7 @@ class MergeLangCommand extends Command
     {
         $appLangPath = lang_path();
         $packageLangPath = __DIR__ . '/../../lang';
+        $requestedLocale = $this->normalizeLocale((string) ($this->argument('lang') ?? ''));
 
         if (!File::isDirectory($packageLangPath)) {
             $this->error("Nie znaleziono folderu lang w paczce: $packageLangPath");
@@ -31,6 +32,11 @@ class MergeLangCommand extends Command
             }
 
             $filename = $packageFile->getFilename(); // np. 'pl.json'
+            $locale = $this->normalizeLocale(pathinfo($filename, PATHINFO_FILENAME));
+            if ($requestedLocale !== null && $locale !== $requestedLocale) {
+                continue;
+            }
+
             $appFilePath = $appLangPath . '/' . $filename;
 
             $this->info("Przetwarzanie: $filename");
@@ -54,7 +60,9 @@ class MergeLangCommand extends Command
                 continue;
             }
 
-            $mergedContent = array_replace($packageContent ?? [], $appContent ?? []);
+            // Prefer freshly prepared package/module translations.
+            // This keeps module locale updates (e.g. en) in sync even if app JSON had older values.
+            $mergedContent = array_replace($appContent ?? [], $packageContent ?? []);
 
             ksort($mergedContent);
 
@@ -69,5 +77,14 @@ class MergeLangCommand extends Command
 
         $this->newLine();
         $this->info('Sukces! Tłumaczenia zostały scalone.');
+    }
+
+    protected function normalizeLocale(string $value): ?string
+    {
+        $normalized = strtolower(trim($value));
+        $normalized = preg_replace('/[^a-z0-9_-]/', '', $normalized) ?? '';
+        $normalized = trim($normalized);
+
+        return $normalized !== '' ? $normalized : null;
     }
 }

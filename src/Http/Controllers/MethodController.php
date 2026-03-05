@@ -37,14 +37,26 @@ class MethodController extends Controller
 
         $methods = [];
 
-        foreach ($this->authLoginService->allowedOtpMethods() as $method) {
+        $methodsToShow = $this->authLoginService->showAllOtpMethods()
+            ? $this->authLoginService->supportedOtpMethods()
+            : $this->authLoginService->allowedOtpMethods();
+
+        foreach ($methodsToShow as $method) {
             if (! isset($definitions[$method])) {
+                continue;
+            }
+
+            $isAllowed = $this->authLoginService->isOtpMethodAllowed($method);
+            $isAvailable = $this->authLoginService->isOtpMethodAvailableForUser($user, $method);
+            $isDisabled = ! $isAllowed || ! $isAvailable;
+
+            if (! $this->authLoginService->showAllOtpMethods() && $isDisabled) {
                 continue;
             }
 
             $methods[] = [
                 'id' => $method,
-                'disabled' => ! $this->authLoginService->isOtpMethodAvailableForUser($user, $method),
+                'disabled' => $isDisabled,
                 'label' => $definitions[$method]['label'],
                 'description' => $definitions[$method]['description'],
             ];
