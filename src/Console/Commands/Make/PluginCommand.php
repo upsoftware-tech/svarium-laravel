@@ -2,17 +2,18 @@
 
 namespace Upsoftware\Svarium\Console\Commands\Make;
 
-use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use Upsoftware\Svarium\Console\Commands\CoreCommand;
 
-class PluginCommand extends Command
+class PluginCommand extends CoreCommand
 {
     protected string $pluginName = '';
     protected string $pluginDir = '';
 
-    protected $signature = 'svarium:make:plugin {name?}';
-    protected $description = 'Tworzy szablon pluginu';
+    protected $signature = 'svarium:make.plugin {name?}';
+    protected $description = 'Create a plugin scaffold';
+    protected $descriptionKey = 'make.plugin';
 
     public function handle() {
         $name = $this->argument('name');

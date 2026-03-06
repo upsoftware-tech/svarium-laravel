@@ -12,6 +12,7 @@ use Upsoftware\Svarium\UI\Components\Button;
 use Upsoftware\Svarium\UI\Components\Block;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
 use Upsoftware\Svarium\UI\Components\Form\Form;
+use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 abstract class Operation
 {
@@ -72,6 +73,11 @@ abstract class Operation
     }
 
     public static function menu(): array
+    {
+        return [];
+    }
+
+    public static function widgets(): array
     {
         return [];
     }
@@ -214,7 +220,13 @@ abstract class Operation
         | SEARCH
         |--------------------------------------------------------------------------
         */
-        if ($search = $context->request()->get('search')) {
+        $search = $context->request()->get('q');
+
+        if (! is_string($search) || trim($search) === '') {
+            $search = $context->request()->get('search');
+        }
+
+        if (is_string($search) && trim($search) !== '') {
             $builder->applySearch($query, $search);
         }
 
@@ -1046,6 +1058,8 @@ abstract class Operation
                 ->footer($actions);
         }
 
+        $schema = $this->appendWidgetsToSchema($schema, $context, ...$args);
+
         $result = new ComponentResult(
             Block::make()->content($schema),
             static::$layout
@@ -1072,6 +1086,209 @@ abstract class Operation
         }
 
         return $result;
+    }
+
+    /**
+     * @param  array<int, mixed>|object  $schema
+     * @return array<int, object>
+     */
+    protected function appendWidgetsToSchema(mixed $schema, PanelContext $context, ...$args): array
+    {
+        $baseSchema = [];
+
+        if (is_array($schema)) {
+            $baseSchema = $schema;
+        } elseif (is_object($schema)) {
+            $baseSchema = [$schema];
+        }
+
+        if (! app()->bound(WidgetRegistry::class)) {
+            return $baseSchema;
+        }
+
+        $contexts = $this->resolveWidgetContexts($context);
+        if ($contexts === []) {
+            return $baseSchema;
+        }
+
+        $widgets = app(WidgetRegistry::class)->componentsForContexts($contexts, $context, $args);
+
+        if ($widgets === []) {
+            return $baseSchema;
+        }
+
+        if ($this->shouldWrapWidgetsInDashboardGrid($contexts)) {
+            $widgets = $this->wrapWidgetsInDashboardGrid($widgets);
+        }
+
+        return [...$baseSchema, ...$widgets];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function resolveWidgetContexts(PanelContext $context): array
+    {
+        $requestPath = trim((string) $context->request()->path(), '/');
+        $panelPrefix = trim((string) $context->panel()->prefixName(), '/');
+
+        if (
+            $panelPrefix !== ''
+            && ($requestPath === $panelPrefix || str_starts_with($requestPath, $panelPrefix.'/'))
+        ) {
+            $requestPath = ltrim(substr($requestPath, strlen($panelPrefix)), '/');
+        }
+
+        if ($requestPath === '') {
+            return ['dashboard'];
+        }
+
+        $paramValues = array_map(
+            static fn ($value): string => is_scalar($value) ? trim((string) $value) : '',
+            $context->params
+        );
+        $paramValues = array_filter($paramValues, static fn (string $value): bool => $value !== '');
+
+        $segments = array_values(array_filter(
+            explode('/', $requestPath),
+            static fn (string $segment): bool => trim($segment) !== ''
+        ));
+
+        $segments = array_values(array_filter(
+            $segments,
+            static fn (string $segment): bool => ! in_array(trim($segment), $paramValues, true)
+        ));
+
+        if ($segments === []) {
+            return ['dashboard'];
+        }
+
+        $dot = implode('.', $segments);
+        $contexts = [$dot];
+
+        if (count($segments) === 1) {
+            $contexts[] = $segments[0].'.index';
+            $contexts[] = $segments[0];
+        }
+
+        return array_values(array_unique(array_filter($contexts)));
+    }
+
+    /**
+     * @param  array<int, string>  $contexts
+     */
+    protected function shouldWrapWidgetsInDashboardGrid(array $contexts): bool
+    {
+        return in_array('dashboard', $contexts, true);
+    }
+
+    /**
+     * @param  array<int, object>  $widgets
+     * @return array<int, object>
+     */
+    protected function wrapWidgetsInDashboardGrid(array $widgets): array
+    {
+        $items = [];
+
+        foreach ($widgets as $widget) {
+            if (! $widget instanceof \Upsoftware\Svarium\UI\Component) {
+                continue;
+            }
+
+            $span = $this->resolveWidgetSpan($widget);
+            $cell = Block::make()
+                ->style([
+                    'gridColumn' => 'span '.$span.' / span '.$span,
+                ]);
+
+            $cardMode = $this->resolveWidgetCardMode($widget);
+
+            if ($cardMode === false) {
+                $cell->children([$widget]);
+                $items[] = $cell;
+                continue;
+            }
+
+            $card = Block::make()
+                ->border()
+                ->borderColor('slate-200', 'zinc-800')
+                ->bg('white', 'zinc-950')
+                ->rounded('xl')
+                ->padding(4)
+                ->children([$widget]);
+
+            if (is_string($cardMode) && in_array($cardMode, ['dashed', 'dotted', 'double'], true)) {
+                $card->borderStyle($cardMode);
+            }
+
+            $cell->children([$card]);
+            $items[] = $cell;
+        }
+
+        if ($items === []) {
+            return [];
+        }
+
+        return [
+            Block::make()
+                ->grid()
+                ->style([
+                    'gridTemplateColumns' => 'repeat(12, minmax(0, 1fr))',
+                    'gap' => '1rem',
+                ])
+                ->children($items),
+        ];
+    }
+
+    protected function resolveWidgetSpan(\Upsoftware\Svarium\UI\Component $widget): int
+    {
+        $meta = $widget->getProp('widget', []);
+        if (! is_array($meta)) {
+            return 4;
+        }
+
+        $span = $meta['span'] ?? 4;
+        if (! is_numeric($span)) {
+            return 4;
+        }
+
+        $resolved = (int) $span;
+
+        if ($resolved < 1 || $resolved > 12) {
+            return 4;
+        }
+
+        return $resolved;
+    }
+
+    protected function resolveWidgetCardMode(\Upsoftware\Svarium\UI\Component $widget): bool|string
+    {
+        $meta = $widget->getProp('widget', []);
+        if (! is_array($meta)) {
+            return true;
+        }
+
+        $card = $meta['card'] ?? true;
+
+        if (is_bool($card)) {
+            return $card;
+        }
+
+        if (! is_string($card)) {
+            return true;
+        }
+
+        $normalized = strtolower(trim($card));
+
+        if (in_array($normalized, ['false', '0', 'no', 'off', 'none'], true)) {
+            return false;
+        }
+
+        if (in_array($normalized, ['dashed', 'dotted', 'double'], true)) {
+            return $normalized;
+        }
+
+        return true;
     }
 
     protected function applyLayoutSlots(ComponentResult $result, array $slots): void

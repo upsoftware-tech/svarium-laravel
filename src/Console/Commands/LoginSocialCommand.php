@@ -7,9 +7,10 @@ use function Laravel\Prompts\select;
 
 class LoginSocialCommand extends CoreCommand
 {
-    protected $signature = 'svarium:login.socials';
+    protected $signature = 'svarium:auth.socials.install';
 
-    protected $description = 'Iniciuje aplikację (dodaje niezbędną konfigurację)';
+    protected $description = 'Configure social login providers (Google/Facebook/Apple/etc.)';
+    protected $descriptionKey = 'auth.socials.install';
 
     protected $default_services_config = [
         'client_id' => '@env(PROVIDER_CLIENT_ID)',

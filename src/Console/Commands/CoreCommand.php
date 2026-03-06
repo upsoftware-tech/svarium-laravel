@@ -9,11 +9,37 @@ use Winter\LaravelConfigWriter\ArrayFile;
 class CoreCommand extends Command
 {
     protected $settingModel;
+    protected $descriptionKey = null;
 
     public function __construct()
     {
         parent::__construct();
         $this->settingModel = config('svarium.models.setting', \Upsoftware\Svarium\Models\Setting::class);
+        $this->translateDescription();
+    }
+
+    protected function translateDescription(): void
+    {
+        if (! is_string($this->descriptionKey) || trim($this->descriptionKey) === '') {
+            return;
+        }
+
+        $translationKey = $this->descriptionTranslationKey($this->descriptionKey);
+        $translated = (string) __($translationKey);
+
+        if ($translated === '' || $translated === $translationKey) {
+            return;
+        }
+
+        $this->description = $translated;
+        $this->setDescription($translated);
+    }
+
+    protected function descriptionTranslationKey(string $key): string
+    {
+        $normalized = trim($key, '.');
+
+        return "svarium::commands.{$normalized}";
     }
 
     protected function addEnvKey(string $key, mixed $value, $force = false, string|bool $newLine = ''): void

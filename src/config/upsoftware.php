@@ -21,6 +21,8 @@ return [
         'action_display' => 'inline',
         'pagination' => true,
         'per_page' => 15,
+        'condesed' => false,
+        'searchbar' => false,
     ],
     'panel' => [
         'enabled' => true,

@@ -546,6 +546,18 @@ Uruchomienie z resetem (`migrate:fresh`):
 php artisan svarium:tenant.migrate --fresh
 ```
 
+Rollback migracji tenant:
+
+```bash
+php artisan svarium:tenant.migrate.rollback
+```
+
+Rollback z liczbą kroków:
+
+```bash
+php artisan svarium:tenant.migrate.rollback --step=3
+```
+
 Uruchomienie tylko dla wybranych tenantów (tryb `database`):
 
 ```bash
@@ -620,6 +632,11 @@ Uruchomienie seedowania razem z migracją:
 php artisan svarium:tenant.migrate --seed
 php artisan svarium:tenant.migrate --seed --seeder=DemoTenantSeeder
 ```
+
+Uwaga:
+- `--fresh` i `--rollback` są wzajemnie wykluczające.
+- `--seed` jest ignorowane w trybie `--rollback`.
+- komenda `svarium:tenant.migrate.rollback` jest skrótem dla `svarium:tenant.migrate --rollback`.
 
 ## Komenda tworzenia tenant
 

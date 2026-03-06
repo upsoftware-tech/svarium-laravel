@@ -2,14 +2,14 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
-use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 
-class MergeLangCommand extends Command
+class MergeLangCommand extends CoreCommand
 {
     protected $signature = 'svarium:lang.merge {lang?}';
 
-    protected $description = 'Łączy pliki JSON z paczki Svarium z plikami JSON głównej aplikacji.';
+    protected $description = 'Merge Svarium package JSON files with application JSON files.';
+    protected $descriptionKey = 'lang.merge';
 
     public function handle()
     {

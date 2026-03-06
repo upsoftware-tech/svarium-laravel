@@ -2,7 +2,6 @@
 
 namespace Upsoftware\Svarium\Console\Commands\Make;
 
-use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
@@ -12,12 +11,14 @@ use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\multiselect;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\text;
+use Upsoftware\Svarium\Console\Commands\CoreCommand;
 use Upsoftware\Svarium\Services\NavigationService;
 
-class ModuleCommand extends Command
+class ModuleCommand extends CoreCommand
 {
-    protected $signature = 'svarium:make:module {name?}';
-    protected $description = 'Create new Svarium module';
+    protected $signature = 'svarium:make.module {name?}';
+    protected $description = 'Create a new Svarium module';
+    protected $descriptionKey = 'make.module';
     protected string $menuMethod = '';
     protected string $entryView = 'table';
     protected string $resourceMode = 'crud';

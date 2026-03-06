@@ -2,16 +2,16 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
-use Illuminate\Console\Command;
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\text;
 use Illuminate\Support\Str;
 use File;
 
-class MakeResource extends Command
+class MakeResource extends CoreCommand
 {
     protected $signature = 'svarium:make.resource {resource?}';
-    protected $description = 'Create Svarium Resource';
+    protected $description = 'Create a new Svarium resource';
+    protected $descriptionKey = 'make.resource';
     protected string $resourceDir;
     protected string $resourceDirPages;
     protected string $resourceDirPagesPanel;

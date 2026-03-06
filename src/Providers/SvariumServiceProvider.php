@@ -34,6 +34,8 @@ use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 use Upsoftware\Svarium\Services\DeviceTracking\DeviceTracking;
 use Upsoftware\Svarium\Services\LayoutService;
 use Upsoftware\Svarium\Tenancy\TenancyManager;
+use Upsoftware\Svarium\Widgets\Widget;
+use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 class SvariumServiceProvider extends ServiceProvider
 {
@@ -64,6 +66,7 @@ class SvariumServiceProvider extends ServiceProvider
 
         $this->app->singleton(EventBus::class);
         $this->app->singleton(MenuRegistry::class);
+        $this->app->singleton(WidgetRegistry::class);
 
         $this->app->singleton(ModuleRegistry::class, function () {
             $registry = new ModuleRegistry;
@@ -131,9 +134,27 @@ class SvariumServiceProvider extends ServiceProvider
 
         if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
             $tenantsMigrationsPath = __DIR__.'/../database/migrations/tenants';
-            $this->loadMigrationsFrom(is_dir($tenantsMigrationsPath)
-                ? $tenantsMigrationsPath
-                : __DIR__.'/../database/migrations/tenancy');
+
+            if (is_dir($tenantsMigrationsPath)) {
+                $this->loadMigrationsFrom($tenantsMigrationsPath);
+
+                if ((bool) config('upsoftware.tenancy.owner.enabled', false)) {
+                    $ownerMigrationsPath = __DIR__.'/../database/migrations/tenants-owner';
+                    if (is_dir($ownerMigrationsPath)) {
+                        $this->loadMigrationsFrom($ownerMigrationsPath);
+                    }
+                }
+
+                if ((bool) config('upsoftware.tenancy.profile.enabled', true)) {
+                    $profileMigrationsPath = __DIR__.'/../database/migrations/tenants-profile';
+                    if (is_dir($profileMigrationsPath)) {
+                        $this->loadMigrationsFrom($profileMigrationsPath);
+                    }
+                }
+            } else {
+                // Backward-compatible fallback for installations without split wrappers.
+                $this->loadMigrationsFrom(__DIR__.'/../database/migrations/tenancy');
+            }
         }
 
         /*
@@ -199,6 +220,7 @@ class SvariumServiceProvider extends ServiceProvider
         |--------------------------------------------------------------------------
         */
         app(OperationRegistry::class)->bootFromModules($modules);
+        $this->registerWidgetsFromHook();
 
         /*
         |--------------------------------------------------------------------------
@@ -244,16 +266,9 @@ class SvariumServiceProvider extends ServiceProvider
 
             $fallbackMiddleware = ['web'];
 
-            if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
-                $fallbackMiddleware[] = InitializeTenancy::class;
-            }
-
+            $fallbackMiddleware[] = InitializeTenancy::class;
             $fallbackMiddleware[] = LocaleMiddleware::class;
-
-            if (config('upsoftware.tenancy.domains.enabled', true)) {
-                $fallbackMiddleware[] = ResolveDomainContext::class;
-            }
-
+            $fallbackMiddleware[] = ResolveDomainContext::class;
             $fallbackMiddleware[] = HandleInertiaRequests::class;
 
             Route::middleware($fallbackMiddleware)->group(function (): void {
@@ -358,9 +373,40 @@ class SvariumServiceProvider extends ServiceProvider
             }
 
             throw new ConsoleRuntimeException(
-                'Svarium nie jest zainicjalizowany. Najpierw uruchom: php artisan svarium:init'
+                'Svarium nie jest zainicjalizowany. Najpierw uruchom: php artisan svarium:app.init'
             );
         });
+    }
+
+    protected function registerWidgetsFromHook(): void
+    {
+        $widgetsPath = svarium_path('widgets.php');
+
+        if (! is_file($widgetsPath)) {
+            return;
+        }
+
+        $definitions = require $widgetsPath;
+
+        if ($definitions instanceof \Closure) {
+            $definitions = $definitions();
+        }
+
+        if ($definitions === null || $definitions === 1) {
+            return;
+        }
+
+        if ($definitions instanceof Widget) {
+            $definitions = [$definitions];
+        }
+
+        if (! is_array($definitions)) {
+            return;
+        }
+
+        app(WidgetRegistry::class)->register($definitions, [
+            'source' => $widgetsPath,
+        ]);
     }
 
     protected function shouldGuardMigrateCommand(?string $command): bool

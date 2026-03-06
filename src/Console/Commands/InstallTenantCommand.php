@@ -16,6 +16,7 @@ class InstallTenantCommand extends CoreCommand
         {--central=central : Nazwa połączenia centralnego}
         {--tenant=tenant : Nazwa połączenia tenant}
         {--template= : Istniejące połączenie bazowe (np. mysql)}
+        {--mode= : Tryb tenancy (database|column)}
         {--enable-tenancy= : Wymuś włączenie/wyłączenie tenancy (true/false)}
         {--enable-domains= : Wymuś włączenie/wyłączenie domen tenancy (true/false)}
         {--owner-enabled= : Wymuś włączenie/wyłączenie powiązania owner tenantu}
@@ -28,8 +29,8 @@ class InstallTenantCommand extends CoreCommand
         {--migrate-domains : Uruchom migracje tabel domen tenancy}
         {--force : Force execution in production}';
 
-    protected $description = 'Konfiguruje połączenia central/tenant w config/database.php';
-    protected $aliases = ['svarium:install:tenant'];
+    protected $description = 'Configure central/tenant connections in config/database.php';
+    protected $descriptionKey = 'tenant.install.default';
 
     public function handle(): int
     {
@@ -106,6 +107,7 @@ class InstallTenantCommand extends CoreCommand
         $this->addConfigKey('upsoftware.php', 'tenancy.database.tenant_connection', $tenantConnection, true);
         $this->addConfigKey('upsoftware.php', 'tenancy.database.template_connection', $templateConnection, true);
 
+        $tenancyMode = $this->resolveTenancyMode();
         $enableTenancy = $this->resolveEnableTenancy();
         $enableDomains = $this->resolveEnableDomains();
         $ownerEnabled = $this->resolveOwnerEnabled($enableTenancy);
@@ -126,6 +128,7 @@ class InstallTenantCommand extends CoreCommand
         }
 
         $this->persistTenancyToggle(
+            tenancyMode: $tenancyMode,
             enableTenancy: $enableTenancy,
             enableDomains: $enableDomains,
             ownerEnabled: $ownerEnabled,
@@ -160,6 +163,7 @@ class InstallTenantCommand extends CoreCommand
         $this->line("Central connection: {$centralConnection}");
         $this->line("Tenant connection: {$tenantConnection}");
         $this->line("Template connection: {$templateConnection}");
+        $this->line("Tenancy mode: {$tenancyMode}");
         $this->line('Tenancy enabled: '.($enableTenancy ? 'true' : 'false'));
         $this->line('Domains enabled: '.($enableDomains ? 'true' : 'false'));
         $this->line('Tenant owner binding enabled: '.($ownerEnabled ? 'true' : 'false'));
@@ -284,7 +288,34 @@ class InstallTenantCommand extends CoreCommand
         return $this->confirm('Czy utworzyć tabele domen tenancy (migracje)?', true);
     }
 
+    protected function resolveTenancyMode(): string
+    {
+        $default = strtolower(trim((string) config('upsoftware.tenancy.mode', 'column')));
+        if (! in_array($default, ['database', 'column'], true)) {
+            $default = 'column';
+        }
+
+        $option = strtolower(trim((string) $this->option('mode')));
+        if (in_array($option, ['database', 'column'], true)) {
+            return $option;
+        }
+
+        if (! $this->input->isInteractive()) {
+            return $default;
+        }
+
+        return (string) select(
+            label: 'Wybierz tryb tenancy',
+            options: [
+                'column' => 'column (jedna baza + tenant_id)',
+                'database' => 'database (osobna baza danych per tenant)',
+            ],
+            default: $default
+        );
+    }
+
     protected function persistTenancyToggle(
+        string $tenancyMode,
         bool $enableTenancy,
         bool $enableDomains,
         bool $ownerEnabled,
@@ -295,8 +326,10 @@ class InstallTenantCommand extends CoreCommand
         string $profileModel
     ): void {
         $this->addEnvKey('SVARIUM_TENANCY_ENABLED', $enableTenancy ? 'true' : 'false');
+        $this->addEnvKey('SVARIUM_TENANCY_MODE', $tenancyMode);
         $this->addEnvKey('SVARIUM_TENANCY_DOMAINS_ENABLED', $enableDomains ? 'true' : 'false');
 
+        $this->addConfigKey('upsoftware.php', 'tenancy.mode', $tenancyMode, true);
         $this->addConfigKey('upsoftware.php', 'tenancy.enabled', $enableTenancy, true);
         $this->addConfigKey('upsoftware.php', 'tenancy.domains.enabled', $enableDomains, true);
         $this->addConfigKey('upsoftware.php', 'tenancy.column.model_maps.tenants.enabled', $enableTenancy, true);
@@ -314,6 +347,7 @@ class InstallTenantCommand extends CoreCommand
         }
 
         config([
+            'upsoftware.tenancy.mode' => $tenancyMode,
             'upsoftware.tenancy.enabled' => $enableTenancy,
             'upsoftware.tenancy.domains.enabled' => $enableDomains,
             'upsoftware.tenancy.column.model_maps.tenants.enabled' => $enableTenancy,
@@ -345,27 +379,27 @@ class InstallTenantCommand extends CoreCommand
         $files = [];
 
         if ($migrateTenancy) {
-            $files[] = $base.'/2030_02_02_000001_create_tenants_table.php';
-            $files[] = $base.'/2030_02_02_000003_create_model_has_tenants_table.php';
+            $files[] = $this->packageMigrationFilePath('2030_02_02_000001_create_tenants_table.php');
+            $files[] = $this->packageMigrationFilePath('2030_02_02_000003_create_model_has_tenants_table.php');
             if ($ownerEnabled) {
-                $files[] = $base.'/2030_02_03_000007_add_tenant_owner_columns.php';
+                $files[] = $this->packageMigrationFilePath('2030_02_03_000007_add_tenant_owner_columns.php');
             }
             if ($profileEnabled) {
-                $files[] = $base.'/2030_02_03_000008_create_tenant_profiles_table.php';
+                $files[] = $this->packageMigrationFilePath('2030_02_03_000008_create_tenant_profiles_table.php');
             }
         }
 
         if ($migrateDomains && $enableTenancy) {
-            $files[] = $base.'/2030_02_02_000002_create_tenant_domains_table.php';
-            $files[] = $base.'/2030_02_02_000004_create_model_has_domain_tenants_table.php';
+            $files[] = $this->packageMigrationFilePath('2030_02_02_000002_create_tenant_domains_table.php');
+            $files[] = $this->packageMigrationFilePath('2030_02_02_000004_create_model_has_domain_tenants_table.php');
         }
 
         if ($migrateDomains) {
-            $files[] = $base.'/2030_02_03_000005_rename_tenant_domain_tables.php';
-            $files[] = $base.'/2030_02_03_000006_add_domain_context_columns.php';
+            $files[] = $this->packageMigrationFilePath('2030_02_03_000005_rename_tenant_domain_tables.php');
+            $files[] = $this->packageMigrationFilePath('2030_02_03_000006_add_domain_context_columns.php');
         }
 
-        $files = array_values(array_unique(array_filter($files, static fn ($file) => is_file($file))));
+        $files = array_values(array_unique(array_filter($files, static fn ($file) => is_string($file) && is_file($file))));
         if ($files === []) {
             return self::SUCCESS;
         }
@@ -389,6 +423,24 @@ class InstallTenantCommand extends CoreCommand
         }
 
         return self::SUCCESS;
+    }
+
+    protected function packageMigrationFilePath(string $filename): ?string
+    {
+        $candidates = [
+            __DIR__.'/../../database/migrations/tenants/'.$filename,
+            __DIR__.'/../../database/migrations/tenants-owner/'.$filename,
+            __DIR__.'/../../database/migrations/tenants-profile/'.$filename,
+            __DIR__.'/../../database/migrations/tenancy/'.$filename,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     protected function resolveOwnerEnabled(bool $tenancyEnabled): bool

@@ -112,6 +112,7 @@ class TableBuilder
     protected array $tabs = [];
 
     protected $searchbar;
+    protected ?bool $showInputSearchInSidebar = null;
 
     protected bool $tabsFromViews = false;
 
@@ -126,6 +127,8 @@ class TableBuilder
 
     protected bool $selected = true;
 
+    protected ?bool $condesed = null;
+
     protected string $filterInputSize = 'default';
 
     public function searchbar($searchbar): static
@@ -133,6 +136,18 @@ class TableBuilder
         $this->searchbar = $searchbar;
 
         return $this;
+    }
+
+    public function showInputSearchInSidebar(bool $state = true): static
+    {
+        $this->showInputSearchInSidebar = $state;
+
+        return $this;
+    }
+
+    public function pokazCzyMaBycInputSearchWSidebarze(bool $state = true): static
+    {
+        return $this->showInputSearchInSidebar($state);
     }
 
     public static function make($query): static
@@ -517,6 +532,18 @@ class TableBuilder
         $this->selected = $state;
 
         return $this;
+    }
+
+    public function condesed(bool $state = true): static
+    {
+        $this->condesed = $state;
+
+        return $this;
+    }
+
+    public function condensed(bool $state = true): static
+    {
+        return $this->condesed($state);
     }
 
     public function pagination(array $config): static
@@ -1220,19 +1247,24 @@ class TableBuilder
 
     protected function resolveSearchbarComponents(): array
     {
-        if (! $this->searchbar) {
-            return [];
-        }
-
         $components = [];
 
         if ($this->searchbar === true) {
-            $components[] = InputSearch::make('search');
+            $components[] = InputSearch::make('q');
         } elseif ($this->searchbar instanceof Component) {
             $components[] = $this->searchbar;
         } elseif (is_array($this->searchbar)) {
             $components = $this->searchbar;
         }
+
+        if ($this->shouldShowSidebarInputSearch() && ! $this->hasSearchbarInputNamed($components, 'q')) {
+            array_unshift($components, InputSearch::make('q')->placeholder(__('Search...')));
+        }
+
+        if ($components === []) {
+            return [];
+        }
+
         foreach ($components as $component) {
             if ($component instanceof DropdownSearch) {
                 $component->resolveFromQuery($this->query);
@@ -1244,6 +1276,44 @@ class TableBuilder
         }
 
         return $components;
+    }
+
+    protected function shouldShowSidebarInputSearch(): bool
+    {
+        if ($this->showInputSearchInSidebar !== null) {
+            return $this->showInputSearchInSidebar;
+        }
+
+        $configured = config('upsoftware.table.searchbar', false);
+
+        return $this->toBoolean($configured, false);
+    }
+
+    protected function hasSearchbarInputNamed(array $components, string $name): bool
+    {
+        $target = strtolower(trim($name));
+
+        if ($target === '') {
+            return false;
+        }
+
+        foreach ($components as $component) {
+            if (! $component instanceof InputSearch) {
+                continue;
+            }
+
+            $inputName = trim((string) ($component->getProp('name', '')));
+
+            if ($inputName === '') {
+                continue;
+            }
+
+            if (strtolower($inputName) === $target) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function resolveSearchAppearanceProps(): array
@@ -2754,6 +2824,7 @@ class TableBuilder
             ->prop('numberingMode', $numberingMode)
             ->prop('sticky', $this->stickySections)
             ->prop('columnSelection', $this->selected)
+            ->prop('condesed', $this->resolveCondesed())
             ->prop('rowSelectionColumn', $this->shouldRenderRowMultiSelectColumn($bulkMode))
             ->prop('hasActions', $hasActions)
             ->prop('footer', $footer)
@@ -2788,6 +2859,21 @@ class TableBuilder
         }
 
         return $table;
+    }
+
+    protected function resolveCondesed(): bool
+    {
+        if ($this->condesed !== null) {
+            return $this->condesed;
+        }
+
+        $configured = config('upsoftware.table.condesed');
+
+        if ($configured === null) {
+            $configured = config('upsoftware.table.condensed', false);
+        }
+
+        return $this->toBoolean($configured, false);
     }
 
     protected function applyConfiguredColumnAttributes(): void

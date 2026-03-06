@@ -16,9 +16,10 @@ class InitCommand extends CoreCommand
 {
     use HasTailwindColor;
 
-    protected $signature = 'svarium:init';
+    protected $signature = 'svarium:app.init';
 
-    protected $description = 'Iniciuje aplikację (dodaje niezbędną konfigurację)';
+    protected $description = 'Initialize the application (adds required configuration)';
+    protected $descriptionKey = 'app.init';
 
     protected function readEnvValue(string $key): ?string
     {
@@ -1246,7 +1247,7 @@ PHP;
             }
         }
 
-        $this->call('svarium:login.socials');
+        $this->call('svarium:auth.socials.install');
 
         $app_name = $this->ask('Nazwa aplikacji', env('APP_NAME'));
         $this->addEnvKey('APP_NAME', $app_name);

@@ -2,17 +2,17 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
-use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Route;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\text;
 use function Laravel\Prompts\multiselect;
 
-class MenuAddCommand extends Command
+class MenuAddCommand extends CoreCommand
 {
     protected $signature = 'svarium:menu.add';
 
-    protected $description = 'Dodaje nowe menu';
+    protected $description = 'Add a new menu item';
+    protected $descriptionKey = 'menu.add';
 
     protected $navigationModel;
     private $permissionModel;

@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\File;
 use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Modules\ActivationRegistry;
 use Upsoftware\Svarium\Modules\ModuleRegistry;
+use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 class OperationRegistry
 {
@@ -93,6 +94,10 @@ class OperationRegistry
                 continue;
             }
 
+            $uri = method_exists($class, 'uri')
+                ? (string) $class::uri()
+                : '';
+
             $menu = method_exists($class, 'menu')
                 ? (array) $class::menu()
                 : [];
@@ -103,9 +108,16 @@ class OperationRegistry
                 ]);
             }
 
-            $uri = method_exists($class, 'uri')
-                ? (string) $class::uri()
-                : '';
+            $widgets = method_exists($class, 'widgets')
+                ? (array) $class::widgets()
+                : [];
+
+            if ($widgets !== []) {
+                app(WidgetRegistry::class)->register($widgets, [
+                    'source' => $class,
+                    'contexts' => $this->widgetContextsFromUri($uri),
+                ]);
+            }
 
             $methods = method_exists($class, 'methods')
                 ? (array) $class::methods()
@@ -211,6 +223,49 @@ class OperationRegistry
         }
 
         return array_values(array_unique($normalized));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function widgetContextsFromUri(string $uri): array
+    {
+        $normalized = trim($uri, '/');
+
+        if ($normalized === '') {
+            return ['dashboard'];
+        }
+
+        $segments = array_values(array_filter(
+            explode('/', $normalized),
+            static function (string $segment): bool {
+                $segment = trim($segment);
+
+                if ($segment === '') {
+                    return false;
+                }
+
+                if (str_starts_with($segment, '{') && str_ends_with($segment, '}')) {
+                    return false;
+                }
+
+                return true;
+            }
+        ));
+
+        if ($segments === []) {
+            return ['dashboard'];
+        }
+
+        $dot = implode('.', $segments);
+        $contexts = [$dot];
+
+        if (count($segments) === 1) {
+            $contexts[] = $segments[0].'.index';
+            $contexts[] = $segments[0];
+        }
+
+        return array_values(array_unique(array_filter($contexts)));
     }
 
     protected function readStaticProperty(string $class, string $property): mixed

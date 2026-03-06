@@ -24,6 +24,8 @@ class Table extends Component
 
     protected ?TableActionDisplay $actionDisplay = null;
 
+    protected ?bool $condesed = null;
+
     public static function make(?string $name = null): static
     {
         return new static;
@@ -141,6 +143,19 @@ class Table extends Component
         return $this->prop('columnSelection', $state);
     }
 
+    public function condesed(bool $state = true): static
+    {
+        $this->condesed = $state;
+        $this->prop('condesed', $state);
+
+        return $this;
+    }
+
+    public function condensed(bool $state = true): static
+    {
+        return $this->condesed($state);
+    }
+
     protected function wrapActions(array $actions): array
     {
         if (empty($actions)) {
@@ -184,6 +199,19 @@ class Table extends Component
 
     public function toArray(): array
     {
+        if (! array_key_exists('condesed', $this->props)) {
+            $configured = config('upsoftware.table.condesed');
+            if ($configured === null) {
+                $configured = config('upsoftware.table.condensed', false);
+            }
+
+            $value = is_bool($configured)
+                ? $configured
+                : filter_var($configured, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+            $this->prop('condesed', $value ?? false);
+        }
+
         return parent::toArray();
     }
 }

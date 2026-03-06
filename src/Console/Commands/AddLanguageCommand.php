@@ -2,15 +2,15 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
-use Illuminate\Console\Command;
 use LaravelLang\Locales\Facades\Locales;
 use function Laravel\Prompts\select;
 
-class AddLanguageCommand extends Command
+class AddLanguageCommand extends CoreCommand
 {
     protected $signature = 'svarium:lang.add {lang?*}';
 
-    protected $description = 'Dodaj nowy język';
+    protected $description = 'Add a new language';
+    protected $descriptionKey = 'lang.add';
 
     public function handle()
     {

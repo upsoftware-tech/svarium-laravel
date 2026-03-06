@@ -8,15 +8,15 @@ class MakeTenantMigrationCommand extends CoreCommand
 {
     use InteractsWithTenantTenancy;
 
-    protected $signature = 'svarium:tenant.migration
+    protected $signature = 'svarium:make.tenant.migration
         {name : Migration name}
         {--create= : The table to be created}
         {--table= : The table to migrate}
         {--path= : Override tenant migrations path}
         {--fullpath : Output the full path of the migration}';
 
-    protected $description = 'Create tenant migration in configured tenant migrations directory';
-    protected $aliases = ['svarium:make.migrate'];
+    protected $description = 'Create a tenant migration in the configured tenant migrations directory';
+    protected $descriptionKey = 'make.tenant.migration';
 
     public function handle(): int
     {

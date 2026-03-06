@@ -52,6 +52,11 @@ abstract class Module
         return [];
     }
 
+    public function widgets(): array
+    {
+        return [];
+    }
+
     protected function registerMenu(array $items, string|int|null $navigationId = null): void
     {
         app(MenuRegistry::class)->register($items, [

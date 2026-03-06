@@ -12,7 +12,8 @@ class PanelAddCommand extends CoreCommand
         {--prefix= : URL prefix for panel (example: admin)}
         {--no-prefix : Register panel without prefix}';
 
-    protected $description = 'Add panel definition to app/Svarium/panels.php';
+    protected $description = 'Add a panel definition to app/Svarium/panels.php';
+    protected $descriptionKey = 'panel.add';
 
     public function handle(): int
     {

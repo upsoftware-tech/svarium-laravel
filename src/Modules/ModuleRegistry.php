@@ -6,6 +6,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\File;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Menu\MenuRegistry;
+use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 class ModuleRegistry
 {
@@ -133,6 +134,13 @@ class ModuleRegistry
             $menu = $module->menu();
             if (is_array($menu) && $menu !== []) {
                 app(MenuRegistry::class)->register($menu, [
+                    'source' => get_class($module),
+                ]);
+            }
+
+            $widgets = $module->widgets();
+            if (is_array($widgets) && $widgets !== []) {
+                app(WidgetRegistry::class)->register($widgets, [
                     'source' => get_class($module),
                 ]);
             }

@@ -12,12 +12,15 @@ class TenantMigrateCommand extends CoreCommand
     protected $signature = 'svarium:tenant.migrate
         {--tenant=* : Tenant IDs (database mode)}
         {--fresh : Run migrate:fresh instead of migrate}
+        {--rollback : Run migrate:rollback instead of migrate}
+        {--step=1 : Number of steps for rollback mode}
         {--seed : Run tenant seeders after migrations}
         {--seeder=* : Seeder class(es) used with --seed}
         {--path=* : Override migration path(s)}
         {--force : Force execution in production}';
 
     protected $description = 'Run tenant migrations using built-in Svarium tenancy';
+    protected $descriptionKey = 'tenant.migrate';
 
     public function handle(): int
     {
@@ -31,7 +34,9 @@ class TenantMigrateCommand extends CoreCommand
         $mode = $this->tenantMode();
         $paths = $this->tenantMigrationsPaths(
             $overridePaths,
-            includeSystem: true,
+            // In database mode central tenancy tables (tenants/domains/model maps)
+            // must stay on central DB and should not be migrated on tenant DBs.
+            includeSystem: $mode !== 'database',
             includeUser: $mode === 'database'
         );
 
@@ -40,20 +45,34 @@ class TenantMigrateCommand extends CoreCommand
         }
 
         $fresh = (bool) $this->option('fresh');
+        $rollback = (bool) $this->option('rollback');
+        $step = max(1, (int) $this->option('step'));
         $seed = (bool) $this->option('seed');
         $seederInput = array_values(array_filter((array) $this->option('seeder')));
         $force = (bool) $this->option('force');
 
-        if ($mode === 'database') {
-            return $this->migrateDatabaseTenants($paths, $fresh, $seed, $seederInput, $force);
+        if ($fresh && $rollback) {
+            $this->error('Opcje --fresh i --rollback nie mogą być użyte jednocześnie.');
+            return self::FAILURE;
         }
 
-        return $this->migrateColumnMode($paths, $fresh, $seed, $seederInput, $force);
+        if ($rollback && $seed) {
+            $this->warn('Opcja --seed jest ignorowana w trybie --rollback.');
+            $seed = false;
+        }
+
+        if ($mode === 'database') {
+            return $this->migrateDatabaseTenants($paths, $fresh, $rollback, $step, $seed, $seederInput, $force);
+        }
+
+        return $this->migrateColumnMode($paths, $fresh, $rollback, $step, $seed, $seederInput, $force);
     }
 
     protected function migrateDatabaseTenants(
         array $paths,
         bool $fresh,
+        bool $rollback,
+        int $step,
         bool $seed,
         array $seederInput,
         bool $force
@@ -72,15 +91,17 @@ class TenantMigrateCommand extends CoreCommand
             return self::SUCCESS;
         }
 
-        $seeders = $seed
+        $seeders = $seed && ! $rollback
             ? $this->resolveSeederClasses($seederInput)
             : [];
 
-        if ($seed && $seeders === []) {
+        if ($seed && ! $rollback && $seeders === []) {
             $this->warn('No tenant seeders found. Migration will run without seeding.');
         }
 
-        $command = $fresh ? 'migrate:fresh' : 'migrate';
+        $command = $rollback
+            ? 'migrate:rollback'
+            : ($fresh ? 'migrate:fresh' : 'migrate');
 
         foreach ($tenants as $tenant) {
             $connection = $this->configureRuntimeTenantConnection($tenant);
@@ -99,6 +120,10 @@ class TenantMigrateCommand extends CoreCommand
                 '--force' => $force,
             ];
 
+            if ($rollback) {
+                $migrateParams['--step'] = $step;
+            }
+
             $exitCode = $this->call($command, $migrateParams);
 
             if ($exitCode !== self::SUCCESS) {
@@ -106,7 +131,7 @@ class TenantMigrateCommand extends CoreCommand
                 return $exitCode;
             }
 
-            if ($seed && $seeders !== []) {
+            if ($seed && ! $rollback && $seeders !== []) {
                 if ($this->seedConnection($connection, $seeders, $force) !== self::SUCCESS) {
                     $this->error("Seeding failed for tenant [{$tenant->getKey()}].");
                     return self::FAILURE;
@@ -114,7 +139,11 @@ class TenantMigrateCommand extends CoreCommand
             }
         }
 
-        $this->info('Tenant migration completed (database mode).');
+        if ($rollback) {
+            $this->info('Tenant rollback completed (database mode).');
+        } else {
+            $this->info('Tenant migration completed (database mode).');
+        }
 
         return self::SUCCESS;
     }
@@ -122,12 +151,16 @@ class TenantMigrateCommand extends CoreCommand
     protected function migrateColumnMode(
         array $paths,
         bool $fresh,
+        bool $rollback,
+        int $step,
         bool $seed,
         array $seederInput,
         bool $force
     ): int {
         $connection = $this->centralConnectionName();
-        $command = $fresh ? 'migrate:fresh' : 'migrate';
+        $command = $rollback
+            ? 'migrate:rollback'
+            : ($fresh ? 'migrate:fresh' : 'migrate');
 
         $this->line("Running {$command} in column mode on connection [{$connection}]...");
 
@@ -138,10 +171,19 @@ class TenantMigrateCommand extends CoreCommand
             '--force' => $force,
         ];
 
+        if ($rollback) {
+            $migrateParams['--step'] = $step;
+        }
+
         $exitCode = $this->call($command, $migrateParams);
 
         if ($exitCode !== self::SUCCESS) {
             return $exitCode;
+        }
+
+        if ($rollback) {
+            $this->info('Tenant rollback completed (column mode).');
+            return self::SUCCESS;
         }
 
         if (! $seed) {

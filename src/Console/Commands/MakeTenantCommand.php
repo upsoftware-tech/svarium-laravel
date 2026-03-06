@@ -22,7 +22,8 @@ class MakeTenantCommand extends CoreCommand
         {--db-user= : Użytkownik bazy tenant (tylko tryb database)}
         {--db-password= : Hasło bazy tenant (tylko tryb database)}';
 
-    protected $description = 'Tworzy tenant + główną domenę (oraz dane DB w trybie database)';
+    protected $description = 'Create tenant + primary domain (and DB data in database mode)';
+    protected $descriptionKey = 'make.tenant.default';
 
     public function handle(): int
     {

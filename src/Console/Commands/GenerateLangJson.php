@@ -2,15 +2,15 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
-use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 
-class GenerateLangJson extends Command
+class GenerateLangJson extends CoreCommand
 {
 
     protected $signature = 'svarium:lang.prepare {lang?}';
 
-    protected $description = 'Konwertuje pliki tłumaczeń PHP (messages.php) na pliki JSON (pl.json)';
+    protected $description = 'Convert PHP translation files (messages.php) to JSON files (pl.json)';
+    protected $descriptionKey = 'lang.prepare';
 
     public function handle()
     {

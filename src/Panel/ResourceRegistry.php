@@ -3,6 +3,10 @@
 namespace Upsoftware\Svarium\Panel;
 
 use Illuminate\Support\Facades\Route;
+use Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;
+use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
+use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
+use Upsoftware\Svarium\Http\Middleware\ResolveDomainContext;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceCreateOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDeleteOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDuplicateOperation;
@@ -87,6 +91,13 @@ class ResourceRegistry
 
     protected function registerModuleRouteAliases(string $resourceClass, string $panel, string $slug): void
     {
+        $middleware = ['web'];
+
+        $middleware[] = InitializeTenancy::class;
+        $middleware[] = LocaleMiddleware::class;
+        $middleware[] = ResolveDomainContext::class;
+        $middleware[] = HandleInertiaRequests::class;
+
         $module = (string) str(class_basename($resourceClass))
             ->replace('Resource', '')
             ->snake();
@@ -118,7 +129,7 @@ class ResourceRegistry
                 continue;
             }
 
-            Route::middleware(['web'])
+            Route::middleware($middleware)
                 ->any($uri, SvariumHttpKernel::class)
                 ->name($name);
         }

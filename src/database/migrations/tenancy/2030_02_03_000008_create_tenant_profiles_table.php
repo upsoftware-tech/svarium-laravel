@@ -12,7 +12,7 @@ return new class extends Migration
         $foreignKey = $this->profileForeignKey();
 
         if (! Schema::hasTable($table)) {
-            Schema::create($table, function (Blueprint $blueprint) use ($foreignKey): void {
+            Schema::create($table, function (Blueprint $blueprint) use ($table, $foreignKey): void {
                 $blueprint->id();
                 $this->addTenantKeyColumn($blueprint, $foreignKey);
                 $blueprint->json('payload')->nullable();

@@ -4,7 +4,6 @@ namespace Upsoftware\Svarium\Panel\Operations;
 
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
-use Upsoftware\Svarium\UI\Components\Text;
 
 class DashboardOperation extends Operation
 {
@@ -29,11 +28,7 @@ class DashboardOperation extends Operation
     {
         $this->applyTitleIfEmpty($this->title());
 
-        return [
-            Text::make(__('Dashboard'))
-                ->headline('h1')
-                ->appearance('text-2xl font-semibold'),
-        ];
+        return [];
     }
 
     protected function applyTitleIfEmpty(string $title): void

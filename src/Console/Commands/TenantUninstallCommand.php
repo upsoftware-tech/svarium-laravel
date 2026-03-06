@@ -15,7 +15,8 @@ class TenantUninstallCommand extends CoreCommand
         {--path=* : Dodatkowe ścieżki migracji tenant}
         {--force : Force execution in production}';
 
-    protected $description = 'Wyłącza tenancy i wycofuje migracje tenant';
+    protected $description = 'Disable tenancy and rollback tenant migrations';
+    protected $descriptionKey = 'tenant.uninstall';
 
     public function handle(): int
     {

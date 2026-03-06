@@ -2,16 +2,16 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
-use Illuminate\Console\Command;
 use Upsoftware\Svarium\Traits\HasSortCommand;
 
-class SortLanguageCommand extends Command
+class SortLanguageCommand extends CoreCommand
 {
     use HasSortCommand;
 
     protected $signature = 'svarium:lang.sort';
 
-    protected $description = 'Sortowanie języków';
+    protected $description = 'Sort languages';
+    protected $descriptionKey = 'lang.sort';
 
     protected $settingModel;
 

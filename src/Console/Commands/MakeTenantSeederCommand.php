@@ -10,12 +10,13 @@ class MakeTenantSeederCommand extends CoreCommand
 {
     use InteractsWithTenantTenancy;
 
-    protected $signature = 'svarium:make.seeder
+    protected $signature = 'svarium:make.tenant.seeder
         {name : Seeder class name (example: DemoTenantSeeder or Billing/InvoiceSeeder)}
         {--path= : Override tenant seeders path}
         {--namespace= : Override tenant seeders namespace}';
 
-    protected $description = 'Create tenant seeder in configured tenant seeders directory';
+    protected $description = 'Create a tenant seeder in the configured tenant seeders directory';
+    protected $descriptionKey = 'make.tenant.seeder';
 
     public function handle(): int
     {

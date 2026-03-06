@@ -2,17 +2,17 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
-use Illuminate\Console\Command;
 use Upsoftware\Svarium\Models\Role;
 use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\multiselect;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\text;
 
-class MakePermissionCommand extends Command
+class MakePermissionCommand extends CoreCommand
 {
     protected $signature = 'svarium:permission';
-    protected $description = 'Tworzy podstawowe ustawienia uprawnień';
+    protected $description = 'Create base permission settings';
+    protected $descriptionKey = 'permission';
 
     public function handle() {
         $roles = multiselect('Jakie role chcesz utworzyć w systemie?', ['Superadministrator', 'Administrator']);

@@ -2,16 +2,17 @@
 
 namespace Upsoftware\Svarium\Console\Commands\Make;
 
-use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Upsoftware\Svarium\Console\Commands\CoreCommand;
 
-class LayoutCommand extends Command
+class LayoutCommand extends CoreCommand
 {
-    protected $signature = 'svarium:make:layout {name}';
+    protected $signature = 'svarium:make.layout {name}';
 
-    protected $description = 'Create new Svarium layout';
+    protected $description = 'Create a new Svarium layout';
+    protected $descriptionKey = 'make.layout';
 
     public function handle(): int
     {
@@ -62,4 +63,3 @@ class LayoutCommand extends Command
         return __DIR__.'/../../../stubs/'.$stubFile;
     }
 }
-

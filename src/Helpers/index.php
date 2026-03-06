@@ -516,6 +516,46 @@ if (! function_exists('register_menu')) {
     }
 }
 
+if (! function_exists('widget')) {
+    /**
+     * Build dashboard/page widget definition.
+     */
+    function widget(string $key): \Upsoftware\Svarium\Widgets\Widget
+    {
+        return \Upsoftware\Svarium\Widgets\Widget::make($key);
+    }
+}
+
+if (! function_exists('register_widget')) {
+    /**
+     * Register runtime widgets globally.
+     *
+     * Example:
+     * register_widget([
+     *   widget('pages.stats')
+     *      ->on(['dashboard', 'pages.index'])
+     *      ->schema(fn (array $data) => [\Upsoftware\Svarium\UI\Components\Block::make()]),
+     * ]);
+     */
+    function register_widget(
+        \Upsoftware\Svarium\Widgets\Widget|array $widgets,
+        string|array|null $contexts = null,
+        ?string $source = null
+    ): void {
+        $defaults = [];
+
+        if ($contexts !== null) {
+            $defaults['contexts'] = $contexts;
+        }
+
+        if (is_string($source) && trim($source) !== '') {
+            $defaults['source'] = trim($source);
+        }
+
+        app(\Upsoftware\Svarium\Widgets\WidgetRegistry::class)->register($widgets, $defaults);
+    }
+}
+
 if (! function_exists('empty_state')) {
     /**
      * Build EmptyState component (maps to Vue Empty component).

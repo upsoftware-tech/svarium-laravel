@@ -32,6 +32,12 @@ trait InteractsWithTenantTenancy
             if ($systemPath !== null) {
                 $paths[] = $systemPath;
             }
+
+            foreach ($this->packageOptionalTenantMigrationsPaths() as $optionalPath) {
+                if (! in_array($optionalPath, $paths, true)) {
+                    $paths[] = $optionalPath;
+                }
+            }
         }
 
         if ($includeUser) {
@@ -88,6 +94,30 @@ trait InteractsWithTenantTenancy
         }
 
         return null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function packageOptionalTenantMigrationsPaths(): array
+    {
+        $paths = [];
+
+        if ((bool) config('upsoftware.tenancy.owner.enabled', false)) {
+            $ownerPath = realpath(__DIR__.'/../../../database/migrations/tenants-owner');
+            if (is_string($ownerPath) && is_dir($ownerPath)) {
+                $paths[] = $ownerPath;
+            }
+        }
+
+        if ((bool) config('upsoftware.tenancy.profile.enabled', true)) {
+            $profilePath = realpath(__DIR__.'/../../../database/migrations/tenants-profile');
+            if (is_string($profilePath) && is_dir($profilePath)) {
+                $paths[] = $profilePath;
+            }
+        }
+
+        return $paths;
     }
 
     protected function tenantSeedersPath(?string $override = null): string

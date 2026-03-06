@@ -2,7 +2,6 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
-use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Upsoftware\Svarium\Traits\HasTailwindColor;
 use Winter\LaravelConfigWriter\ArrayFile;
@@ -10,7 +9,7 @@ use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\text;
 
-class LayoutCommand extends Command
+class LayoutCommand extends CoreCommand
 {
     use HasTailwindColor;
 
@@ -24,9 +23,10 @@ class LayoutCommand extends Command
         $this->navigationModel = config('svarium.models.navigation', \Upsoftware\Svarium\Models\Navigation::class);
     }
 
-    protected $signature = 'svarium:layout';
+    protected $signature = 'svarium:app.layout';
 
-    protected $description = '(Re)konfiguracja układu panelu';
+    protected $description = '(Re)configure panel layout';
+    protected $descriptionKey = 'app.layout';
 
     protected function selectColors($label = 'Wybierz kolor'): string
     {

@@ -18,6 +18,28 @@ class DropdownSearch extends Search
 
     protected ?array $staticOptions = null;
 
+    protected bool $showOnlyActive = false;
+
+    protected bool $showOnlyDefined = false;
+
+    protected bool $searchable = false;
+
+    protected string $searchPlaceholder = 'Search...';
+
+    protected int $searchMinItems = 0;
+    
+    protected int $visibleItems = 2;
+
+    protected string|array|null $color = null;
+
+    protected string|array|null $iconColor = null;
+
+    protected string $iconPosition = 'left';
+
+    protected bool $counter = true;
+
+    protected string $counterPosition = 'right';
+
     protected $mapCallback = null;
 
     protected ?string $relationName = null;
@@ -108,6 +130,102 @@ class DropdownSearch extends Search
         return $this;
     }
 
+    public function showOnlyActive(bool $state = true): static
+    {
+        $this->showOnlyActive = $state;
+
+        return $this;
+    }
+
+    public function showOnlyDefined(bool $state = true): static
+    {
+        $this->showOnlyDefined = $state;
+
+        return $this;
+    }
+
+    public function searchable(string|bool|null $placeholder = null, ?int $minItems = null): static
+    {
+        if (is_bool($placeholder)) {
+            $this->searchable = $placeholder;
+
+            if ($minItems !== null) {
+                $this->searchMinItems = max(0, $minItems);
+            }
+
+            return $this;
+        }
+
+        $this->searchable = true;
+
+        if (is_string($placeholder) && trim($placeholder) !== '') {
+            $this->searchPlaceholder = trim($placeholder);
+        }
+
+        if ($minItems !== null) {
+            $this->searchMinItems = max(0, $minItems);
+        }
+
+        return $this;
+    }
+
+    public function visibleItems(?int $count = 2): static
+    {
+        $this->visibleItems = max(1, (int) ($count ?? 2));
+
+        return $this;
+    }
+
+    public function color(string|array|null $color): static
+    {
+        $this->color = $color;
+
+        return $this;
+    }
+
+    public function iconColor(string|array|null $color): static
+    {
+        $this->iconColor = $color;
+
+        return $this;
+    }
+
+    public function iconPosition(string $position = 'left'): static
+    {
+        $normalized = strtolower(trim($position));
+        if (! in_array($normalized, ['left', 'right', 'end'], true)) {
+            $normalized = 'left';
+        }
+
+        $this->iconPosition = $normalized;
+
+        return $this;
+    }
+
+    public function counter(bool $enabled = true): static
+    {
+        $this->counter = $enabled;
+
+        return $this;
+    }
+
+    public function counterPosition(string $position = 'right'): static
+    {
+        $normalized = strtolower(trim($position));
+        if (! in_array($normalized, ['left', 'right', 'end'], true)) {
+            $normalized = 'right';
+        }
+
+        $this->counterPosition = $normalized;
+
+        return $this;
+    }
+
+    public function counterPosution(string $position = 'right'): static
+    {
+        return $this->counterPosition($position);
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Resolve items for column strategy
@@ -125,49 +243,182 @@ class DropdownSearch extends Search
             ->groupBy($this->column)
             ->get();
 
-        $this->items = $grouped
-            ->filter(fn ($row) => $row->{$this->column} !== null)
-            ->map(function ($row) use ($query) {
+        $activeByKey = [];
+        $activeOrder = [];
 
-                $value = $row->{$this->column};
-                $count = (int) $row->aggregate;
+        foreach ($grouped as $row) {
+            $value = $row->{$this->column};
 
-                $item = [
-                    'value' => $value,
-                    'count' => $count,
-                ];
+            if ($value === null) {
+                continue;
+            }
 
-                if ($this->staticOptions !== null) {
-                    if (isset($this->staticOptions[$value])) {
-                        $item = array_merge($item, $this->staticOptions[$value]);
-                    } else {
-                        $item['label'] = $value;
-                    }
-                } elseif ($this->relationName) {
+            $key = $this->normalizeItemKey($value);
 
-                    $modelClass = $query->getModel()::class;
-                    $relation = $this->relationName;
-                    $labelColumn = $this->relationLabelColumn;
+            $activeByKey[$key] = [
+                'value' => $value,
+                'count' => (int) $row->aggregate,
+            ];
 
-                    $relatedModel = (new $modelClass)->$relation()->getRelated();
+            if (! in_array($key, $activeOrder, true)) {
+                $activeOrder[] = $key;
+            }
+        }
 
-                    $map = $relatedModel
-                        ->newQuery()
-                        ->pluck($labelColumn, $relatedModel->getKeyName())
-                        ->toArray();
+        $relationMap = $this->resolveRelationMap($query);
+        $items = [];
 
-                    $item['label'] = $map[$value] ?? $value;
-                } elseif ($this->mapCallback) {
-                    $item['label'] = call_user_func($this->mapCallback, $value);
-                } else {
-                    $item['label'] = $value;
+        if ($this->staticOptions === null) {
+            foreach ($activeOrder as $key) {
+                $active = $activeByKey[$key] ?? null;
+                if (! is_array($active)) {
+                    continue;
                 }
 
-                return $item;
+                $items[] = $this->buildItem(
+                    $active['value'],
+                    (int) ($active['count'] ?? 0),
+                    null,
+                    $relationMap
+                );
+            }
 
-            })
-            ->values()
+            $this->items = array_values($items);
+
+            return;
+        }
+
+        $definedByKey = [];
+        $definedOrder = [];
+
+        foreach ($this->staticOptions as $option) {
+            if (! is_array($option) || ! array_key_exists('value', $option)) {
+                continue;
+            }
+
+            $key = $this->normalizeItemKey($option['value']);
+            $definedByKey[$key] = $option;
+
+            if (! in_array($key, $definedOrder, true)) {
+                $definedOrder[] = $key;
+            }
+        }
+
+        if (! $this->showOnlyActive) {
+            foreach ($definedOrder as $key) {
+                $option = $definedByKey[$key] ?? null;
+                if (! is_array($option) || ! array_key_exists('value', $option)) {
+                    continue;
+                }
+
+                $active = $activeByKey[$key] ?? null;
+                $value = is_array($active) ? $active['value'] : $option['value'];
+                $count = is_array($active) ? (int) ($active['count'] ?? 0) : 0;
+
+                $items[] = $this->buildItem($value, $count, $option, $relationMap);
+            }
+
+            if (! $this->showOnlyDefined) {
+                foreach ($activeOrder as $key) {
+                    if (array_key_exists($key, $definedByKey)) {
+                        continue;
+                    }
+
+                    $active = $activeByKey[$key] ?? null;
+                    if (! is_array($active)) {
+                        continue;
+                    }
+
+                    $items[] = $this->buildItem(
+                        $active['value'],
+                        (int) ($active['count'] ?? 0),
+                        null,
+                        $relationMap
+                    );
+                }
+            }
+        } else {
+            foreach ($activeOrder as $key) {
+                $active = $activeByKey[$key] ?? null;
+                if (! is_array($active)) {
+                    continue;
+                }
+
+                $option = $definedByKey[$key] ?? null;
+
+                if ($this->showOnlyDefined && ! is_array($option)) {
+                    continue;
+                }
+
+                $items[] = $this->buildItem(
+                    $active['value'],
+                    (int) ($active['count'] ?? 0),
+                    is_array($option) ? $option : null,
+                    $relationMap
+                );
+            }
+        }
+
+        $this->items = array_values($items);
+    }
+
+    protected function normalizeItemKey(mixed $value): string
+    {
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        if ($value === null) {
+            return 'null';
+        }
+
+        return (string) $value;
+    }
+
+    protected function resolveRelationMap(Builder $query): array
+    {
+        if (! $this->relationName || ! $this->relationLabelColumn) {
+            return [];
+        }
+
+        $modelClass = $query->getModel()::class;
+        $relation = $this->relationName;
+        $labelColumn = $this->relationLabelColumn;
+
+        $relatedModel = (new $modelClass)->$relation()->getRelated();
+
+        return $relatedModel
+            ->newQuery()
+            ->pluck($labelColumn, $relatedModel->getKeyName())
             ->toArray();
+    }
+
+    protected function buildItem(
+        mixed $value,
+        int $count,
+        ?array $definedOption,
+        array $relationMap
+    ): array {
+        $item = [
+            'value' => $value,
+            'count' => $count,
+        ];
+
+        if (is_array($definedOption)) {
+            $item = array_merge($item, $definedOption);
+        }
+
+        if (! array_key_exists('label', $item) || trim((string) $item['label']) === '') {
+            if ($relationMap !== []) {
+                $item['label'] = $relationMap[$value] ?? $value;
+            } elseif ($this->mapCallback) {
+                $item['label'] = call_user_func($this->mapCallback, $value);
+            } else {
+                $item['label'] = $value;
+            }
+        }
+
+        return $item;
     }
 
     public function toArray(): array
@@ -181,6 +432,17 @@ class DropdownSearch extends Search
             $props['label'] = $this->column;
         }
         $props['items'] = $this->items ?? [];
+        $props['searchable'] = [
+            'enabled' => $this->searchable,
+            'placeholder' => $this->searchPlaceholder,
+            'minItems' => $this->searchMinItems,
+        ];
+        $props['visibleItems'] = $this->visibleItems;
+        $props['color'] = $this->color;
+        $props['iconColor'] = $this->iconColor;
+        $props['iconPosition'] = $this->iconPosition;
+        $props['counter'] = $this->counter;
+        $props['counterPosition'] = $this->counterPosition;
 
         return array_merge($parent, ['props' => $props]);
     }

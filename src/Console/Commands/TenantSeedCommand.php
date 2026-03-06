@@ -17,6 +17,7 @@ class TenantSeedCommand extends CoreCommand
         {--force : Force execution in production}';
 
     protected $description = 'Seed tenant databases using built-in Svarium tenancy';
+    protected $descriptionKey = 'tenant.seed';
 
     public function handle(): int
     {

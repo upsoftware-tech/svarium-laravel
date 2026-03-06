@@ -9,17 +9,9 @@ use Upsoftware\Svarium\Http\Middleware\ResolveDomainContext;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 
 $middleware = ['web'];
-
-if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
-    $middleware[] = InitializeTenancy::class;
-}
-
+$middleware[] = InitializeTenancy::class;
 $middleware[] = LocaleMiddleware::class;
-
-if (config('upsoftware.tenancy.domains.enabled', true)) {
-    $middleware[] = ResolveDomainContext::class;
-}
-
+$middleware[] = ResolveDomainContext::class;
 $middleware[] = HandleInertiaRequests::class;
 
 Route::prefix(config('upsoftware.panel.prefix'))->as('panel.')->middleware('auth.panel')->group(function() use ($middleware) {
