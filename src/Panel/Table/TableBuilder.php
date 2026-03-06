@@ -1996,6 +1996,12 @@ class TableBuilder
                 ->children($components);
 
             return TableCell::make()
+                ->appearance([
+                    'style' => [
+                        'paddingLeft' => '2px',
+                        'paddingRight' => '2px',
+                    ],
+                ])
                 ->width('10')
                 ->children([$dropdown]);
         }

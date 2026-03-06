@@ -13,6 +13,7 @@ Ten dokument opisuje wszystkie komendy Artisan rejestrowane przez paczkę `svari
 | `svarium:menu.add` | Dodaje pozycję menu. |
 | `svarium:permission` | Tworzy bazowe role/uprawnienia. |
 | `svarium:user.add` | Dodaje użytkownika, przypisuje rolę i tenanty. |
+| `svarium:diagnose.database.connection` | Diagnozuje połączenie DB dla wybranego modelu (`upsoftware.models`). |
 | `svarium:auth.socials.install` | Konfigurator logowania social (Google/Facebook/Apple itd.). |
 | `svarium:make.resource` | Generator zasobu (resource). |
 | `svarium:make.module` | Generator modułu. |
@@ -164,6 +165,33 @@ php artisan svarium:user.add
 php artisan svarium:user.add --name="Jan Kowalski" --email="jan@example.com" --random-password
 php artisan svarium:user.add --email="anna@example.com" --role=1 --tenant=tenant_01 --tenant=tenant_02
 php artisan svarium:user.add --email="user@example.com" --password="haslo1234"
+```
+
+### `svarium:diagnose.database.connection`
+
+Diagnozuje połączenie DB dla wybranego modelu:
+
+- możesz wskazać model przez `--model={key}` (np. `user`) albo pełną klasę modelu,
+- bez `--model` komenda działa interaktywnie i pokazuje listę modeli z `config('upsoftware.models')`,
+- wynik zawiera m.in.:
+  - klucz modelu,
+  - klasę modelu,
+  - tabelę,
+  - nazwę połączenia z modelu i nazwę finalnie rozwiązaną,
+  - `driver`, `host`, `port`, `database`, `username`, `password`.
+
+Składnia:
+
+```bash
+php artisan svarium:diagnose.database.connection {--model=}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:diagnose.database.connection
+php artisan svarium:diagnose.database.connection --model=user
+php artisan svarium:diagnose.database.connection --model="Upsoftware\\Svarium\\Models\\User"
 ```
 
 ### `svarium:auth.socials.install`
