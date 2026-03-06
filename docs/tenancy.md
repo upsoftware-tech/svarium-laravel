@@ -126,6 +126,7 @@ Jeśli chcesz ograniczać rekordy do wybranych domen jednego tenanta, zobacz:
 Tenant jest rozpoznawany po domenie, a następnie Svarium przełącza połączenie na `tenancy.database.tenant_connection`.
 
 Dane dostępowe do bazy tenanta są brane z pól rekordu tenanta:
+- `env` (`local|prod|development`)
 - `tenancy_db_host`
 - `tenancy_db_port`
 - `tenancy_db_name`
@@ -432,6 +433,9 @@ Logowanie/reset i sprawdzanie ról w Svarium korzystają z helperów tenancy:
 Ważne:
 - migracje użytkownika tenant są uruchamiane na bazach tenantów (tryb `database`),
 - w trybie `column` migracje użytkownika tenant są pomijane (nie idą do bazy centralnej).
+- domyślnie tenanty są filtrowane po `APP_ENV`:
+  - komenda porównuje `APP_ENV` z kolumną `tenants.env`,
+  - aby uruchomić migracje dla wszystkich tenantów niezależnie od środowiska, użyj `--all`.
 
 Tworzenie migracji tenant w folderze z konfiguracji:
 
@@ -540,6 +544,12 @@ Uruchomienie migracji tenant:
 php artisan svarium:tenant.migrate
 ```
 
+Uruchomienie dla wszystkich tenantów (bez filtra `APP_ENV`):
+
+```bash
+php artisan svarium:tenant.migrate --all
+```
+
 Uruchomienie z resetem (`migrate:fresh`):
 
 ```bash
@@ -550,6 +560,12 @@ Rollback migracji tenant:
 
 ```bash
 php artisan svarium:tenant.migrate.rollback
+```
+
+Rollback dla wszystkich tenantów (bez filtra `APP_ENV`):
+
+```bash
+php artisan svarium:tenant.migrate.rollback --all
 ```
 
 Rollback z liczbą kroków:

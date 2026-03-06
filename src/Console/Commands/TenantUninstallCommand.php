@@ -40,6 +40,7 @@ class TenantUninstallCommand extends CoreCommand
             $this->warn('Brak dodatkowych ścieżek migracji tenant do wycofania.');
         }
 
+        $this->synchronizeModelHasRolesTenancySchema(false);
         $this->dropTenancyTables();
         $this->synchronizeDomainsTableName(false);
 

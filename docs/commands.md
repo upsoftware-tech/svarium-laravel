@@ -473,6 +473,8 @@ Obsługuje:
 - `--fresh`,
 - `--rollback`,
 - `--step`,
+- domyślny filtr tenantów po `APP_ENV` (kolumna `tenants.env`),
+- `--all` (pomija filtr środowiska i uruchamia dla wszystkich tenantów),
 - `--seed` + `--seeder`,
 - `--tenant=*` (w trybie `database`),
 - `--path=*` (nadpisanie ścieżek).
@@ -480,7 +482,7 @@ Obsługuje:
 Składnia:
 
 ```bash
-php artisan svarium:tenant.migrate {--tenant=*} {--fresh} {--rollback} {--step=1} {--seed} {--seeder=*} {--path=*} {--force}
+php artisan svarium:tenant.migrate {--tenant=*} {--fresh} {--rollback} {--step=1} {--all} {--seed} {--seeder=*} {--path=*} {--force}
 ```
 
 Przykłady:
@@ -490,6 +492,7 @@ php artisan svarium:tenant.migrate
 php artisan svarium:tenant.migrate --tenant=1 --tenant=2
 php artisan svarium:tenant.migrate --fresh --seed
 php artisan svarium:tenant.migrate --rollback --step=2
+php artisan svarium:tenant.migrate --all
 ```
 
 ### `svarium:tenant.migrate.rollback`
@@ -499,7 +502,7 @@ Skrót rollbacku dla migracji tenancy.
 Składnia:
 
 ```bash
-php artisan svarium:tenant.migrate.rollback {--tenant=*} {--step=1} {--path=*} {--force}
+php artisan svarium:tenant.migrate.rollback {--tenant=*} {--step=1} {--all} {--path=*} {--force}
 ```
 
 Przykłady:
@@ -507,6 +510,7 @@ Przykłady:
 ```bash
 php artisan svarium:tenant.migrate.rollback
 php artisan svarium:tenant.migrate.rollback --tenant=5 --step=3
+php artisan svarium:tenant.migrate.rollback --all
 ```
 
 ### `svarium:tenant.seed`

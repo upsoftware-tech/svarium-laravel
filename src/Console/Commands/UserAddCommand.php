@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -33,6 +34,7 @@ class UserAddCommand extends CoreCommand
             $userModelClass = $this->resolveModelClass('upsoftware.models.user', config('auth.providers.users.model', \App\Models\User::class));
             $roleModelClass = $this->resolveModelClass('permission.models.role', \Spatie\Permission\Models\Role::class);
             $tenantModelClass = $this->resolveOptionalModelClass('upsoftware.models.tenant');
+            $this->validatePrerequisitesBeforePrompt($userModelClass, $roleModelClass, $tenantModelClass);
 
             $name = $this->resolveName();
             $email = $this->resolveEmail($userModelClass);
@@ -40,7 +42,13 @@ class UserAddCommand extends CoreCommand
             $guard = $this->resolveGuardNameForUserModel($userModelClass, (string) config('auth.defaults.guard', 'web'));
 
             $role = $this->resolveRole($roleModelClass, $guard);
-            $tenantIds = $this->resolveTenantIds($tenantModelClass);
+            $tenantIds = [];
+
+            if ($this->shouldAssignTenants()) {
+                $tenantIds = $this->resolveTenantIds($tenantModelClass);
+            } elseif ((array) $this->option('tenant') !== []) {
+                $this->warn('Tenancy jest wyłączone, więc parametr --tenant został pominięty.');
+            }
 
             $user = $this->createOrUpdateUser($userModelClass, $name, $email, $password);
 
@@ -63,6 +71,113 @@ class UserAddCommand extends CoreCommand
 
             return self::FAILURE;
         }
+    }
+
+    protected function shouldAssignTenants(): bool
+    {
+        return (bool) config('upsoftware.tenancy.enabled', config('tenancy.enabled', false));
+    }
+
+    protected function validatePrerequisitesBeforePrompt(
+        string $userModelClass,
+        string $roleModelClass,
+        ?string $tenantModelClass
+    ): void {
+        $errors = [];
+
+        $errors = array_merge($errors, $this->validateUserStorage($userModelClass));
+        $errors = array_merge($errors, $this->validateRolesStorage($roleModelClass));
+
+        if ($this->shouldAssignTenants()) {
+            $errors = array_merge($errors, $this->validateTenantsStorage($tenantModelClass));
+        }
+
+        if ($errors !== []) {
+            throw new RuntimeException(implode(PHP_EOL, array_values(array_unique($errors))));
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function validateUserStorage(string $userModelClass): array
+    {
+        $errors = [];
+
+        /** @var Model $prototype */
+        $prototype = new $userModelClass();
+        $table = $prototype->getTable();
+
+        if (! Schema::hasTable($table)) {
+            $errors[] = "Tabela użytkownika [{$table}] nie istnieje.";
+            return $errors;
+        }
+
+        if (! Schema::hasColumn($table, 'email')) {
+            $errors[] = "Tabela [{$table}] nie ma kolumny email.";
+        }
+
+        if (! Schema::hasColumn($table, 'password')) {
+            $errors[] = "Tabela [{$table}] nie ma kolumny password.";
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function validateRolesStorage(string $roleModelClass): array
+    {
+        $errors = [];
+
+        /** @var Model $prototype */
+        $prototype = new $roleModelClass();
+        $table = $prototype->getTable();
+
+        if (! Schema::hasTable($table)) {
+            $errors[] = "Tabela [{$table}] nie istnieje. Najpierw uruchom migracje ról.";
+            return $errors;
+        }
+
+        try {
+            if (! $roleModelClass::query()->exists()) {
+                $errors[] = 'Brak ról w tabeli roles. Najpierw utwórz role.';
+            }
+        } catch (Throwable $exception) {
+            $errors[] = 'Nie udało się odczytać ról: '.$exception->getMessage();
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param  class-string<Model>|null  $tenantModelClass
+     * @return array<int, string>
+     */
+    protected function validateTenantsStorage(?string $tenantModelClass): array
+    {
+        $errors = [];
+
+        if ($tenantModelClass === null) {
+            $errors[] = 'Model tenanta nie jest skonfigurowany. Nie można przypisać tenanta.';
+            return $errors;
+        }
+
+        if (! Schema::hasTable('tenants')) {
+            $errors[] = 'Tabela tenants nie istnieje. Utwórz tenanty przed dodaniem użytkownika.';
+            return $errors;
+        }
+
+        try {
+            if (! $tenantModelClass::query()->exists()) {
+                $errors[] = 'Brak tenantów. Najpierw utwórz tenant.';
+            }
+        } catch (Throwable $exception) {
+            $errors[] = 'Nie udało się odczytać tenantów: '.$exception->getMessage();
+        }
+
+        return $errors;
     }
 
     protected function resolveName(): string
@@ -420,8 +535,24 @@ class UserAddCommand extends CoreCommand
             return;
         }
 
-        foreach ($tenantIds as $tenantId) {
-            $this->insertRolePivotRow($query, $modelKeyColumn, $modelType, $userKey, $roleId, $tenantId, $statusColumn, $table);
+        try {
+            foreach ($tenantIds as $tenantId) {
+                $this->insertRolePivotRow($query, $modelKeyColumn, $modelType, $userKey, $roleId, $tenantId, $statusColumn, $table);
+            }
+        } catch (Throwable $exception) {
+            if (! $this->isDuplicateModelHasRolesException($exception)) {
+                throw $exception;
+            }
+
+            // Fallback for installations with Spatie default primary key
+            // (role_id + model_id + model_type) that does not include tenant_id.
+            $query
+                ->where('model_type', $modelType)
+                ->where($modelKeyColumn, $userKey)
+                ->delete();
+
+            $this->insertRolePivotRow($query, $modelKeyColumn, $modelType, $userKey, $roleId, null, $statusColumn, $table);
+            $this->warn('Tabela model_has_roles nie wspiera wielu tenantów dla tej samej roli (PK bez tenant_id). Zapisano rolę globalnie, a przypisanie tenantów realizuje model_has_tenants.');
         }
 
         $this->forgetPermissionCache();
@@ -665,5 +796,20 @@ class UserAddCommand extends CoreCommand
         }
 
         app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();
+    }
+
+    protected function isDuplicateModelHasRolesException(Throwable $exception): bool
+    {
+        if (! $exception instanceof QueryException) {
+            return false;
+        }
+
+        $table = strtolower((string) config('permission.table_names.model_has_roles', 'model_has_roles'));
+        $message = strtolower($exception->getMessage());
+        $driverCode = (string) ($exception->errorInfo[1] ?? '');
+
+        return $driverCode === '1062'
+            && str_contains($message, 'duplicate entry')
+            && str_contains($message, $table);
     }
 }

@@ -27,6 +27,7 @@ class Tenant extends Model
         'name',
         'slug',
         'status',
+        'env',
         'owner_type',
         'owner_id',
         'tenancy_db_host',
@@ -38,6 +39,7 @@ class Tenant extends Model
 
     protected $casts = [
         'status' => 'boolean',
+        'env' => 'string',
         'tenancy_db_name' => EncryptedOrPlainText::class,
         'tenancy_db_username' => EncryptedOrPlainText::class,
         'tenancy_db_password' => EncryptedOrPlainText::class,

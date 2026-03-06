@@ -2,8 +2,10 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
+use Throwable;
 use Upsoftware\Svarium\Console\Commands\Concerns\InteractsWithTenantTenancy;
 use Winter\LaravelConfigWriter\ArrayFile;
 use function Laravel\Prompts\select;
@@ -159,6 +161,8 @@ class InstallTenantCommand extends CoreCommand
             }
         }
 
+        $this->synchronizeModelHasRolesTenancySchema($enableTenancy);
+
         $this->info('Dodano/odświeżono konfigurację tenancy w config/database.php');
         $this->line("Central connection: {$centralConnection}");
         $this->line("Tenant connection: {$tenantConnection}");
@@ -186,6 +190,7 @@ class InstallTenantCommand extends CoreCommand
     protected function makeConnectionConfig(ArrayFile $config, array $template, string $envPrefix): array
     {
         $connection = $template;
+        $safeFallbacks = $this->safeConnectionFallbacks($template, $envPrefix);
 
         $map = [
             'driver' => "{$envPrefix}_DB_DRIVER",
@@ -205,10 +210,50 @@ class InstallTenantCommand extends CoreCommand
                 continue;
             }
 
-            $connection[$key] = $config->constant($this->envExpression($envKey, $connection[$key]));
+            $fallback = $safeFallbacks[$key] ?? $connection[$key];
+            $connection[$key] = $config->constant($this->envExpression($envKey, $fallback));
         }
 
         return $connection;
+    }
+
+    /**
+     * @param array<string, mixed> $template
+     * @return array<string, mixed>
+     */
+    protected function safeConnectionFallbacks(array $template, string $envPrefix): array
+    {
+        $driver = trim((string) ($template['driver'] ?? 'mysql'));
+        if ($driver === '') {
+            $driver = 'mysql';
+        }
+
+        $charset = trim((string) ($template['charset'] ?? 'utf8mb4'));
+        if ($charset === '') {
+            $charset = 'utf8mb4';
+        }
+
+        $collation = trim((string) ($template['collation'] ?? 'utf8mb4_unicode_ci'));
+        if ($collation === '') {
+            $collation = 'utf8mb4_unicode_ci';
+        }
+
+        $defaultDatabase = str_contains($envPrefix, 'TENANT')
+            ? 'svarium_tenant'
+            : 'svarium_central';
+
+        return [
+            'driver' => $driver,
+            'url' => null,
+            'host' => '127.0.0.1',
+            'port' => '3306',
+            'database' => $defaultDatabase,
+            'username' => 'svarium',
+            'password' => '',
+            'unix_socket' => '',
+            'charset' => $charset,
+            'collation' => $collation,
+        ];
     }
 
     protected function envExpression(string $envKey, mixed $default): string
@@ -407,6 +452,7 @@ class InstallTenantCommand extends CoreCommand
         $connection = $this->centralConnectionName();
 
         foreach ($files as $file) {
+            $this->prepareTenantMigrationReplayIfNeeded($connection, $file);
             $this->line('Migracja tenancy: '.$file);
 
             $exitCode = $this->call('migrate', [
@@ -423,6 +469,94 @@ class InstallTenantCommand extends CoreCommand
         }
 
         return self::SUCCESS;
+    }
+
+    protected function prepareTenantMigrationReplayIfNeeded(string $connection, string $file): void
+    {
+        $migration = pathinfo($file, PATHINFO_FILENAME);
+        if ($migration === '') {
+            return;
+        }
+
+        $expectedTables = $this->expectedTenantTablesForMigration($migration);
+        if ($expectedTables === []) {
+            return;
+        }
+
+        if (! $this->migrationRecordExists($connection, $migration)) {
+            return;
+        }
+
+        if ($this->anyTableExists($connection, $expectedTables)) {
+            return;
+        }
+
+        try {
+            DB::connection($connection)
+                ->table('migrations')
+                ->where('migration', $migration)
+                ->delete();
+
+            $this->warn("Brak tabel dla wykonanej migracji [{$migration}] - usuwam wpis z tabeli migrations i uruchamiam ponownie.");
+        } catch (Throwable $exception) {
+            $this->warn("Nie udało się przygotować ponownego uruchomienia migracji [{$migration}]: {$exception->getMessage()}");
+        }
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function expectedTenantTablesForMigration(string $migration): array
+    {
+        return match (true) {
+            str_contains($migration, 'create_tenants_table') => ['tenants'],
+            str_contains($migration, 'create_model_has_tenants_table') => ['model_has_tenants'],
+            str_contains($migration, 'create_tenant_domains_table') => ['tenant_domains', 'domains'],
+            str_contains($migration, 'create_model_has_domain_tenants_table') => ['model_has_domain_tenants', 'model_has_domains'],
+            str_contains($migration, 'create_tenant_profiles_table') => [
+                trim((string) config('upsoftware.tenancy.profile.table', 'tenant_profiles')) ?: 'tenant_profiles',
+            ],
+            default => [],
+        };
+    }
+
+    protected function migrationRecordExists(string $connection, string $migration): bool
+    {
+        try {
+            if (! Schema::connection($connection)->hasTable('migrations')) {
+                return false;
+            }
+
+            return DB::connection($connection)
+                ->table('migrations')
+                ->where('migration', $migration)
+                ->exists();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * @param  array<int, string>  $tables
+     */
+    protected function anyTableExists(string $connection, array $tables): bool
+    {
+        foreach ($tables as $table) {
+            $name = trim((string) $table);
+            if ($name === '') {
+                continue;
+            }
+
+            try {
+                if (Schema::connection($connection)->hasTable($name)) {
+                    return true;
+                }
+            } catch (Throwable) {
+                // Ignore.
+            }
+        }
+
+        return false;
     }
 
     protected function packageMigrationFilePath(string $filename): ?string

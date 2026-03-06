@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Console\Commands;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
@@ -45,6 +46,14 @@ class MakeTenantCommand extends CoreCommand
                 'slug' => $slug,
                 'status' => ! (bool) $this->option('inactive'),
             ];
+
+            $tenantRuntimeEnvironment = $this->normalizeRuntimeEnvironment();
+            $tenantPrototype = new $tenantModel();
+            $tenantTable = $tenantPrototype->getTable();
+
+            if (Schema::hasColumn($tenantTable, 'env')) {
+                $attributes['env'] = $tenantRuntimeEnvironment;
+            }
 
             if ($this->tenantMode() === 'database') {
                 $attributes = [
@@ -265,5 +274,20 @@ class MakeTenantCommand extends CoreCommand
 
             $this->warn('To pole jest wymagane.');
         }
+    }
+
+    protected function normalizeRuntimeEnvironment(?string $value = null): string
+    {
+        $environment = strtolower(trim((string) ($value ?? app()->environment())));
+
+        if (in_array($environment, ['prod', 'production'], true)) {
+            return 'prod';
+        }
+
+        if ($environment === 'local') {
+            return 'local';
+        }
+
+        return 'development';
     }
 }

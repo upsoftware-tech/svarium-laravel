@@ -2,6 +2,9 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
 use RuntimeException;
 use Upsoftware\Svarium\Console\Commands\Concerns\InteractsWithTenantTenancy;
 
@@ -14,6 +17,7 @@ class TenantMigrateCommand extends CoreCommand
         {--fresh : Run migrate:fresh instead of migrate}
         {--rollback : Run migrate:rollback instead of migrate}
         {--step=1 : Number of steps for rollback mode}
+        {--all : Run for all tenants, ignore env filter}
         {--seed : Run tenant seeders after migrations}
         {--seeder=* : Seeder class(es) used with --seed}
         {--path=* : Override migration path(s)}
@@ -78,6 +82,7 @@ class TenantMigrateCommand extends CoreCommand
         bool $force
     ): int {
         $tenantIds = array_values(array_filter((array) $this->option('tenant')));
+        $all = (bool) $this->option('all');
 
         try {
             $tenants = $this->resolveTenants($tenantIds);
@@ -85,6 +90,8 @@ class TenantMigrateCommand extends CoreCommand
             $this->error($exception->getMessage());
             return self::FAILURE;
         }
+
+        $tenants = $this->filterTenantsByRuntimeEnvironment($tenants, $all);
 
         if ($tenants->isEmpty()) {
             $this->warn('No tenants found for migration.');
@@ -223,5 +230,63 @@ class TenantMigrateCommand extends CoreCommand
         $this->info('Tenant seeding completed.');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * @param  EloquentCollection<int, Model>  $tenants
+     * @return EloquentCollection<int, Model>
+     */
+    protected function filterTenantsByRuntimeEnvironment(EloquentCollection $tenants, bool $all): EloquentCollection
+    {
+        if ($all) {
+            return $tenants;
+        }
+
+        try {
+            $tenantModel = $this->resolveTenantModelClass();
+            /** @var Model $tenantPrototype */
+            $tenantPrototype = new $tenantModel();
+            $table = $tenantPrototype->getTable();
+
+            if (! Schema::hasColumn($table, 'env')) {
+                $this->warn("Tabela [{$table}] nie zawiera kolumny env. Pomijam filtr APP_ENV.");
+                return $tenants;
+            }
+        } catch (\Throwable) {
+            return $tenants;
+        }
+
+        $runtimeEnvironment = $this->normalizeRuntimeEnvironment((string) app()->environment());
+        $beforeCount = $tenants->count();
+
+        $filtered = $tenants
+            ->filter(function (Model $tenant) use ($runtimeEnvironment): bool {
+                $tenantEnvironment = $tenant->getAttribute('env');
+                $tenantEnvironment = $this->normalizeRuntimeEnvironment((string) $tenantEnvironment);
+
+                return $tenantEnvironment === $runtimeEnvironment;
+            })
+            ->values();
+
+        if ($beforeCount !== $filtered->count()) {
+            $this->line("APP_ENV filter: {$runtimeEnvironment} (matched: {$filtered->count()}/{$beforeCount})");
+        }
+
+        return $filtered;
+    }
+
+    protected function normalizeRuntimeEnvironment(?string $value = null): string
+    {
+        $environment = strtolower(trim((string) ($value ?? app()->environment())));
+
+        if (in_array($environment, ['prod', 'production'], true)) {
+            return 'prod';
+        }
+
+        if ($environment === 'local') {
+            return 'local';
+        }
+
+        return 'development';
     }
 }

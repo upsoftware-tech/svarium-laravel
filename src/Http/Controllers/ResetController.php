@@ -4,7 +4,7 @@ namespace Upsoftware\Svarium\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
-use App\Models\User;
+use Illuminate\Support\Facades\Schema;
 
 class ResetController extends Controller
 {
@@ -18,19 +18,57 @@ class ResetController extends Controller
             'email' => ['required', 'string', 'email:rfc,dns'],
         ]);
 
-        $tenant_id = false;
-        $user = User::where('email', $request->email)->first();
+        $tenant_id = tenant()?->id;
+        $userModel = get_model('user');
+        $user = $userModel::query()->where('email', $request->email)->first();
         $has_role = false;
 
         if ($user) {
-            if (tenant() && tenant()->id) {
-                $tenant_id = tenant()->id;
-            }
-            $queryRole = get_model('model_has_role')::where('model_id', $user->id)->where('model_type', 'App\Models\User')->where('status', 1);
+            $modelType = ltrim($user::class, '\\');
+            $roleModel = get_model('model_has_role');
+            $queryRole = $roleModel::query()
+                ->where('model_id', $user->id)
+                ->where('model_type', $modelType)
+                ->where('status', 1);
+
             if (svarium_tenancy_column_mode()) {
-                $queryRole->where('tenant_id', $tenant_id);
+                $table = (new $roleModel())->getTable();
+                $connection = (new $roleModel())->getConnectionName();
+                $hasTenantColumn = is_string($connection) && $connection !== ''
+                    ? Schema::connection($connection)->hasColumn($table, 'tenant_id')
+                    : Schema::hasColumn($table, 'tenant_id');
+
+                if ($hasTenantColumn && $tenant_id !== null && $tenant_id !== '') {
+                    $tenantRoleExists = (clone $queryRole)
+                        ->where('tenant_id', $tenant_id)
+                        ->exists();
+
+                    if ($tenantRoleExists) {
+                        $has_role = true;
+                    } else {
+                        $globalRoleExists = (clone $queryRole)
+                            ->where(function ($builder): void {
+                                $builder->whereNull('tenant_id')->orWhere('tenant_id', '');
+                            })
+                            ->exists();
+
+                        if ($globalRoleExists) {
+                            $mapModel = get_model('model_has_tenant');
+                            $has_role = $mapModel::query()
+                                ->where('model_id', $user->id)
+                                ->where('model_type', $modelType)
+                                ->where('tenant_id', $tenant_id)
+                                ->exists();
+                        } else {
+                            $has_role = false;
+                        }
+                    }
+                } else {
+                    $has_role = $queryRole->exists();
+                }
+            } else {
+                $has_role = $queryRole->exists();
             }
-            $has_role = $queryRole->count() > 0;
         }
 
         $session = sha1(md5(time()));

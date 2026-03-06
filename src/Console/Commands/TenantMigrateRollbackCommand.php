@@ -7,6 +7,7 @@ class TenantMigrateRollbackCommand extends CoreCommand
     protected $signature = 'svarium:tenant.migrate.rollback
         {--tenant=* : Tenant IDs (database mode)}
         {--step=1 : Number of steps for rollback mode}
+        {--all : Run for all tenants, ignore env filter}
         {--path=* : Override migration path(s)}
         {--force : Force execution in production}';
 
@@ -21,9 +22,9 @@ class TenantMigrateRollbackCommand extends CoreCommand
             '--tenant' => (array) $this->option('tenant'),
             '--rollback' => true,
             '--step' => $step,
+            '--all' => (bool) $this->option('all'),
             '--path' => (array) $this->option('path'),
             '--force' => (bool) $this->option('force'),
         ]);
     }
 }
-

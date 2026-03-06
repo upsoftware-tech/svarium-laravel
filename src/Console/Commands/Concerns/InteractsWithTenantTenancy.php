@@ -2,14 +2,334 @@
 
 namespace Upsoftware\Svarium\Console\Commands\Concerns;
 
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 trait InteractsWithTenantTenancy
 {
+    protected function synchronizeModelHasRolesTenancySchema(bool $enableTenancy): void
+    {
+        $connection = $this->resolveConnectionForTenancySchemaSync();
+        if ($connection === null) {
+            return;
+        }
+
+        $table = trim((string) config('permission.table_names.model_has_roles', 'model_has_roles'));
+        if ($table === '') {
+            $table = 'model_has_roles';
+        }
+
+        if (! Schema::connection($connection)->hasTable($table)) {
+            return;
+        }
+
+        if ($enableTenancy) {
+            $this->enableModelHasRolesTenancySchema($connection, $table);
+            return;
+        }
+
+        $this->disableModelHasRolesTenancySchema($connection, $table);
+    }
+
+    protected function enableModelHasRolesTenancySchema(string $connection, string $table): void
+    {
+        $useNumericTenantId = $this->tenantIdUsesNumericTypeForConnection($connection);
+
+        if (! Schema::connection($connection)->hasColumn($table, 'tenant_id')) {
+            try {
+                Schema::connection($connection)->table($table, function (Blueprint $blueprint) use ($useNumericTenantId): void {
+                    if ($useNumericTenantId) {
+                        $blueprint->unsignedBigInteger('tenant_id')->nullable();
+                        return;
+                    }
+
+                    $blueprint->string('tenant_id')->nullable();
+                });
+            } catch (Throwable $exception) {
+                $this->warn("Nie udało się dodać kolumny tenant_id do {$table}: {$exception->getMessage()}");
+                return;
+            }
+        } else {
+            $this->alignModelHasRolesTenantIdType($connection, $table);
+        }
+
+        if (! $this->indexExists($connection, $table, 'model_has_roles_tenant_lookup_index')) {
+            try {
+                Schema::connection($connection)->table($table, function (Blueprint $blueprint): void {
+                    $blueprint->index(['tenant_id', 'model_type', 'model_id'], 'model_has_roles_tenant_lookup_index');
+                });
+            } catch (Throwable $exception) {
+                $this->warn("Nie udało się dodać indeksu model_has_roles_tenant_lookup_index: {$exception->getMessage()}");
+            }
+        }
+
+        if (! $this->indexExists($connection, $table, 'model_has_roles_role_model_tenant_unique')) {
+            try {
+                Schema::connection($connection)->table($table, function (Blueprint $blueprint): void {
+                    $blueprint->unique(
+                        ['role_id', 'model_id', 'model_type', 'tenant_id'],
+                        'model_has_roles_role_model_tenant_unique'
+                    );
+                });
+            } catch (Throwable $exception) {
+                $this->warn("Nie udało się dodać unikalnego indeksu model_has_roles_role_model_tenant_unique: {$exception->getMessage()}");
+            }
+        }
+
+        if ($this->indexExists($connection, $table, 'PRIMARY')) {
+            try {
+                Schema::connection($connection)->table($table, function (Blueprint $blueprint): void {
+                    $blueprint->dropPrimary();
+                });
+            } catch (Throwable $exception) {
+                $this->warn("Nie udało się usunąć PRIMARY KEY z {$table}: {$exception->getMessage()}");
+            }
+        }
+
+        $this->ensureModelHasRolesTenantForeignKey($connection, $table);
+    }
+
+    protected function disableModelHasRolesTenancySchema(string $connection, string $table): void
+    {
+        foreach ([
+            'model_has_roles_tenant_foreign',
+            'model_has_roles_tenant_id_foreign',
+        ] as $foreignKey) {
+            $this->dropForeignIfExists($connection, $table, $foreignKey);
+        }
+
+        $this->dropIndexIfExists($connection, $table, 'model_has_roles_role_model_tenant_unique', 'unique');
+        $this->dropIndexIfExists($connection, $table, 'model_has_roles_tenant_lookup_index', 'index');
+
+        if (! $this->indexExists($connection, $table, 'PRIMARY')) {
+            try {
+                Schema::connection($connection)->table($table, function (Blueprint $blueprint): void {
+                    $blueprint->primary(['role_id', 'model_id', 'model_type']);
+                });
+            } catch (Throwable $exception) {
+                $this->warn("Nie udało się przywrócić PRIMARY KEY w {$table}: {$exception->getMessage()}");
+            }
+        }
+
+        if (Schema::connection($connection)->hasColumn($table, 'tenant_id')) {
+            try {
+                Schema::connection($connection)->table($table, function (Blueprint $blueprint): void {
+                    $blueprint->dropColumn('tenant_id');
+                });
+            } catch (Throwable $exception) {
+                $this->warn("Nie udało się usunąć kolumny tenant_id z {$table}: {$exception->getMessage()}");
+            }
+        }
+    }
+
+    protected function ensureModelHasRolesTenantForeignKey(string $connection, string $table): void
+    {
+        if (! Schema::connection($connection)->hasTable('tenants')) {
+            return;
+        }
+
+        if (! Schema::connection($connection)->hasColumn($table, 'tenant_id')) {
+            return;
+        }
+
+        if (! $this->tenantColumnsAreCompatibleForConnection($connection, $table, 'tenant_id')) {
+            return;
+        }
+
+        if ($this->foreignKeyExists($connection, $table, 'model_has_roles_tenant_foreign')) {
+            return;
+        }
+
+        try {
+            Schema::connection($connection)->table($table, function (Blueprint $blueprint): void {
+                $blueprint->foreign('tenant_id', 'model_has_roles_tenant_foreign')
+                    ->references('id')
+                    ->on('tenants')
+                    ->cascadeOnDelete();
+            });
+        } catch (Throwable $exception) {
+            $this->warn("Nie udało się dodać FK model_has_roles_tenant_foreign: {$exception->getMessage()}");
+        }
+    }
+
+    protected function alignModelHasRolesTenantIdType(string $connection, string $table): void
+    {
+        if (! $this->tenantColumnsAreCompatibleForConnection($connection, $table, 'tenant_id')) {
+            $useNumericTenantId = $this->tenantIdUsesNumericTypeForConnection($connection);
+
+            try {
+                Schema::connection($connection)->table($table, function (Blueprint $blueprint) use ($useNumericTenantId): void {
+                    if ($useNumericTenantId) {
+                        $blueprint->unsignedBigInteger('tenant_id')->nullable()->change();
+                        return;
+                    }
+
+                    $blueprint->string('tenant_id')->nullable()->change();
+                });
+            } catch (Throwable) {
+                // Ignore conversion errors; FK creation will be skipped.
+            }
+        }
+    }
+
+    protected function resolveConnectionForTenancySchemaSync(): ?string
+    {
+        $preferred = trim((string) $this->centralConnectionName());
+        if ($this->databaseConnectionConfigured($preferred)) {
+            return $preferred;
+        }
+
+        $fallback = trim((string) config('database.default', ''));
+        if ($this->databaseConnectionConfigured($fallback)) {
+            return $fallback;
+        }
+
+        return null;
+    }
+
+    protected function databaseConnectionConfigured(string $connection): bool
+    {
+        if ($connection === '') {
+            return false;
+        }
+
+        $config = config("database.connections.{$connection}");
+
+        return is_array($config) && $config !== [];
+    }
+
+    protected function tenantIdUsesNumericTypeForConnection(string $connection): bool
+    {
+        if (! Schema::connection($connection)->hasTable('tenants')
+            || ! Schema::connection($connection)->hasColumn('tenants', 'id')) {
+            return true;
+        }
+
+        try {
+            $type = strtolower((string) Schema::connection($connection)->getColumnType('tenants', 'id'));
+        } catch (Throwable) {
+            return true;
+        }
+
+        return $this->isNumericType($type);
+    }
+
+    protected function tenantColumnsAreCompatibleForConnection(string $connection, string $table, string $column): bool
+    {
+        if (! Schema::connection($connection)->hasTable('tenants')
+            || ! Schema::connection($connection)->hasTable($table)) {
+            return false;
+        }
+
+        if (! Schema::connection($connection)->hasColumn('tenants', 'id')
+            || ! Schema::connection($connection)->hasColumn($table, $column)) {
+            return false;
+        }
+
+        try {
+            $tenantType = strtolower((string) Schema::connection($connection)->getColumnType('tenants', 'id'));
+            $pivotType = strtolower((string) Schema::connection($connection)->getColumnType($table, $column));
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $this->isNumericType($tenantType) === $this->isNumericType($pivotType);
+    }
+
+    protected function isNumericType(string $type): bool
+    {
+        return in_array($type, [
+            'bigint',
+            'biginteger',
+            'unsignedbigint',
+            'int',
+            'integer',
+            'mediumint',
+            'smallint',
+            'tinyint',
+            'unsignedinteger',
+        ], true);
+    }
+
+    protected function indexExists(string $connection, string $table, string $indexName): bool
+    {
+        try {
+            $databaseName = (string) DB::connection($connection)->getDatabaseName();
+            if ($databaseName === '') {
+                return false;
+            }
+
+            return DB::connection($connection)
+                ->table('information_schema.statistics')
+                ->where('table_schema', $databaseName)
+                ->where('table_name', $table)
+                ->where('index_name', $indexName)
+                ->exists();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    protected function foreignKeyExists(string $connection, string $table, string $constraintName): bool
+    {
+        try {
+            $databaseName = (string) DB::connection($connection)->getDatabaseName();
+            if ($databaseName === '') {
+                return false;
+            }
+
+            return DB::connection($connection)
+                ->table('information_schema.table_constraints')
+                ->where('table_schema', $databaseName)
+                ->where('table_name', $table)
+                ->where('constraint_name', $constraintName)
+                ->where('constraint_type', 'FOREIGN KEY')
+                ->exists();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    protected function dropForeignIfExists(string $connection, string $table, string $constraintName): void
+    {
+        if (! $this->foreignKeyExists($connection, $table, $constraintName)) {
+            return;
+        }
+
+        try {
+            DB::connection($connection)->statement("ALTER TABLE `{$table}` DROP FOREIGN KEY `{$constraintName}`");
+        } catch (Throwable) {
+            // Ignore.
+        }
+    }
+
+    protected function dropIndexIfExists(string $connection, string $table, string $indexName, string $type = 'index'): void
+    {
+        if (! $this->indexExists($connection, $table, $indexName)) {
+            return;
+        }
+
+        try {
+            Schema::connection($connection)->table($table, function (Blueprint $blueprint) use ($indexName, $type): void {
+                if ($type === 'unique') {
+                    $blueprint->dropUnique($indexName);
+                    return;
+                }
+
+                $blueprint->dropIndex($indexName);
+            });
+        } catch (Throwable) {
+            // Ignore.
+        }
+    }
+
     protected function tenantMode(): string
     {
         $mode = strtolower(trim((string) config('upsoftware.tenancy.mode', 'column')));

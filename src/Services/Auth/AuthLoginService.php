@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Services\Auth;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\Hash;
@@ -238,11 +239,82 @@ class AuthLoginService
             ->where('model_type', $modelType)
             ->where('status', 1);
 
-        if (svarium_tenancy_column_mode()) {
-            $query->where('tenant_id', $tenantId);
+        if (! svarium_tenancy_column_mode()) {
+            return $query->exists();
         }
 
-        return $query->exists();
+        if ($tenantId === null || $tenantId === '') {
+            return false;
+        }
+
+        if (! $this->roleTableHasTenantColumn($modelHasRole)) {
+            return $query->exists()
+                && $this->userBelongsToTenant($user, $tenantId);
+        }
+
+        $tenantRoleExists = (clone $query)
+            ->where('tenant_id', $tenantId)
+            ->exists();
+
+        if ($tenantRoleExists) {
+            return true;
+        }
+
+        $globalRoleExists = (clone $query)
+            ->where(function ($builder): void {
+                $builder->whereNull('tenant_id')->orWhere('tenant_id', '');
+            })
+            ->exists();
+
+        if (! $globalRoleExists) {
+            return false;
+        }
+
+        return $this->userBelongsToTenant($user, $tenantId);
+    }
+
+    protected function roleTableHasTenantColumn(mixed $modelHasRole): bool
+    {
+        if (! is_string($modelHasRole) || ! class_exists($modelHasRole)) {
+            return false;
+        }
+
+        try {
+            $model = new $modelHasRole();
+            $table = (string) $model->getTable();
+            $connection = $model->getConnectionName();
+
+            if ($table === '') {
+                return false;
+            }
+
+            return is_string($connection) && $connection !== ''
+                ? Schema::connection($connection)->hasColumn($table, 'tenant_id')
+                : Schema::hasColumn($table, 'tenant_id');
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    protected function userBelongsToTenant(mixed $user, mixed $tenantId): bool
+    {
+        $modelHasTenant = get_model('model_has_tenant');
+
+        if (! is_string($modelHasTenant) || ! class_exists($modelHasTenant)) {
+            return false;
+        }
+
+        $modelType = ltrim($user::class, '\\');
+
+        try {
+            return $modelHasTenant::query()
+                ->where('model_id', $user->id)
+                ->where('model_type', $modelType)
+                ->where('tenant_id', $tenantId)
+                ->exists();
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     protected function shouldRemember(Request $request): bool
