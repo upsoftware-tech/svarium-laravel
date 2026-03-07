@@ -150,6 +150,13 @@ Czyli oba URL działają:
 - `->condesed(bool $state = true)`
 - `->condensed(bool $state = true)` (alias)
 
+### Eksport
+
+- `->exported(true)` - eksport włączony (domyślnie).
+- `->exported(false)` - eksport wyłączony.
+- `->exported('sql', 'csv')` - dozwolone formaty eksportu.
+- `->exported(['sql', 'txt'])` - dozwolone formaty eksportu (wariant tablicowy).
+
 ### Akcje
 
 - `->actions(array $actions)`
@@ -199,6 +206,7 @@ Najczęściej używane:
 - `->sortable()`
 - `->searchable()`
 - `->selected(false)` - blokuje zaznaczanie tej kolumny z poziomu nagłówka.
+- `->exported(bool $state = true)` - steruje, czy kolumna ma być uwzględniana w eksporcie (`true` domyślnie).
 - `->hide()`
 - `->state(fn ($row) => ...)`
 - `->default(...)`
@@ -211,6 +219,14 @@ Najczęściej używane:
 - `->date('Y-m-d')`, `->dateTime('Y-m-d H:i')`, `->time('H:i')`, `->format('...')`
 - `->action(Action::edit())`
 - `->footer('...')`
+
+Przykład wyłączenia kolumny z eksportu:
+
+```php
+Column::make('internal_note')
+    ->label('Internal note')
+    ->exported(false);
+```
 
 Dla wyglądu:
 

@@ -112,6 +112,11 @@ Przykład:
 - `public_auth_route_patterns` – route names dostępne bez auth middleware.
 - `public_auth_path_patterns` – ścieżki dostępne bez auth middleware.
 
+## `lang`
+
+- `key_locale` – locale używany do rozwiązywania kluczy tłumaczeń w atrybutach pól (np. gdy w `attributes.php` jest `__('First Name')`).
+- Praktycznie: backend przekaże klucz (np. `First Name`), a frontend przetłumaczy go dynamicznie po zmianie języka.
+
 ## `auth`
 
 ### `auth.register`
@@ -241,4 +246,4 @@ Przykład:
 - `SVARIUM_TENANCY_CENTRAL_CONNECTION`
 - `SVARIUM_TENANCY_TENANT_CONNECTION`
 - `SVARIUM_TENANCY_TEMPLATE_CONNECTION`
-
+- `SVARIUM_LANG_KEY_LOCALE`

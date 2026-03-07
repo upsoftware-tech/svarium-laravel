@@ -4,6 +4,7 @@ namespace Upsoftware\Svarium\Modules;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\File;
+use Illuminate\Translation\Translator;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
@@ -136,7 +137,7 @@ class ModuleRegistry
         $fieldAttributesRegistry->addLockedDefinitions($this->resolveGlobalFieldAttributes());
 
         foreach ($this->modules as $module) {
-            $fieldAttributes = $module->fieldAttributes();
+            $fieldAttributes = $this->resolveFieldAttributesWithKeyLocale($module);
             if (is_array($fieldAttributes) && $fieldAttributes !== []) {
                 $fieldAttributesRegistry->addDefinitions($fieldAttributes);
             }
@@ -167,13 +168,61 @@ class ModuleRegistry
             return [];
         }
 
-        $definitions = require $file;
+        $definitions = $this->withFieldAttributesLocale(static function () use ($file) {
+            $resolved = require $file;
 
-        if ($definitions instanceof \Closure) {
-            $definitions = $definitions();
-        }
+            if ($resolved instanceof \Closure) {
+                return $resolved();
+            }
+
+            return $resolved;
+        });
 
         return is_array($definitions) ? $definitions : [];
+    }
+
+    protected function resolveFieldAttributesWithKeyLocale(Module $module): array
+    {
+        $resolved = $this->withFieldAttributesLocale(static fn () => $module->fieldAttributes());
+
+        return is_array($resolved) ? $resolved : [];
+    }
+
+    protected function withFieldAttributesLocale(callable $resolver): mixed
+    {
+        $translator = app('translator');
+
+        if (! $translator instanceof Translator) {
+            return $resolver();
+        }
+
+        $originalLocale = $translator->getLocale();
+        $keyLocale = $this->fieldAttributesKeyLocale($originalLocale);
+
+        if ($keyLocale === $originalLocale) {
+            return $resolver();
+        }
+
+        app()->setLocale($keyLocale);
+        $translator->setLocale($keyLocale);
+
+        try {
+            return $resolver();
+        } finally {
+            app()->setLocale($originalLocale);
+            $translator->setLocale($originalLocale);
+        }
+    }
+
+    protected function fieldAttributesKeyLocale(string $fallback): string
+    {
+        $configured = config('upsoftware.lang.key_locale');
+
+        if (is_string($configured) && trim($configured) !== '') {
+            return trim($configured);
+        }
+
+        return 'en';
     }
 
     public function bootPhase(): void

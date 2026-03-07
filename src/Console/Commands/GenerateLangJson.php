@@ -15,6 +15,7 @@ class GenerateLangJson extends CoreCommand
     public function handle()
     {
         $langPath = __DIR__.'/../../lang';
+        $globalSvariumLangPath = app_path('Svarium/Lang');
         $modulesPath = app_path('Svarium/Modules');
         $requestedLocale = $this->normalizeLocale((string) ($this->argument('lang') ?? ''));
 
@@ -43,6 +44,15 @@ class GenerateLangJson extends CoreCommand
             }
         }
 
+        if (File::isDirectory($globalSvariumLangPath)) {
+            foreach (File::directories($globalSvariumLangPath) as $localeDir) {
+                $locale = $this->normalizeLocale(basename($localeDir));
+                if ($locale !== null) {
+                    $locales[$locale] = true;
+                }
+            }
+        }
+
         if ($requestedLocale !== null) {
             $locales = [$requestedLocale => true];
         }
@@ -53,8 +63,6 @@ class GenerateLangJson extends CoreCommand
         }
 
         foreach (array_keys($locales) as $locale) {
-            $this->info("Przetwarzanie języka: $locale");
-
             $translations = [];
 
             $packageLocaleDir = $langPath.'/'.$locale;
@@ -81,6 +89,11 @@ class GenerateLangJson extends CoreCommand
                 $this->buildModuleTranslations($modulesPath, $locale)
             );
 
+            $translations = array_replace_recursive(
+                $translations,
+                $this->buildGlobalSvariumTranslations($globalSvariumLangPath, $locale)
+            );
+
             $jsonFile = $langPath . "/$locale.json";
             $existingJson = [];
 
@@ -96,12 +109,9 @@ class GenerateLangJson extends CoreCommand
                 $jsonFile,
                 json_encode($finalTranslations, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
             );
-
-            $this->info("Zapisano: $locale.json (" . count($finalTranslations) . " kluczy)");
         }
 
-        $this->newLine();
-        $this->info('Gotowe.');
+        $this->info('Przygotowano pliki do łączenia tłumaczeń');
     }
 
     /**
@@ -123,6 +133,37 @@ class GenerateLangJson extends CoreCommand
             }
 
             $content = include $filePath;
+            if (! is_array($content)) {
+                continue;
+            }
+
+            $translations = array_replace_recursive($translations, $content);
+        }
+
+        return $translations;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function buildGlobalSvariumTranslations(string $globalLangPath, string $locale): array
+    {
+        if (! File::isDirectory($globalLangPath)) {
+            return [];
+        }
+
+        $localeDirectory = $globalLangPath.'/'.$locale;
+        if (! File::isDirectory($localeDirectory)) {
+            return [];
+        }
+
+        $translations = [];
+        foreach (File::files($localeDirectory) as $file) {
+            if ($file->getExtension() !== 'php') {
+                continue;
+            }
+
+            $content = include $file->getPathname();
             if (! is_array($content)) {
                 continue;
             }

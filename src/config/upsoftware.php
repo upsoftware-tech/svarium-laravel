@@ -68,6 +68,11 @@ return [
             'auth/register/*',
         ],
     ],
+    'lang' => [
+        // Locale used to resolve translation keys in attributes (for labels defined as __('...')).
+        // Frontend then translates this key dynamically with current UI locale.
+        'key_locale' => env('SVARIUM_LANG_KEY_LOCALE', 'en'),
+    ],
     'auth' => [
         'register' => [
             'enabled' => true,

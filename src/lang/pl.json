@@ -29,6 +29,8 @@
     "Error message": "Treść błędu",
     "Error name": "Nazwa błędu",
     "Error number": "Numer błędu",
+    "First Name": "Imię",
+    "First name": "Imię",
     "Forgot your password?": "Nie pamiętasz hasła?",
     "Generate": "Generuj",
     "Generate new code": "Wygeneruj nowy kod",
@@ -62,6 +64,7 @@
     "Password": "Hasło",
     "Password recovery": "Odzyskiwanie hasła",
     "Patient": "Pacjent",
+    "Patient list": "Pacjenci",
     "Patients": "Pacjenci",
     "Patients calendar": "Pacjenci calendar",
     "Patients page": "Pacjenci page",
@@ -112,6 +115,15 @@
     "Your one-time login code :code": "Twój jednorazowy kod :code do logowania",
     "Your password for accessing the :system panel has been changed.": "Twoje hasło dostępu do panelu :system zostało zmienione.",
     "after": "po",
+    "app": {
+        "init": "Inicjuje aplikację (dodaje niezbędną konfigurację)",
+        "layout": "(Re)konfiguracja układu panelu"
+    },
+    "auth": {
+        "socials": {
+            "install": "Konfiguruje logowanie socialite (Google\/Facebook\/Apple\/itd.)"
+        }
+    },
     "before": "przed",
     "between": "pomiędzy",
     "contains": "zawiera",
@@ -131,7 +143,27 @@
     "is not equal to": "jest różne od",
     "is not null": "nie jest puste (null)",
     "is null": "jest puste (null)",
+    "lang": {
+        "add": "Dodaj nowy język",
+        "merge": "Łączy pliki JSON z paczki Svarium z plikami JSON głównej aplikacji.",
+        "prepare": "Konwertuje pliki tłumaczeń PHP (messages.php) na pliki JSON (pl.json)",
+        "sort": "Sortowanie języków"
+    },
     "lastname": "nazwisko",
+    "make": {
+        "layout": "Tworzy nowy layout Svarium",
+        "module": "Tworzy nowy moduł Svarium",
+        "plugin": "Tworzy szablon pluginu",
+        "resource": "Tworzy nowy zasób (Resource) Svarium",
+        "tenant": {
+            "default": "Tworzy tenant + główną domenę (oraz dane DB w trybie database)",
+            "migration": "Tworzy migrację tenanta w skonfigurowanym katalogu migracji tenant",
+            "seeder": "Tworzy seeder tenanta w skonfigurowanym katalogu seederów tenant"
+        }
+    },
+    "menu": {
+        "add": "Dodaje nowe menu"
+    },
     "module": {
         "name": "Placówka i specjalista",
         "name_plural": "Placówki i specjaliści",
@@ -149,8 +181,12 @@
     "not in": "nie jest w",
     "or": "lub",
     "or login with": "lub zaloguj za pomocą",
+    "panel": {
+        "add": "Dodaje definicję panelu do app\/Svarium\/panels.php"
+    },
     "password": "hasło",
     "password confirmation": "potwierdzenie hasła",
+    "permission": "Tworzy podstawowe ustawienia uprawnień",
     "phone": "telefon",
     "sign up here": "zarejestruj się tutaj",
     "specialist::module.menu.calendar": "Calendar",
@@ -170,6 +206,17 @@
     "specialist_institution::module.title.calendar": "Placówki i specjaliści calendar",
     "specialist_institution::module.title.page": "Placówki i specjaliści page",
     "starts with": "zaczyna się od",
+    "tenant": {
+        "install": {
+            "default": "Konfiguruje połączenia central\/tenant w config\/database.php",
+            "owner": "Włącza\/wyłącza owner tenantu i opcjonalnie uruchamia migrację add_tenant_owner_columns.php",
+            "profile": "Włącza\/wyłącza profil tenantu i opcjonalnie uruchamia migrację create_tenant_profiles_table.php"
+        },
+        "migrate": "Uruchamia migracje tenantów z użyciem wbudowanej tenancy Svarium",
+        "migrate_rollback": "Wycofuje migracje tenantów z użyciem wbudowanej tenancy Svarium",
+        "seed": "Uruchamia seedy tenantów z użyciem wbudowanej tenancy Svarium",
+        "uninstall": "Wyłącza tenancy i wycofuje migracje tenant"
+    },
     "type of account": "typ konta",
     "verification method": "metoda weryfikacji"
 }

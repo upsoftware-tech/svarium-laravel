@@ -27,6 +27,8 @@ class Column extends Component
 
     protected bool $visible = true;
 
+    protected bool $exported = true;
+
     protected bool $filterEnabled = false;
 
     protected ?string $filterType = null;
@@ -171,6 +173,13 @@ class Column extends Component
     public function selected(bool $state = true): static
     {
         $this->selected = $state;
+
+        return $this;
+    }
+
+    public function exported(bool $state = true): static
+    {
+        $this->exported = $state;
 
         return $this;
     }
@@ -793,6 +802,7 @@ class Column extends Component
             'searchable' => $this->searchable,
             'selected' => $this->selected,
             'visible' => $this->visible,
+            'exported' => $this->exported,
             'filterable' => $this->filterEnabled,
             'filter' => $this->toFilterDefinition(),
             'footer' => $this->footerDefinition,

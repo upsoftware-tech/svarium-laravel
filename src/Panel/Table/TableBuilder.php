@@ -42,6 +42,8 @@ use Upsoftware\Svarium\UI\Components\Text;
 
 class TableBuilder
 {
+    protected const EXPORT_FORMATS = ['sql', 'csv', 'txt'];
+
     protected $query;
 
     protected bool $bulkEnabled = false;
@@ -133,6 +135,8 @@ class TableBuilder
     protected string $filterInputSize = 'default';
 
     protected ?string $id = null;
+
+    protected bool|array $exported = true;
 
     public function searchbar($searchbar): static
     {
@@ -598,6 +602,31 @@ class TableBuilder
         return $this->condesed($state);
     }
 
+    public function exported(bool|array|string ...$config): static
+    {
+        if (count($config) === 0) {
+            $this->exported = true;
+
+            return $this;
+        }
+
+        if (count($config) === 1 && is_bool($config[0])) {
+            $this->exported = $config[0];
+
+            return $this;
+        }
+
+        $formats = $this->normalizeExportFormats($config);
+
+        if ($formats === []) {
+            throw new \InvalidArgumentException('Export formats list cannot be empty.');
+        }
+
+        $this->exported = $formats;
+
+        return $this;
+    }
+
     public function pagination(array $config): static
     {
         if (array_key_exists('rowsPerPageOptions', $config) && is_array($config['rowsPerPageOptions'])) {
@@ -972,6 +1001,52 @@ class TableBuilder
         }
 
         return $default;
+    }
+
+    protected function normalizeExportFormats(array $config): array
+    {
+        $tokens = [];
+
+        foreach ($config as $item) {
+            if (is_string($item)) {
+                $parts = array_map('trim', explode(',', $item));
+                foreach ($parts as $part) {
+                    if ($part !== '') {
+                        $tokens[] = strtolower($part);
+                    }
+                }
+                continue;
+            }
+
+            if (! is_array($item)) {
+                continue;
+            }
+
+            foreach ($item as $nested) {
+                if (! is_string($nested)) {
+                    continue;
+                }
+
+                $parts = array_map('trim', explode(',', $nested));
+                foreach ($parts as $part) {
+                    if ($part !== '') {
+                        $tokens[] = strtolower($part);
+                    }
+                }
+            }
+        }
+
+        $tokens = array_values(array_unique($tokens));
+
+        foreach ($tokens as $token) {
+            if (! in_array($token, self::EXPORT_FORMATS, true)) {
+                throw new \InvalidArgumentException(
+                    "Invalid export format [{$token}]. Allowed values: ".implode(', ', self::EXPORT_FORMATS).'.'
+                );
+            }
+        }
+
+        return $tokens;
     }
 
     public function actionDisplay(TableActionDisplay|string $mode): static
@@ -2885,6 +2960,7 @@ class TableBuilder
             ->prop('sticky', $this->stickySections)
             ->prop('columnSelection', $this->selected)
             ->prop('condesed', $this->resolveCondesed())
+            ->prop('exported', $this->exported)
             ->prop('rowSelectionColumn', $this->shouldRenderRowMultiSelectColumn($bulkMode))
             ->prop('hasActions', $hasActions)
             ->prop('footer', $footer)

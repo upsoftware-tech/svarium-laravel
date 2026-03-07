@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
 
 class MergeLangCommand extends CoreCommand
@@ -17,6 +18,10 @@ class MergeLangCommand extends CoreCommand
         $packageLangPath = __DIR__ . '/../../lang';
         $requestedLocale = $this->normalizeLocale((string) ($this->argument('lang') ?? ''));
 
+        Artisan::call('svarium:lang.prepare', array_filter([
+            'lang' => $requestedLocale,
+        ], static fn ($value) => $value !== null && $value !== ''));
+
         if (!File::isDirectory($packageLangPath)) {
             $this->error("Nie znaleziono folderu lang w paczce: $packageLangPath");
             return;
@@ -24,22 +29,18 @@ class MergeLangCommand extends CoreCommand
 
         $packageFiles = File::files($packageLangPath);
 
-        $this->info("Znaleziono plików w paczce: " . count($packageFiles));
-
         foreach ($packageFiles as $packageFile) {
             if ($packageFile->getExtension() !== 'json') {
                 continue;
             }
 
-            $filename = $packageFile->getFilename(); // np. 'pl.json'
+            $filename = $packageFile->getFilename();
             $locale = $this->normalizeLocale(pathinfo($filename, PATHINFO_FILENAME));
             if ($requestedLocale !== null && $locale !== $requestedLocale) {
                 continue;
             }
 
             $appFilePath = $appLangPath . '/' . $filename;
-
-            $this->info("Przetwarzanie: $filename");
 
             $packageContent = json_decode(File::get($packageFile->getPathname()), true);
             if (json_last_error() !== JSON_ERROR_NONE) {
@@ -60,8 +61,6 @@ class MergeLangCommand extends CoreCommand
                 continue;
             }
 
-            // Prefer freshly prepared package/module translations.
-            // This keeps module locale updates (e.g. en) in sync even if app JSON had older values.
             $mergedContent = array_replace($appContent ?? [], $packageContent ?? []);
 
             ksort($mergedContent);
@@ -70,13 +69,9 @@ class MergeLangCommand extends CoreCommand
                 $appFilePath,
                 json_encode($mergedContent, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
             );
-
-            $addedKeys = count($mergedContent) - count($appContent);
-            $this->line("  - Zaktualizowano. Kluczy łącznie: " . count($mergedContent));
         }
 
-        $this->newLine();
-        $this->info('Sukces! Tłumaczenia zostały scalone.');
+        $this->info('Gotowe łączenie tłumaczeń');
     }
 
     protected function normalizeLocale(string $value): ?string

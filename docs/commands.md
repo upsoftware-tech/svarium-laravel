@@ -11,6 +11,12 @@ Ten dokument opisuje wszystkie komendy Artisan rejestrowane przez paczkę `svari
 | `svarium:app.colors` | Podmienia neutralną tonację OKLCH w `app.css` (`:root` i `.dark`). |
 | `svarium:panel.add` | Dodaje panel do `app/Svarium/panels.php`. |
 | `svarium:menu.add` | Dodaje pozycję menu. |
+| `svarium:attribute.add` | Dodaje atrybut pola globalnie lub do wskazanego modułu. |
+| `svarium:attribute.move` | Przenosi atrybut pola między plikiem globalnym i modułami. |
+| `svarium:attribute.remove` | Usuwa atrybut pola z globalnego pliku lub modułu. |
+| `svarium:translation.add` | Dodaje tłumaczenie globalnie lub do wskazanego modułu. |
+| `svarium:translation.move` | Przenosi tłumaczenia między globalnym plikiem i modułami. |
+| `svarium:translation.remove` | Usuwa tłumaczenia z globalnego pliku lub modułu. |
 | `svarium:permission` | Tworzy bazowe role/uprawnienia. |
 | `svarium:user.add` | Dodaje użytkownika, przypisuje rolę i tenanty. |
 | `svarium:diagnose.database.connection` | Diagnozuje połączenie DB dla wybranego modelu (`upsoftware.models`). |
@@ -112,6 +118,243 @@ Interaktywne dodawanie pozycji menu.
 
 ```bash
 php artisan svarium:menu.add
+```
+
+### `svarium:attribute.add`
+
+Dodaje atrybut pola:
+
+- globalnie do `app/Svarium/attributes.php`,
+- albo do metody `fieldAttributes()` w wybranym module.
+
+Flow interaktywny:
+
+- pyta o nazwę pola,
+- pyta o etykietę,
+- pyta, czy dodać atrybut do modułu,
+- jeśli tak: pokazuje listę modułów i zapisuje wpis w wybranym module,
+- jeśli nie: zapisuje wpis do pliku globalnego.
+- po zapisie pyta, czy od razu dodać tłumaczenia etykiety.
+
+Obsługiwane flagi:
+
+- `--field=` - nazwa pola, np. `first_name`
+- `--label=` - etykieta, np. `First name`
+- `--module=` - szybki wybór modułu, np. `Patient`
+- `--translations` - automatycznie dodaje tłumaczenia etykiety (klucz i wartość = etykieta) w lokalizacji globalnej lub modułowej.
+
+Składnia:
+
+```bash
+php artisan svarium:attribute.add {--field=} {--label=} {--module=} {--translations}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:attribute.add
+php artisan svarium:attribute.add --field=first_name --label="First name"
+php artisan svarium:attribute.add --field=first_name --label="First name" --module=Patient
+php artisan svarium:attribute.add --field=first_name --label="First name" --module=Patient --translations
+```
+
+Wynik:
+
+```php
+'first_name' => 'First name',
+```
+
+Jeśli wpis już istnieje w pliku globalnym albo w module, komenda przerwie działanie i zwróci błąd.
+
+### `svarium:attribute.move`
+
+Przenosi atrybut pola między:
+
+- `app/Svarium/attributes.php` (globalny plik),
+- modułami (`app/Svarium/Modules/*/*Module.php`, metoda `fieldAttributes()`).
+
+Flow interaktywny:
+
+- `Skąd chcesz przenieść`,
+- `Dokąd chcesz przenieść` (bez miejsca wybranego jako źródło),
+- wybór jednego lub wielu pól,
+- `Czy usunąć z pliku źródłowego`.
+
+Flagi:
+
+- `--from=` - `global` albo nazwa modułu,
+- `--to=` - `global` albo nazwa modułu,
+- `--field=*` - nazwa pola (można podać wiele razy),
+- `--delete-source` - usuwa wpis ze źródła po zapisaniu celu.
+
+Składnia:
+
+```bash
+php artisan svarium:attribute.move {--from=} {--to=} {--field=*} {--delete-source}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:attribute.move
+php artisan svarium:attribute.move --from=Patient --to=global --field=last_name --delete-source
+php artisan svarium:attribute.move --from=global --to=Patient --field=email
+php artisan svarium:attribute.move --from=Patient --to=global --field=last_name --field=email --delete-source
+```
+
+### `svarium:attribute.remove`
+
+Usuwa atrybut pola z:
+
+- `app/Svarium/attributes.php` (globalny plik),
+- modułu (`fieldAttributes()`).
+
+Flow interaktywny:
+
+- `Skąd chcesz usunąć`,
+- `Wybierz pola do usunięcia`,
+- potwierdzenie usunięcia.
+
+Flagi:
+
+- `--from=` - `global` albo nazwa modułu,
+- `--module=` - alias dla `--from` (tylko moduł),
+- `--field=*` - nazwa pola (można podać wiele razy),
+- `--force` - usuwa bez pytania o potwierdzenie.
+
+Składnia:
+
+```bash
+php artisan svarium:attribute.remove {--from=} {--module=} {--field=*} {--force}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:attribute.remove
+php artisan svarium:attribute.remove --from=global --field=email
+php artisan svarium:attribute.remove --module=Patient --field=last_name --force
+php artisan svarium:attribute.remove --module=Patient --field=last_name --field=email --force
+```
+
+### `svarium:translation.add`
+
+Dodaje tłumaczenie do:
+
+- globalnego pliku: `app/Svarium/Lang/{locale}/messages.php`,
+- albo modułu: `app/Svarium/Modules/{Module}/Lang/{locale}/messages.php`.
+
+Po zapisie komenda automatycznie uruchamia:
+
+- `svarium:lang.prepare {locale}`
+- `svarium:lang.merge {locale}`
+
+Flow interaktywny (bez `--locale`):
+
+1. `Gdzie dodać tłumaczenie`
+2. `Podaj klucz`
+3. Jeśli klucz istnieje: pytanie o nadpisanie
+4. Pętla po wszystkich językach:
+`Wprowadź tłumaczenie ({key}) dla PL/DE/EN/...`
+
+Jeśli wartość dla danego języka zostanie pusta, komenda zapisze jako wartość sam klucz.
+
+Flagi:
+
+- `--locale=` - kod języka, np. `pl` (gdy podany, komenda działa tylko dla tego locale)
+- `--module=` - nazwa modułu (jeśli brak, możesz wybrać global/moduł interaktywnie)
+- `--key=` - klucz tłumaczenia
+- `--value=` - wartość tłumaczenia
+
+Składnia:
+
+```bash
+php artisan svarium:translation.add {--locale=} {--module=} {--key=} {--value=}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:translation.add
+php artisan svarium:translation.add --locale=pl --key="Create account" --value="Utwórz konto"
+php artisan svarium:translation.add --locale=pl --module=Patient --key="Patient list" --value="Lista pacjentów"
+```
+
+### `svarium:translation.move`
+
+Przenosi tłumaczenia między lokalizacjami (global/moduł) dla wybranego locale.
+
+Flow interaktywny:
+
+- `Wybierz język`,
+- `Skąd chcesz przenieść tłumaczenie`,
+- `Dokąd chcesz przenieść tłumaczenie` (bez źródła),
+- `Wybierz klucze do przeniesienia`,
+- `Czy usunąć z miejsca źródłowego`.
+
+Po zapisie komenda automatycznie uruchamia:
+
+- `svarium:lang.prepare {locale}`
+- `svarium:lang.merge {locale}`
+
+Flagi:
+
+- `--locale=` - kod języka, np. `pl`
+- `--from=` - `global` albo nazwa modułu
+- `--to=` - `global` albo nazwa modułu
+- `--key=*` - klucz tłumaczenia (można podać wiele razy)
+- `--delete-source` - usuwa przeniesione wpisy ze źródła
+
+Składnia:
+
+```bash
+php artisan svarium:translation.move {--locale=} {--from=} {--to=} {--key=*} {--delete-source}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:translation.move
+php artisan svarium:translation.move --locale=pl --from=Patient --to=global --key="Patient list" --delete-source
+php artisan svarium:translation.move --locale=pl --from=global --to=Patient --key="Create account" --key="Edit"
+```
+
+### `svarium:translation.remove`
+
+Usuwa tłumaczenia z globalnego pliku lub modułu dla wybranego locale.
+
+Flow interaktywny:
+
+- `Wybierz język`,
+- `Skąd chcesz usunąć tłumaczenia`,
+- `Wybierz klucze do usunięcia`,
+- potwierdzenie usunięcia.
+
+Po zapisie komenda automatycznie uruchamia:
+
+- `svarium:lang.prepare {locale}`
+- `svarium:lang.merge {locale}`
+
+Flagi:
+
+- `--locale=` - kod języka, np. `pl`
+- `--from=` - `global` albo nazwa modułu
+- `--module=` - alias dla `--from` (tylko moduł)
+- `--key=*` - klucz tłumaczenia (można podać wiele razy)
+- `--force` - usuwa bez potwierdzenia
+
+Składnia:
+
+```bash
+php artisan svarium:translation.remove {--locale=} {--from=} {--module=} {--key=*} {--force}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:translation.remove
+php artisan svarium:translation.remove --locale=pl --from=global --key="Create account"
+php artisan svarium:translation.remove --locale=pl --module=Patient --key="Patient list" --key="Edit" --force
 ```
 
 ### `svarium:permission`
