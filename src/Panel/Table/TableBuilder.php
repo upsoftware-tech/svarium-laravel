@@ -5,6 +5,7 @@ namespace Upsoftware\Svarium\Panel\Table;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Str;
 use Upsoftware\Svarium\Enums\TableActionDisplay;
 use Upsoftware\Svarium\UI\Component;
 use Upsoftware\Svarium\UI\Components\Button;
@@ -131,9 +132,26 @@ class TableBuilder
 
     protected string $filterInputSize = 'default';
 
+    protected ?string $id = null;
+
     public function searchbar($searchbar): static
     {
         $this->searchbar = $searchbar;
+
+        return $this;
+    }
+
+    public function id(?string $id): static
+    {
+        $normalized = $this->normalizeTableIdentifier((string) $id);
+
+        if ($normalized === '') {
+            $this->id = null;
+
+            return $this;
+        }
+
+        $this->id = $normalized;
 
         return $this;
     }
@@ -154,8 +172,42 @@ class TableBuilder
     {
         $instance = new static;
         $instance->query = $query;
+        $instance->applyPaginationDefaultsFromConfig();
 
         return $instance;
+    }
+
+    protected function applyPaginationDefaultsFromConfig(): void
+    {
+        $tableConfig = config('upsoftware.table', []);
+        $paginationConfig = config('upsoftware.table.pagination', []);
+
+        if (is_array($paginationConfig)) {
+            $this->pagination($paginationConfig);
+        } else {
+            $paginationConfig = [];
+        }
+
+        $hasRowsPerPageOptions = array_key_exists('rowsPerPageOptions', $paginationConfig)
+            || array_key_exists('perPageOptions', $paginationConfig);
+        $hasRowsPerPage = array_key_exists('rowsPerPage', $paginationConfig)
+            || array_key_exists('perPage', $paginationConfig);
+
+        if ((! $hasRowsPerPageOptions || ! $hasRowsPerPage) && is_array($tableConfig) && array_key_exists('per_page', $tableConfig)) {
+            $perPage = $tableConfig['per_page'];
+
+            if (is_numeric($perPage)) {
+                $perPageValue = max(0, (int) $perPage);
+
+                if (! $hasRowsPerPageOptions) {
+                    $this->rowsPerPageOptions([$perPageValue]);
+                }
+
+                if (! $hasRowsPerPage) {
+                    $this->rowsPerPage($perPageValue);
+                }
+            }
+        }
     }
 
     public function bulk(bool|string $mode = true): static
@@ -2809,8 +2861,10 @@ class TableBuilder
 
         $resolvedRowsPerPage = $this->resolvedRowsPerPage ?? $paginator->perPage();
         $resolvedRowsPerPageOptions = $this->getPerPageOptions();
+        $resolvedTableId = $this->resolveTableIdentifier();
 
         $table = Table::make()
+            ->prop('id', $resolvedTableId)
             ->prop('columns', $this->serializeColumns())
             ->children($tableChildren)
             ->actions($resolvedActions)
@@ -2865,6 +2919,160 @@ class TableBuilder
         }
 
         return $table;
+    }
+
+    protected function resolveTableIdentifier(): string
+    {
+        $preferred = $this->id;
+
+        if (! is_string($preferred) || trim($preferred) === '') {
+            $preferred = $this->generateDefaultTableIdentifier();
+        }
+
+        return $this->ensureUniqueTableIdentifier($preferred);
+    }
+
+    protected function generateDefaultTableIdentifier(): string
+    {
+        $segments = $this->resolveIdentifierPathSegments();
+
+        if ($segments === []) {
+            return 'page-index-table';
+        }
+
+        $resource = $this->normalizeTableIdentifier($segments[0] ?? '');
+        if ($resource === '') {
+            $resource = 'page';
+        }
+
+        $action = $this->normalizeTableIdentifier($this->resolveIdentifierAction($segments));
+        if ($action === '') {
+            $action = 'index';
+        }
+
+        return "{$resource}-{$action}-table";
+    }
+
+    protected function normalizeTableIdentifier(string $value): string
+    {
+        $trimmed = trim($value);
+
+        if ($trimmed === '') {
+            return '';
+        }
+
+        $normalized = Str::of($trimmed)
+            ->replaceMatches('/[^A-Za-z0-9\-_:.]+/', '-')
+            ->replaceMatches('/-+/', '-')
+            ->trim('-')
+            ->lower()
+            ->value();
+
+        return $normalized;
+    }
+
+    protected function ensureUniqueTableIdentifier(string $identifier): string
+    {
+        $base = $this->normalizeTableIdentifier($identifier);
+
+        if ($base === '') {
+            $base = 'table';
+        }
+
+        $request = request();
+
+        if (! $request) {
+            return $base;
+        }
+
+        $used = $request->attributes->get('_svarium_table_identifiers', []);
+
+        if (! is_array($used)) {
+            $used = [];
+        }
+
+        $count = (int) ($used[$base] ?? 0) + 1;
+        $used[$base] = $count;
+        $request->attributes->set('_svarium_table_identifiers', $used);
+
+        if ($count <= 1) {
+            return $base;
+        }
+
+        return "{$base}-{$count}";
+    }
+
+    protected function resolveIdentifierPathSegments(): array
+    {
+        $path = request()?->path();
+
+        if (! is_string($path)) {
+            return [];
+        }
+
+        $trimmedPath = trim($path, '/');
+        if ($trimmedPath === '') {
+            return [];
+        }
+
+        $segments = array_values(array_filter(
+            array_map(static fn (string $segment): string => trim($segment), explode('/', $trimmedPath)),
+            static fn (string $segment): bool => $segment !== ''
+        ));
+
+        if ($segments === []) {
+            return [];
+        }
+
+        $prefix = trim((string) config('upsoftware.panel.prefix', ''), '/');
+        if ($prefix === '') {
+            return $segments;
+        }
+
+        $prefixSegments = array_values(array_filter(
+            array_map(static fn (string $segment): string => trim($segment), explode('/', $prefix)),
+            static fn (string $segment): bool => $segment !== ''
+        ));
+
+        if ($prefixSegments === []) {
+            return $segments;
+        }
+
+        $matchesPrefix = true;
+        foreach ($prefixSegments as $index => $prefixSegment) {
+            if (($segments[$index] ?? null) !== $prefixSegment) {
+                $matchesPrefix = false;
+                break;
+            }
+        }
+
+        if (! $matchesPrefix) {
+            return $segments;
+        }
+
+        $withoutPrefix = array_slice($segments, count($prefixSegments));
+
+        return $withoutPrefix === [] ? $segments : array_values($withoutPrefix);
+    }
+
+    protected function resolveIdentifierAction(array $segments): string
+    {
+        if (count($segments) <= 1) {
+            return 'index';
+        }
+
+        $second = trim((string) ($segments[1] ?? ''));
+        $third = trim((string) ($segments[2] ?? ''));
+
+        if ($second !== '' && ! is_numeric($second)) {
+            return $second;
+        }
+
+        if ($third !== '' && ! is_numeric($third)) {
+            return $third;
+        }
+
+        return 'index';
     }
 
     protected function resolveCondesed(): bool

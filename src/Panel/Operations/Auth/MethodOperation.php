@@ -2,8 +2,9 @@
 
 namespace Upsoftware\Svarium\Panel\Operations\Auth;
 
+use Illuminate\Cache\RateLimiter as CacheRateLimiter;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -355,11 +356,11 @@ class MethodOperation extends Operation
 
         $key = $this->resendRateLimitKey($context, $userAuth);
 
-        if (! RateLimiter::tooManyAttempts($key, $maxAttempts)) {
+        if (! $this->rateLimiterTooManyAttempts($key, $maxAttempts)) {
             return 0;
         }
 
-        return max(1, (int) RateLimiter::availableIn($key));
+        return max(1, $this->rateLimiterAvailableIn($key));
     }
 
     protected function hitResendRateLimit(PanelContext $context, mixed $userAuth): void
@@ -371,10 +372,56 @@ class MethodOperation extends Operation
             return;
         }
 
-        RateLimiter::hit(
+        $this->rateLimiterHit(
             $this->resendRateLimitKey($context, $userAuth),
             max(1, $decayMinutes) * 60
         );
+    }
+
+    protected function otpRateLimiter(): CacheRateLimiter
+    {
+        $store = trim((string) config('upsoftware.auth.otp.rate_limit_store', 'file'));
+
+        if ($store !== '' && config("cache.stores.{$store}") !== null) {
+            try {
+                return new CacheRateLimiter(Cache::store($store));
+            } catch (Throwable) {
+                // fallback below
+            }
+        }
+
+        try {
+            return app(CacheRateLimiter::class);
+        } catch (Throwable) {
+            return new CacheRateLimiter(Cache::store('array'));
+        }
+    }
+
+    protected function rateLimiterTooManyAttempts(string $key, int $maxAttempts): bool
+    {
+        try {
+            return $this->otpRateLimiter()->tooManyAttempts($key, $maxAttempts);
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    protected function rateLimiterAvailableIn(string $key): int
+    {
+        try {
+            return max(0, (int) $this->otpRateLimiter()->availableIn($key));
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+
+    protected function rateLimiterHit(string $key, int $decaySeconds): void
+    {
+        try {
+            $this->otpRateLimiter()->hit($key, $decaySeconds);
+        } catch (Throwable) {
+            // Ignore cache store issues.
+        }
     }
 
     protected function normalizeRateLimitIp(?string $ip): string

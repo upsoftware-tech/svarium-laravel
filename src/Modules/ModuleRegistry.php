@@ -6,6 +6,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\File;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Menu\MenuRegistry;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 class ModuleRegistry
@@ -130,7 +131,16 @@ class ModuleRegistry
 
     public function registerPhase(): void
     {
+        $fieldAttributesRegistry = app(FieldAttributesRegistry::class);
+        $fieldAttributesRegistry->clearAll();
+        $fieldAttributesRegistry->addLockedDefinitions($this->resolveGlobalFieldAttributes());
+
         foreach ($this->modules as $module) {
+            $fieldAttributes = $module->fieldAttributes();
+            if (is_array($fieldAttributes) && $fieldAttributes !== []) {
+                $fieldAttributesRegistry->addDefinitions($fieldAttributes);
+            }
+
             $menu = $module->menu();
             if (is_array($menu) && $menu !== []) {
                 app(MenuRegistry::class)->register($menu, [
@@ -147,6 +157,23 @@ class ModuleRegistry
 
             $module->register();
         }
+    }
+
+    protected function resolveGlobalFieldAttributes(): array
+    {
+        $file = base_path('app/Svarium/attributes.php');
+
+        if (! is_file($file)) {
+            return [];
+        }
+
+        $definitions = require $file;
+
+        if ($definitions instanceof \Closure) {
+            $definitions = $definitions();
+        }
+
+        return is_array($definitions) ? $definitions : [];
     }
 
     public function bootPhase(): void

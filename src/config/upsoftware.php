@@ -1,6 +1,6 @@
 <?php
 
-use \Upsoftware\Svarium\Services\DeviceTracking\DeviceHijackingDetectorDefault;
+use Upsoftware\Svarium\Services\DeviceTracking\DeviceHijackingDetectorDefault;
 
 return [
     'middleware' => [
@@ -15,12 +15,26 @@ return [
             'guard' => 'sanctum',
             'middleware' => ['auth:sanctum'],
             'custom_handler' => null,
-        ]
+        ],
     ],
     'table' => [
         'action_display' => 'inline',
-        'pagination' => true,
-        'per_page' => 15,
+        'pagination' => [
+            'enabled' => true,
+            'rowsPerPageOptions' => [10, 20, 30, 50, 100, 0],
+            'rowsPerPage' => 50,
+            'rowsPerPageLabel' => null,
+            'rowsPerPageAllLabel' => null,
+            'paginationLabel' => null,
+            'showButtonLabel' => true,
+            'showFirstLabel' => true,
+            'showLastLabel' => true,
+            'ellipsisAfter' => 7,
+            'firstButtonLabel' => null,
+            'previousButtonLabel' => null,
+            'nextButtonLabel' => null,
+            'lastButtonLabel' => null,
+        ],
         'condesed' => false,
         'searchbar' => false,
     ],
@@ -155,6 +169,10 @@ return [
              *
              * default_enabled:
              * Domyślny stan OTP dla użytkownika, gdy brak ustawienia per user.
+             *
+             * rate_limit_store:
+             * Store cache używany wyłącznie przez limiter OTP (resend/verify).
+             * Zalecane: file lub redis.
              **************************************************************************/
             // Global OTP toggle for login flow.
             'enabled' => true,
@@ -193,6 +211,8 @@ return [
             'allow_user_disable' => true,
             // Default user OTP status when user-specific setting is missing.
             'default_enabled' => true,
+            // Dedicated cache store for OTP rate limit (prevents tenant DB cache table errors).
+            'rate_limit_store' => env('SVARIUM_OTP_RATE_LIMIT_STORE', 'file'),
         ],
     ],
     'tenancy' => [
@@ -301,5 +321,5 @@ return [
     'components' => [
         'prefix' => '',
     ],
-    'logo' => []
+    'logo' => [],
 ];

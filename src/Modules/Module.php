@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Modules;
 
 use Illuminate\Support\Str;
+use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Panel\ResourceRegistry;
 
@@ -55,6 +56,34 @@ abstract class Module
     public function widgets(): array
     {
         return [];
+    }
+
+    /**
+     * Global field attributes for module components.
+     * Used when Column/Input has no explicit label/props.
+     *
+     * Example:
+     * [
+     *   'lastname' => ['label' => __('Last name')],
+     *   'status' => [
+     *     'label' => __('Status'),
+     *     'column' => ['sortable' => true],
+     *     'input' => ['placeholder' => __('Choose status')],
+     *   ],
+     * ]
+     */
+    public function fieldAttributes(): array
+    {
+        return [];
+    }
+
+    protected function registerFieldAttributes(array $definitions): void
+    {
+        if ($definitions === []) {
+            return;
+        }
+
+        app(FieldAttributesRegistry::class)->addDefinitions($definitions);
     }
 
     protected function registerMenu(array $items, string|int|null $navigationId = null): void

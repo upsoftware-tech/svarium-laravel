@@ -45,8 +45,22 @@ Sekcja:
 ```php
 'table' => [
     'action_display' => 'inline',
-    'pagination' => true,
-    'per_page' => 15,
+    'pagination' => [
+        'enabled' => true,
+        'rowsPerPageOptions' => [10, 20, 30, 50, 100, 0],
+        'rowsPerPage' => 50,
+        'rowsPerPageLabel' => __('Rows per page'),
+        'rowsPerPageAllLabel' => null,
+        'paginationLabel' => null,
+        'showButtonLabel' => true,
+        'showFirstLabel' => true,
+        'showLastLabel' => true,
+        'ellipsisAfter' => 7,
+        'firstButtonLabel' => __('First'),
+        'previousButtonLabel' => __('Previous'),
+        'nextButtonLabel' => __('Next'),
+        'lastButtonLabel' => __('Last'),
+    ],
     'condesed' => false,
     'searchbar' => false,
 ],
@@ -55,7 +69,7 @@ Sekcja:
 Znaczenie:
 
 - `action_display`: domyślny tryb akcji (`inline` lub `dropdown`).
-- `per_page`: domyślna liczba rekordów na stronę.
+- `pagination`: pełna konfiguracja paginacji i etykiet.
 - `condesed`: domyślna kondensacja tabel (`false` = standardowe odstępy).
 - `searchbar`: automatyczne dodanie `InputSearch::make('q')` do każdej tabeli.
 

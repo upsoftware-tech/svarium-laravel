@@ -1,6 +1,7 @@
 # Dokumentacja Svarium Laravel
 
 - [Roadmap ogólny Svarium](./roadmap.md)
+- [Konfiguracja `config/upsoftware.php`](./config-upsoftware.md)
 - Operacje aplikacji: preferowana ścieżka `app/Svarium/Operations` (legacy: `app/Svarium/Panel/Operations`)
 - [Layouty panelu](./panel-layouts.md)
 - [Komponent Link (PHP + Vue, wrapper Inertia)](./link-component.md)
