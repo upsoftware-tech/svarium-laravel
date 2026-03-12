@@ -52,7 +52,7 @@ class LoginController extends Controller
 
             if (($result['status'] ?? null) === AuthLoginService::STATUS_INVALID) {
                 throw ValidationException::withMessages([
-                    'email' => [__('svarium::validation.Invalid email address or password')],
+                    'email' => [__('Invalid email address or password')],
                 ]);
             }
 
@@ -65,13 +65,13 @@ class LoginController extends Controller
             }
 
             throw ValidationException::withMessages([
-                'email' => [__('svarium::validation.Invalid email address or password')],
+                'email' => [__('Invalid email address or password')],
             ]);
         } catch (ValidationException $e) {
             throw $e;
         } catch (Throwable) {
             throw ValidationException::withMessages([
-                'email' => [__('svarium::validation.Invalid email address or password')],
+                'email' => [__('Invalid email address or password')],
             ]);
         }
     }

@@ -37,7 +37,7 @@ class ResetPasswordController extends Controller
         try {
             $user->update(['password' => $request->password]);
             $user->notify(new UserChangePasswordNotify());
-            return redirect()->to(svarium_login_url())->with(['success' => __('The password has been changed.')]);
+            return redirect()->to(svarium_login_url(false))->with(['success' => __('The password has been changed.')]);
         } catch (\Exception $exception) {
             return back()->with(['error' => 'An error occurred while changing your password. Please try again later.', 'message' => $exception->getMessage()]);
         }

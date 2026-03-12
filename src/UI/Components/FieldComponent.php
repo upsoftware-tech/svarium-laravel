@@ -13,11 +13,12 @@ abstract class FieldComponent extends Component
 
     protected ?string $name = null;
     protected ?string $label = '';
-    protected ?string $value = null;
+    protected mixed $value = null;
 
     public function __construct(?string $name = null)
     {
         $this->name = $name;
+        $this->props['language'] = false;
 
         if ($name) {
             $this->props['name'] = $name;
@@ -55,6 +56,31 @@ abstract class FieldComponent extends Component
         $this->label = $label;
         $this->props['label'] = $label;
         return $this;
+    }
+
+    public function hint(string $hint): static
+    {
+        return $this->prop('hint', $hint);
+    }
+
+    public function placeholder(string $placeholder): static
+    {
+        return $this->prop('placeholder', $placeholder);
+    }
+
+    public function autocomplete(string $autocomplete): static
+    {
+        return $this->prop('autocomplete', $autocomplete);
+    }
+
+    public function step(int|float|string $step): static
+    {
+        return $this->prop('step', $step);
+    }
+
+    public function language(bool $enabled = true): static
+    {
+        return $this->prop('language', $enabled);
     }
 
     public function getName(): ?string

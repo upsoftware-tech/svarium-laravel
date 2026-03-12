@@ -59,6 +59,25 @@ abstract class Module
     }
 
     /**
+     * Additional role parameter definitions exposed by the module.
+     *
+     * Example:
+     * [
+     *   'languages' => [
+     *     'label' => __('Languages'),
+     *     'options' => [
+     *       ['value' => 'pl', 'label' => 'Polski'],
+     *       ['value' => 'en', 'label' => 'English'],
+     *     ],
+     *   ],
+     * ]
+     */
+    public function roleParameters(): array
+    {
+        return [];
+    }
+
+    /**
      * Global field attributes for module components.
      * Used when Column/Input has no explicit label/props.
      *

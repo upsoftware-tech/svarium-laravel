@@ -4,14 +4,27 @@ namespace Upsoftware\Svarium\Console\Commands;
 
 use RuntimeException;
 use Upsoftware\Svarium\Traits\HasTailwindColor;
+use function Laravel\Prompts\confirm;
 use function Laravel\Prompts\select;
 
 class AppColorsCommand extends CoreCommand
 {
     use HasTailwindColor;
 
+    /**
+     * @var array{light_color: string, light_shade: int, dark_color: string, dark_shade: int}|null
+     */
+    protected ?array $lastPrimarySelection = null;
+
     protected $signature = 'svarium:app.colors
-        {--file=resources/css/app.css : Ścieżka do app.css}
+        {--file= : Ścieżka do app.css}
+        {--initialize : Utwórz/Nadpisz app.css ze stuba i ustaw PRIMARY/PRIMARY_DARK}
+        {--force : Wymuś nadpisanie pliku przy --initialize}
+        {--skip-primary : Pomiń zmianę PRIMARY/PRIMARY_DARK}
+        {--primary-color= : Kolor primary (light), np. amber}
+        {--primary-shade= : Odcień primary (light), np. 500}
+        {--primary-dark-color= : Kolor primary (dark), np. amber}
+        {--primary-dark-shade= : Odcień primary (dark), np. 500}
         {--tone= : Tonacja neutralna (slate|gray|zinc|neutral|stone|taupe|mauve|mist|olive)}';
 
     protected $description = 'Zmienia neutralną tonację kolorów (OKLCH) w app.css dla :root i .dark';
@@ -19,6 +32,21 @@ class AppColorsCommand extends CoreCommand
     public function handle(): int
     {
         $cssPath = $this->resolveCssPath((string) $this->option('file'));
+        $initialized = false;
+
+        $initializeResult = true;
+        if ((bool) $this->option('initialize')) {
+            $initializeResult = $this->initializeCssFromStub($cssPath);
+            $initialized = $initializeResult === true;
+        }
+
+        if ($initializeResult === false) {
+            return self::FAILURE;
+        }
+
+        if ($initializeResult === null) {
+            return self::SUCCESS;
+        }
 
         if (! is_file($cssPath)) {
             $this->error('Nie znaleziono pliku CSS: '.$cssPath);
@@ -26,15 +54,40 @@ class AppColorsCommand extends CoreCommand
             return self::FAILURE;
         }
 
+        $original = (string) file_get_contents($cssPath);
+        $updated = $original;
+
+        if (! $initialized) {
+            $primarySelection = $this->resolvePrimarySelection();
+            if ($primarySelection === false) {
+                return self::FAILURE;
+            }
+
+            if (is_array($primarySelection)) {
+                $updated = $this->replaceTokensInSelector($updated, ':root', [
+                    'primary' => $primarySelection['light'],
+                ]);
+
+                $updated = $this->replaceTokensInSelector($updated, '.dark', [
+                    'primary' => $primarySelection['dark'],
+                ]);
+            }
+        }
+
         $availableTones = $this->toneLabels();
         $tone = strtolower(trim((string) $this->option('tone')));
+        $defaultTone = $this->defaultTone();
 
         if ($tone === '' || ! array_key_exists($tone, $availableTones)) {
-            $tone = (string) select(
-                'Wybierz tonację kolorystyczną',
-                $availableTones,
-                'zinc'
-            );
+            if ($this->input->isInteractive()) {
+                $tone = (string) select(
+                    'Wybierz tonację kolorystyczną',
+                    $availableTones,
+                    $defaultTone
+                );
+            } else {
+                $tone = $defaultTone;
+            }
         }
 
         if (! array_key_exists($tone, $availableTones)) {
@@ -46,11 +99,11 @@ class AppColorsCommand extends CoreCommand
         $scale = $this->toneScale($tone);
         $tokens = $this->buildTokenMap($scale);
 
-        $original = (string) file_get_contents($cssPath);
-        $updated = $this->replaceTokensInSelector($original, ':root', $tokens['root']);
+        $updated = $this->replaceTokensInSelector($updated, ':root', $tokens['root']);
         $updated = $this->replaceTokensInSelector($updated, '.dark', $tokens['dark']);
 
         if ($updated === $original) {
+            $this->persistColorDefaults($cssPath, $tone);
             $this->info('Brak zmian w pliku (tokeny już mają wybraną tonację).');
             $this->line('Tonacja: '.$tone);
             $this->line('Plik: '.$cssPath);
@@ -59,6 +112,7 @@ class AppColorsCommand extends CoreCommand
         }
 
         file_put_contents($cssPath, $updated);
+        $this->persistColorDefaults($cssPath, $tone);
 
         $this->info('Zaktualizowano kolory neutralne w app.css.');
         $this->line('Tonacja: '.$tone);
@@ -67,12 +121,297 @@ class AppColorsCommand extends CoreCommand
         return self::SUCCESS;
     }
 
+    /**
+     * @return array{light: string, dark: string}|false|null
+     */
+    protected function resolvePrimarySelection(): array|false|null
+    {
+        if ((bool) $this->option('skip-primary')) {
+            return null;
+        }
+
+        $palette = $this->tailwindPalette();
+        $colors = $this->tailwindColors();
+        $shades = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+        $defaults = $this->defaultPrimaryConfig();
+
+        $optionPrimaryColor = strtolower(trim((string) $this->option('primary-color')));
+        $optionPrimaryShade = $this->normalizeShadeOption((string) $this->option('primary-shade'));
+        $optionPrimaryDarkColor = strtolower(trim((string) $this->option('primary-dark-color')));
+        $optionPrimaryDarkShade = $this->normalizeShadeOption((string) $this->option('primary-dark-shade'));
+
+        $hasPrimaryOptions = $optionPrimaryColor !== '' || $optionPrimaryShade !== null || $optionPrimaryDarkColor !== '' || $optionPrimaryDarkShade !== null;
+
+        if (! $hasPrimaryOptions && ! $this->input->isInteractive()) {
+            return null;
+        }
+
+        if (! $hasPrimaryOptions) {
+            $changePrimary = confirm('Czy chcesz zmienić kolor PRIMARY?', true, 'Tak', 'Nie');
+            if (! $changePrimary) {
+                return null;
+            }
+        }
+
+        $lightColor = $optionPrimaryColor;
+        if ($lightColor === '') {
+            if ($this->input->isInteractive()) {
+                $lightColor = (string) select(
+                    'Wybierz kolor primary jasny (light)',
+                    $colors,
+                    $defaults['light_color']
+                );
+            } else {
+                $lightColor = $defaults['light_color'];
+            }
+        }
+
+        if (! isset($palette[$lightColor])) {
+            $this->error("Nieprawidłowy kolor primary (light): {$lightColor}");
+
+            return false;
+        }
+
+        $lightShade = $optionPrimaryShade;
+        if ($lightShade === null) {
+            if ($this->input->isInteractive()) {
+                $lightShade = (int) select(
+                    'Wybierz odcień primary jasny (light)',
+                    $shades,
+                    $defaults['light_shade']
+                );
+            } else {
+                $lightShade = $defaults['light_shade'];
+            }
+        }
+
+        if (! isset($palette[$lightColor][$lightShade])) {
+            $this->error("Nieprawidłowy odcień primary (light): {$lightShade}");
+
+            return false;
+        }
+
+        $sameDark = false;
+        if ($optionPrimaryDarkColor === '' && $optionPrimaryDarkShade === null && $this->input->isInteractive()) {
+            $sameDark = confirm('Czy ten sam kolor dodać jako primary ciemny?', true, 'Tak', 'Nie');
+        }
+
+        if ($sameDark) {
+            $darkColor = $lightColor;
+            $darkShade = $lightShade;
+        } else {
+            $darkColor = $optionPrimaryDarkColor;
+            if ($darkColor === '') {
+                if ($this->input->isInteractive()) {
+                    $darkColor = (string) select(
+                        'Wybierz kolor primary ciemny (dark)',
+                        $colors,
+                        $defaults['dark_color']
+                    );
+                } else {
+                    $darkColor = $defaults['dark_color'];
+                }
+            }
+
+            if (! isset($palette[$darkColor])) {
+                $this->error("Nieprawidłowy kolor primary (dark): {$darkColor}");
+
+                return false;
+            }
+
+            $darkShade = $optionPrimaryDarkShade;
+            if ($darkShade === null) {
+                if ($this->input->isInteractive()) {
+                    $darkShade = (int) select(
+                        'Wybierz odcień primary ciemny (dark)',
+                        $shades,
+                        $defaults['dark_shade']
+                    );
+                } else {
+                    $darkShade = $defaults['dark_shade'];
+                }
+            }
+
+            if (! isset($palette[$darkColor][$darkShade])) {
+                $this->error("Nieprawidłowy odcień primary (dark): {$darkShade}");
+
+                return false;
+            }
+        }
+
+        $light = (string) $palette[$lightColor][$lightShade];
+        $dark = (string) $palette[$darkColor][$darkShade];
+        $this->lastPrimarySelection = [
+            'light_color' => $lightColor,
+            'light_shade' => (int) $lightShade,
+            'dark_color' => $darkColor,
+            'dark_shade' => (int) $darkShade,
+        ];
+
+        $this->info('PRIMARY light: '.$lightColor.' ('.$lightShade.') - '.$light);
+        $this->info('PRIMARY dark: '.$darkColor.' ('.$darkShade.') - '.$dark);
+
+        return [
+            'light' => $light,
+            'dark' => $dark,
+        ];
+    }
+
+    protected function normalizeShadeOption(string $value): ?int
+    {
+        $raw = trim($value);
+        if ($raw === '') {
+            return null;
+        }
+
+        $parsed = (int) $raw;
+        $allowed = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+
+        return in_array($parsed, $allowed, true) ? $parsed : null;
+    }
+
+    protected function initializeCssFromStub(string $cssPath): bool|null
+    {
+        $stubPath = __DIR__.'/../../stubs/app.css.stub';
+
+        if (! is_file($stubPath)) {
+            $this->error('Nie znaleziono stuba CSS: '.$stubPath);
+
+            return false;
+        }
+
+        if (is_file($cssPath) && ! (bool) $this->option('force')) {
+            $overwrite = confirm('Czy nadpisać plik: '.$cssPath, false, 'Tak', 'Nie');
+            if (! $overwrite) {
+                $this->info('Pominięto nadpisywanie app.css.');
+
+                return null;
+            }
+        }
+
+        $palette = $this->tailwindPalette();
+        $colors = $this->tailwindColors();
+        $shades = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950];
+        $defaults = $this->defaultPrimaryConfig();
+
+        if ($this->input->isInteractive()) {
+            $tailwindColor = (string) select(
+                'Wybierz kolor podstawowy jasny (primary)',
+                $colors,
+                $defaults['light_color']
+            );
+            $tailwindColorPalette = (int) select(
+                'Wybierz odcień',
+                $shades,
+                $defaults['light_shade']
+            );
+        } else {
+            $tailwindColor = $defaults['light_color'];
+            $tailwindColorPalette = $defaults['light_shade'];
+        }
+        $primary = (string) ($palette[$tailwindColor][$tailwindColorPalette] ?? '');
+
+        if ($primary === '') {
+            $this->error('Nie udało się ustalić koloru PRIMARY.');
+
+            return false;
+        }
+
+        $sameColor = false;
+        if ($this->input->isInteractive()) {
+            $sameColor = confirm('Czy ten sam kolor dodać jako kolor ciemny?', $defaults['dark_matches_light'], 'Tak', 'Nie');
+        }
+        if ($sameColor) {
+            $primaryDark = $primary;
+            $tailwindColorDark = $tailwindColor;
+            $tailwindColorDarkPalette = $tailwindColorPalette;
+        } else {
+            if ($this->input->isInteractive()) {
+                $tailwindColorDark = (string) select(
+                    'Wybierz kolor podstawowy ciemny (primary)',
+                    $colors,
+                    $defaults['dark_color']
+                );
+                $tailwindColorDarkPalette = (int) select(
+                    'Wybierz odcień',
+                    $shades,
+                    $defaults['dark_shade']
+                );
+            } else {
+                $tailwindColorDark = $defaults['dark_color'];
+                $tailwindColorDarkPalette = $defaults['dark_shade'];
+            }
+            $primaryDark = (string) ($palette[$tailwindColorDark][$tailwindColorDarkPalette] ?? '');
+
+            if ($primaryDark === '') {
+                $this->error('Nie udało się ustalić koloru PRIMARY_DARK.');
+
+                return false;
+            }
+        }
+
+        $this->info('Kolor podstawowy (jasny/light): '.$tailwindColor.' ('.$tailwindColorPalette.') - '.$primary);
+        $this->info('Kolor podstawowy (ciemny/dark): '.$tailwindColorDark.' ('.$tailwindColorDarkPalette.') - '.$primaryDark);
+        $this->lastPrimarySelection = [
+            'light_color' => $tailwindColor,
+            'light_shade' => (int) $tailwindColorPalette,
+            'dark_color' => $tailwindColorDark,
+            'dark_shade' => (int) $tailwindColorDarkPalette,
+        ];
+
+        $stubContent = file_get_contents($stubPath);
+        if (! is_string($stubContent) || $stubContent === '') {
+            $this->error('Nie udało się odczytać zawartości stuba app.css.');
+
+            return false;
+        }
+
+        $cssContent = strtr($stubContent, [
+            '{{PRIMARY}}' => $primary,
+            '{{PRIMARY_DARK}}' => $primaryDark,
+        ]);
+
+        $directory = dirname($cssPath);
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+
+        file_put_contents($cssPath, $cssContent);
+        $this->info('Utworzono/Nadpisano plik: '.$cssPath);
+
+        return true;
+    }
+
+    protected function persistColorDefaults(string $cssPath, string $tone): void
+    {
+        $this->addConfigKey('upsoftware.php', 'colors.css_file', $this->pathForConfig($cssPath), true);
+        $this->addConfigKey('upsoftware.php', 'colors.tone', $tone, true);
+
+        if (is_array($this->lastPrimarySelection)) {
+            $this->addConfigKey('upsoftware.php', 'colors.primary.light.color', $this->lastPrimarySelection['light_color'], true);
+            $this->addConfigKey('upsoftware.php', 'colors.primary.light.shade', $this->lastPrimarySelection['light_shade'], true);
+            $this->addConfigKey('upsoftware.php', 'colors.primary.dark.color', $this->lastPrimarySelection['dark_color'], true);
+            $this->addConfigKey('upsoftware.php', 'colors.primary.dark.shade', $this->lastPrimarySelection['dark_shade'], true);
+        }
+    }
+
+    protected function pathForConfig(string $cssPath): string
+    {
+        $base = rtrim(base_path(), DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+
+        if (str_starts_with($cssPath, $base)) {
+            return ltrim(substr($cssPath, strlen($base)), DIRECTORY_SEPARATOR);
+        }
+
+        return $cssPath;
+    }
+
     protected function resolveCssPath(string $rawPath): string
     {
         $path = trim($rawPath);
 
         if ($path === '') {
-            $path = 'resources/css/app.css';
+            $path = $this->defaultCssFile();
         }
 
         if (str_starts_with($path, '/')) {
@@ -80,6 +419,63 @@ class AppColorsCommand extends CoreCommand
         }
 
         return base_path($path);
+    }
+
+    protected function defaultCssFile(): string
+    {
+        $path = trim((string) config('upsoftware.colors.css_file', 'resources/css/app.css'));
+
+        return $path !== '' ? $path : 'resources/css/app.css';
+    }
+
+    protected function defaultTone(): string
+    {
+        $labels = $this->toneLabels();
+        $configured = strtolower(trim((string) config('upsoftware.colors.tone', 'zinc')));
+
+        if (array_key_exists($configured, $labels)) {
+            return $configured;
+        }
+
+        return array_key_exists('zinc', $labels) ? 'zinc' : (string) array_key_first($labels);
+    }
+
+    /**
+     * @return array{light_color: string, light_shade: int, dark_color: string, dark_shade: int, dark_matches_light: bool}
+     */
+    protected function defaultPrimaryConfig(): array
+    {
+        $palette = $this->tailwindPalette();
+        $fallbackColor = isset($palette['blue']) ? 'blue' : (string) array_key_first($palette);
+        $fallbackColor = $fallbackColor !== '' ? $fallbackColor : 'blue';
+
+        $lightColor = strtolower(trim((string) config('upsoftware.colors.primary.light.color', $fallbackColor)));
+        if ($lightColor === '' || ! isset($palette[$lightColor])) {
+            $lightColor = $fallbackColor;
+        }
+
+        $lightShade = $this->normalizeShadeOption((string) config('upsoftware.colors.primary.light.shade', 500)) ?? 500;
+        if (! isset($palette[$lightColor][$lightShade])) {
+            $lightShade = isset($palette[$lightColor][500]) ? 500 : (int) array_key_first($palette[$lightColor]);
+        }
+
+        $darkColor = strtolower(trim((string) config('upsoftware.colors.primary.dark.color', $lightColor)));
+        if ($darkColor === '' || ! isset($palette[$darkColor])) {
+            $darkColor = $lightColor;
+        }
+
+        $darkShade = $this->normalizeShadeOption((string) config('upsoftware.colors.primary.dark.shade', $lightShade)) ?? $lightShade;
+        if (! isset($palette[$darkColor][$darkShade])) {
+            $darkShade = isset($palette[$darkColor][500]) ? 500 : (int) array_key_first($palette[$darkColor]);
+        }
+
+        return [
+            'light_color' => $lightColor,
+            'light_shade' => $lightShade,
+            'dark_color' => $darkColor,
+            'dark_shade' => $darkShade,
+            'dark_matches_light' => $lightColor === $darkColor && $lightShade === $darkShade,
+        ];
     }
 
     /**
@@ -285,4 +681,3 @@ class AppColorsCommand extends CoreCommand
         return $body.$indent.'--'.$variable.': '.$value.";\n";
     }
 }
-

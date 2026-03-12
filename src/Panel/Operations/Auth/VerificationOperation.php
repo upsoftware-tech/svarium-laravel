@@ -90,7 +90,7 @@ class VerificationOperation extends Operation
                         ])
                 )
                 ->afterText(__('Generate new code'))
-                ->afterUrl($this->resendUrl($type, $userAuth)),
+                ->afterUrl($this->resendUrl($type, $userAuth, $context->panel()->name)),
             Toggle::make('remember')
                 ->if($type === 'login')
                 ->label(__('Remember browser'))
@@ -144,9 +144,9 @@ class VerificationOperation extends Operation
         $this->clearFailedVerificationAttempts($context, $userAuth);
 
         if ($type === 'reset') {
-            return RedirectResult::to(route('panel.auth.reset.password', [
+            return RedirectResult::to(route_panel('reset.password', [
                 'userAuth' => $userAuth->hash,
-            ]));
+            ], true, $context->panel()->name));
         }
 
         if ($type === 'register') {
@@ -264,28 +264,28 @@ class VerificationOperation extends Operation
         return max(1, (int) now()->diffInSeconds($availableAt));
     }
 
-    protected function resendUrl(string $type, mixed $userAuth): string
+    protected function resendUrl(string $type, mixed $userAuth, ?string $panel = null): string
     {
-        return route('panel.auth.verification.resend', [
+        return route_panel('verification.resend', [
             'type' => $type,
             'userAuth' => $userAuth->hash,
-        ]);
+        ], true, $panel);
     }
 
-    protected function verificationUrl(string $type, mixed $userAuth): string
+    protected function verificationUrl(string $type, mixed $userAuth, ?string $panel = null): string
     {
-        return route('panel.auth.verification', [
+        return route_panel('verification', [
             'type' => $type,
             'userAuth' => $userAuth->hash,
-        ]);
+        ], true, $panel);
     }
 
-    protected function methodUrl(string $type, mixed $userAuth): string
+    protected function methodUrl(string $type, mixed $userAuth, ?string $panel = null): string
     {
-        return route('panel.auth.method', [
+        return route_panel('method', [
             'type' => $type,
             'userAuth' => $userAuth->hash,
-        ]);
+        ], true, $panel);
     }
 
     protected function resendVerificationCode(mixed $userAuth, string $type): bool

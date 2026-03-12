@@ -4,6 +4,7 @@ namespace Upsoftware\Svarium\Console\Commands;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 use function Laravel\Prompts\select;
@@ -157,12 +158,32 @@ class RoleAddCommand extends CoreCommand
         string $guard,
         bool $roleNameIsJson
     ): array {
+        $roleKey = $this->resolveRoleKey($roleName);
+        $hasRoleKeyColumn = $this->roleTableHasRoleKeyColumn($roleModelClass);
+
+        if ($hasRoleKeyColumn && $roleKey !== '') {
+            /** @var Model|null $existingByKey */
+            $existingByKey = $roleModelClass::query()
+                ->where('guard_name', $guard)
+                ->where('role_key', $roleKey)
+                ->first();
+
+            if ($existingByKey) {
+                return [$existingByKey, false];
+            }
+        }
+
         if (! $roleNameIsJson) {
             /** @var Model $role */
             $role = $roleModelClass::query()->firstOrCreate([
                 'name' => $roleName,
                 'guard_name' => $guard,
             ]);
+
+            if ($hasRoleKeyColumn && trim((string) $role->getAttribute('role_key')) === '') {
+                $role->setAttribute('role_key', $roleKey);
+                $role->save();
+            }
 
             return [$role, (bool) $role->wasRecentlyCreated];
         }
@@ -173,6 +194,11 @@ class RoleAddCommand extends CoreCommand
 
         foreach ($roles as $existingRole) {
             if ($this->resolveRoleDisplayName($existingRole) === $roleName) {
+                if ($hasRoleKeyColumn && trim((string) $existingRole->getAttribute('role_key')) === '') {
+                    $existingRole->setAttribute('role_key', $roleKey);
+                    $existingRole->save();
+                }
+
                 return [$existingRole, false];
             }
         }
@@ -190,6 +216,10 @@ class RoleAddCommand extends CoreCommand
             $role->setTranslation('name', $locale, $roleName);
         } else {
             $role->setAttribute('name', json_encode([$locale => $roleName], JSON_UNESCAPED_UNICODE));
+        }
+
+        if ($hasRoleKeyColumn) {
+            $role->setAttribute('role_key', $roleKey);
         }
 
         $role->save();
@@ -234,5 +264,40 @@ class RoleAddCommand extends CoreCommand
 
         return '';
     }
-}
 
+    /**
+     * @param class-string<Model> $roleModelClass
+     */
+    protected function roleTableHasRoleKeyColumn(string $roleModelClass): bool
+    {
+        try {
+            /** @var Model $model */
+            $model = new $roleModelClass();
+            $table = $model->getTable();
+
+            return Schema::hasTable($table) && Schema::hasColumn($table, 'role_key');
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    protected function resolveRoleKey(string $roleName): string
+    {
+        $normalized = Str::of($roleName)
+            ->lower()
+            ->ascii()
+            ->replaceMatches('/[^a-z0-9]+/', '_')
+            ->trim('_')
+            ->toString();
+
+        if (in_array($normalized, ['superadministrator', 'super_admin', 'superadmin'], true)) {
+            return 'superadmin';
+        }
+
+        if (in_array($normalized, ['administrator', 'admin'], true)) {
+            return 'admin';
+        }
+
+        return $normalized !== '' ? $normalized : 'role';
+    }
+}

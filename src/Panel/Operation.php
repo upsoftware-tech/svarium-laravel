@@ -12,6 +12,7 @@ use Upsoftware\Svarium\UI\Components\Button;
 use Upsoftware\Svarium\UI\Components\Block;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
 use Upsoftware\Svarium\UI\Components\Form\Form;
+use Upsoftware\Svarium\Support\PermissionMatcher;
 use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 abstract class Operation
@@ -72,6 +73,21 @@ abstract class Operation
         return ['GET'];
     }
 
+    /**
+     * Optional operation route suffix used for named route aliases.
+     *
+     * Example:
+     * - module: ksef
+     * - routeName(): documents.import
+     * Final named routes:
+     * - module:ksef.documents.import
+     * - module:ksef.documents.import.get / .post (method aliases)
+     */
+    public static function routeName(): ?string
+    {
+        return null;
+    }
+
     public static function menu(): array
     {
         return [];
@@ -121,7 +137,69 @@ abstract class Operation
 
     public function authorize(PanelContext $context): bool
     {
-        return true;
+        $permission = app(\Upsoftware\Svarium\Roles\RolePermissionCatalog::class)
+            ->operationPermissionName(static::class, method_exists(static::class, 'uri') ? (string) static::uri() : null);
+
+        if ($permission === null) {
+            return true;
+        }
+
+        $user = $this->resolvePanelUser($context);
+        if (! is_object($user)) {
+            return false;
+        }
+
+        if ($this->userHasRole($user, 'superadmin')) {
+            return true;
+        }
+
+        return $this->userHasPermission($user, $permission);
+    }
+
+    public function delegatedAuthorize(PanelContext $context): bool
+    {
+        return $this->authorize($context);
+    }
+
+    public function delegatedSchema(PanelContext $context, ...$args): array
+    {
+        return $this->getSchema($context, ...$args);
+    }
+
+    public function delegatedValidationRules(PanelContext $context, ...$args): array
+    {
+        return $this->validationRules($context, ...$args);
+    }
+
+    public function delegatedValidationAttributes(PanelContext $context, ...$args): array
+    {
+        return $this->validationAttributes($context, ...$args);
+    }
+
+    public function delegatedValidationMessages(PanelContext $context, ...$args): array
+    {
+        return $this->validationMessages($context, ...$args);
+    }
+
+    public function delegatedSave(PanelContext $context, ...$args): ?OperationResult
+    {
+        if (! method_exists($this, 'save')) {
+            return null;
+        }
+
+        $result = $this->call('save', $context, ...$args);
+
+        if ($result === null) {
+            return null;
+        }
+
+        if (! $result instanceof OperationResult) {
+            throw new \RuntimeException(
+                static::class . '::save() must return OperationResult.'
+            );
+        }
+
+        return $result;
     }
 
     public static function middleware(): array
@@ -214,6 +292,20 @@ abstract class Operation
         $this->applyTableAccess($builder, $context);
 
         $query = $builder->getQuery();
+
+        /*
+        |--------------------------------------------------------------------------
+        | SAVED VIEW (TABLE TAB)
+        |--------------------------------------------------------------------------
+        */
+        $requestedView = trim((string) $context->request()->get('view', ''));
+        if ($requestedView !== '') {
+            $builder->applySavedView(
+                $query,
+                $requestedView,
+                ! $context->request()->filled('sort')
+            );
+        }
 
         /*
         |--------------------------------------------------------------------------
@@ -805,9 +897,6 @@ abstract class Operation
 
         return match ($prefix) {
             'perm', 'permission' => $this->userHasPermission($user, $value),
-            'role' => $this->userHasRole($user, $value),
-            'user' => $this->userMatches($user, $value),
-            'group' => $this->userHasGroup($user, $value),
             default => $this->userHasPermission($user, $token),
         };
     }
@@ -829,27 +918,7 @@ abstract class Operation
 
     protected function userHasPermission(?object $user, string $permission): bool
     {
-        if (! $user || $permission === '') {
-            return false;
-        }
-
-        if (method_exists($user, 'can')) {
-            try {
-                return (bool) $user->can($permission);
-            } catch (\Throwable) {
-                return false;
-            }
-        }
-
-        if (method_exists($user, 'hasPermissionTo')) {
-            try {
-                return (bool) $user->hasPermissionTo($permission);
-            } catch (\Throwable) {
-                return false;
-            }
-        }
-
-        return false;
+        return PermissionMatcher::hasPermission($user, $permission);
     }
 
     protected function userHasRole(?object $user, string $role): bool
@@ -877,7 +946,11 @@ abstract class Operation
                         return true;
                     }
 
-                    if ($roles->contains('name', $role)) {
+                    if ($roles->contains('role_key', $role) || $roles->contains('role_key', strtolower($role))) {
+                        return true;
+                    }
+
+                    if ($roles->contains(fn ($assignedRole) => $this->roleMatchesToken($assignedRole, $role))) {
                         return true;
                     }
                 }
@@ -887,6 +960,53 @@ abstract class Operation
         }
 
         return false;
+    }
+
+    protected function roleMatchesToken(mixed $assignedRole, string $role): bool
+    {
+        $token = strtolower(trim($role));
+        if ($token === '' || ! is_object($assignedRole)) {
+            return false;
+        }
+
+        $roleKey = strtolower(trim((string) ($assignedRole->role_key ?? '')));
+        if ($roleKey !== '' && $roleKey === $token) {
+            return true;
+        }
+
+        // Legacy fallback: only when role_key is missing (old, not-yet-migrated rows).
+        if ($roleKey !== '') {
+            return false;
+        }
+
+        $name = $assignedRole->name ?? null;
+
+        if (is_array($name)) {
+            foreach ($name as $value) {
+                if (strtolower(trim((string) $value)) === $token) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        if (! is_string($name)) {
+            return false;
+        }
+
+        $decoded = json_decode($name, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            foreach ($decoded as $value) {
+                if (strtolower(trim((string) $value)) === $token) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return strtolower(trim($name)) === $token;
     }
 
     protected function userMatches(?object $user, string $value): bool
@@ -1038,7 +1158,10 @@ abstract class Operation
 
         if ($this->isFormLike()) {
 
-            $actions = $this->formActions();
+            $actions = array_values(array_filter(
+                $this->formActions(),
+                static fn (mixed $action): bool => is_object($action) && method_exists($action, 'toArray')
+            ));
 
             if ($this->hasSubmit()) {
 
@@ -1319,26 +1442,105 @@ abstract class Operation
     {
         $ref = new \ReflectionMethod($this, $method);
         $params = [];
+        $consumedRouteArgs = [];
 
         foreach ($ref->getParameters() as $parameter) {
 
-            $type = $parameter->getType()?->getName();
+            $reflectionType = $parameter->getType();
+            $namedType = $reflectionType instanceof \ReflectionNamedType ? $reflectionType : null;
+            $type = $namedType?->getName();
+            $isBuiltin = $namedType?->isBuiltin() ?? false;
+            $parameterName = $parameter->getName();
 
             if ($type === PanelContext::class) {
                 $params[] = $context;
                 continue;
             }
 
-            foreach ($routeArgs as $arg) {
-                if ($type && $arg instanceof $type) {
-                    $params[] = $arg;
-                    continue 2;
+            if (array_key_exists($parameterName, $context->params)) {
+                $params[] = $context->params[$parameterName];
+                continue;
+            }
+
+            if ($type !== null && ! $isBuiltin) {
+                foreach ($routeArgs as $index => $arg) {
+                    if (isset($consumedRouteArgs[$index])) {
+                        continue;
+                    }
+
+                    if (is_object($arg) && is_a($arg, $type)) {
+                        $params[] = $arg;
+                        $consumedRouteArgs[$index] = true;
+                        continue 2;
+                    }
                 }
             }
 
-            $params[] = $type ? app($type) : null;
+            foreach ($routeArgs as $index => $arg) {
+                if (isset($consumedRouteArgs[$index])) {
+                    continue;
+                }
+
+                if (! $this->parameterAcceptsRouteArg($parameter, $arg, $type, $isBuiltin)) {
+                    continue;
+                }
+
+                $params[] = $arg;
+                $consumedRouteArgs[$index] = true;
+                continue 2;
+            }
+
+            if ($parameter->isDefaultValueAvailable()) {
+                $params[] = $parameter->getDefaultValue();
+                continue;
+            }
+
+            if ($reflectionType?->allowsNull()) {
+                $params[] = null;
+                continue;
+            }
+
+            if ($type !== null && ! $isBuiltin && class_exists($type)) {
+                $params[] = app($type);
+                continue;
+            }
+
+            $params[] = null;
         }
 
         return $this->$method(...$params);
+    }
+
+    protected function parameterAcceptsRouteArg(
+        \ReflectionParameter $parameter,
+        mixed $arg,
+        ?string $type,
+        bool $isBuiltin
+    ): bool {
+        if ($arg instanceof PanelContext) {
+            return false;
+        }
+
+        if ($type === null) {
+            return true;
+        }
+
+        if (! $isBuiltin) {
+            return is_object($arg) && is_a($arg, $type);
+        }
+
+        if ($arg === null) {
+            return $parameter->allowsNull();
+        }
+
+        return match ($type) {
+            'string' => is_scalar($arg) || (is_object($arg) && method_exists($arg, '__toString')),
+            'int' => is_int($arg) || (is_string($arg) && preg_match('/^-?\d+$/', trim($arg)) === 1),
+            'float' => is_float($arg) || is_int($arg) || (is_string($arg) && is_numeric(trim($arg))),
+            'bool' => is_bool($arg) || is_int($arg) || (is_string($arg) && in_array(strtolower(trim($arg)), ['0', '1', 'true', 'false', 'yes', 'no', 'on', 'off'], true)),
+            'array' => is_array($arg),
+            'mixed' => true,
+            default => true,
+        };
     }
 }

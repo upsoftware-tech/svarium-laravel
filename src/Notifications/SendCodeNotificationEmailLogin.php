@@ -6,10 +6,12 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
+use Upsoftware\Svarium\Notifications\Concerns\InteractsWithNotificationTemplates;
 
 class SendCodeNotificationEmailLogin extends Notification
 {
     use Queueable;
+    use InteractsWithNotificationTemplates;
 
     public $code;
     public $expired_at;
@@ -38,15 +40,29 @@ class SendCodeNotificationEmailLogin extends Notification
      */
     public function toMail(object $notifiable): MailMessage
     {
-        return (new MailMessage)
-            ->subject(__('svarium::email.Your one-time login code :code', ['code' => $this->code]))
+        $subject = __('svarium::email.Your one-time login code :code', ['code' => $this->code]);
+        $defaultBody = [
+            __('svarium::email.We received a request to log in to your account in the').' '.config('app.name'),
+            __('svarium::email.To confirm the login, enter the code below:'),
+            (string) $this->code,
+            __('svarium::email.The code and the link will expire in 30 minutes (:expires).', ['expires' => $this->expired_at]),
+            __('svarium::email.If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.'),
+        ];
+
+        $rendered = $this->renderTemplateContent($subject, $defaultBody, [
+            'code' => (string) $this->code,
+            'expires' => (string) $this->expired_at,
+            'system' => (string) config('app.name'),
+        ]);
+
+        $message = (new MailMessage)
+            ->subject((string) ($rendered['subject'] ?? $subject))
             ->greeting(__('svarium::email.Hello!'))
-            ->line(__('svarium::email.We received a request to log in to your account in the').' '.config('app.name'))
-            ->line(__('svarium::email.To confirm the login, enter the code below:'))
-            ->line($this->code)
-            ->line(__('svarium::email.The code and the link will expire in 30 minutes (:expires).', ['expires' => $this->expired_at]))
-            ->line(__('svarium::email.If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.'))
             ->salutation(__('svarium::email.Team :system', ['system' => config('app.name')]));
+
+        $this->appendTemplateParagraphLines($message, (string) ($rendered['body'] ?? ''));
+
+        return $message;
     }
 
     /**

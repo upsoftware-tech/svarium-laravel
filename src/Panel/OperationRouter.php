@@ -9,6 +9,7 @@ use ReflectionMethod;
 use ReflectionNamedType;
 use ReflectionUnionType;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Upsoftware\Svarium\Http\Middleware\AuthenticateMiddleware;
 use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\ComponentResult;
@@ -163,6 +164,7 @@ class OperationRouter
         }
 
         $context = new PanelContext($panel, $request, $route['params']);
+        app()->instance(PanelContext::class, $context);
         $request->attributes->set('panel', $panelName);
         $context->input = new PanelInput($request->all());
 
@@ -189,12 +191,6 @@ class OperationRouter
             $operation->setResource($route['meta']['resource']);
         }
 
-        try {
-            app(OperationAuthorizer::class)->authorize($operation, $context);
-        } catch (AuthorizationException $e) {
-            return response('Forbidden', 403);
-        }
-
         $args = app(OperationParameterResolver::class)
             ->resolve($operation, $context);
 
@@ -214,7 +210,27 @@ class OperationRouter
         $result = app(\Illuminate\Pipeline\Pipeline::class)
             ->send($request)
             ->through($this->resolveMiddleware($middleware, $context))
-            ->then(fn () => $operation->handle($context, ...$args));
+            ->then(function () use ($operation, $context, $args) {
+                try {
+                    app(OperationAuthorizer::class)->authorize($operation, $context);
+                } catch (AuthorizationException $e) {
+                    return response('Forbidden', 403);
+                }
+
+                try {
+                    return $operation->handle($context, ...$args);
+                } catch (NotFoundHttpException $e) {
+                    if ($this->shouldRedirectAuthNotFound($context->request())) {
+                        return redirect($this->panelRootPath($context->panel()))
+                            ->with('alert_warning', [
+                                'text' => 'Zaloguj się ponownie.',
+                                'duration' => 0,
+                            ]);
+                    }
+
+                    throw $e;
+                }
+            });
 
         if ($result instanceof ComponentResult) {
 
@@ -240,58 +256,30 @@ class OperationRouter
         return $result;
     }
 
+    protected function shouldRedirectAuthNotFound(Request $request): bool
+    {
+        $path = trim((string) $request->path(), '/');
+        if ($path === '') {
+            return false;
+        }
+
+        return preg_match('#(^|/)auth/(login|register|reset)/(verification|method)(/|$)#i', $path) === 1;
+    }
+
+    protected function panelRootPath(?Panel $panel): string
+    {
+        if (! $panel instanceof Panel) {
+            return '/';
+        }
+
+        $prefix = trim((string) $panel->prefixName(), '/');
+
+        return $prefix !== '' ? '/'.$prefix : '/';
+    }
+
     protected function isPublicAuthRequest(Request $request): bool
     {
-        $defaultRoutePatterns = [
-            'panel.auth.login',
-            'panel.auth.login.*',
-            'panel.auth.reset',
-            'panel.auth.reset.*',
-            'panel.auth.register',
-            'panel.auth.register.*',
-            'panel.auth.method',
-            'panel.auth.method.*',
-            'panel.auth.verification',
-            'panel.auth.verification.*',
-            'panel.auth.redirect',
-            'panel.auth.callback',
-        ];
-
-        $routePatterns = config('upsoftware.panel.public_auth_route_patterns', $defaultRoutePatterns);
-        if (! is_array($routePatterns)) {
-            $routePatterns = $defaultRoutePatterns;
-        }
-
-        foreach ($routePatterns as $pattern) {
-            if (is_string($pattern) && $pattern !== '' && $request->routeIs($pattern)) {
-                return true;
-            }
-        }
-
-        $panelPrefix = trim((string) config('upsoftware.panel.prefix', ''), '/');
-        $base = $panelPrefix !== '' ? $panelPrefix.'/' : '';
-
-        $defaultPathPatterns = [
-            $base.'auth/login',
-            $base.'auth/login/*',
-            $base.'auth/reset',
-            $base.'auth/reset/*',
-            $base.'auth/register',
-            $base.'auth/register/*',
-        ];
-
-        $pathPatterns = config('upsoftware.panel.public_auth_path_patterns', $defaultPathPatterns);
-        if (! is_array($pathPatterns)) {
-            $pathPatterns = $defaultPathPatterns;
-        }
-
-        foreach ($pathPatterns as $pattern) {
-            if (is_string($pattern) && $pattern !== '' && $request->is($pattern)) {
-                return true;
-            }
-        }
-
-        return false;
+        return svarium_is_public_auth_request($request);
     }
 
     protected function withoutAuthMiddleware(array $middleware): array

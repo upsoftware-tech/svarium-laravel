@@ -30,6 +30,7 @@ use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Panel\OperationRegistry;
 use Upsoftware\Svarium\Panel\Panel;
 use Upsoftware\Svarium\Panel\PanelRegistry;
+use Upsoftware\Svarium\Roles\RoleParameterRegistry;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 use Upsoftware\Svarium\Services\DeviceTracking\DeviceTracking;
 use Upsoftware\Svarium\Services\LayoutService;
@@ -46,6 +47,8 @@ class SvariumServiceProvider extends ServiceProvider
     */
     public function register(): void
     {
+        $this->syncAuthUserProviderModel();
+
         $this->app->register(SvariumPluginAggregateServiceProvider::class);
 
         $this->app->singleton('layout', fn () => new LayoutService);
@@ -67,9 +70,11 @@ class SvariumServiceProvider extends ServiceProvider
         $this->app->singleton(EventBus::class);
         $this->app->singleton(MenuRegistry::class);
         $this->app->singleton(WidgetRegistry::class);
+        $this->app->singleton(RoleParameterRegistry::class);
 
         $this->app->singleton(ModuleRegistry::class, function () {
             $registry = new ModuleRegistry;
+            $registry->loadFromPackage();
             $registry->loadFromApp();
             $registry->registerPhase(); // tylko register
 
@@ -92,6 +97,31 @@ class SvariumServiceProvider extends ServiceProvider
         $this->app->singleton(FieldAttributesRegistry::class);
 
         $this->registerHelpers();
+    }
+
+    protected function syncAuthUserProviderModel(): void
+    {
+        $userModel = config('upsoftware.models.user');
+        $originalModels = [];
+
+        if (! is_string($userModel) || $userModel === '' || ! class_exists($userModel)) {
+            return;
+        }
+
+        foreach ((array) config('auth.providers', []) as $provider => $definition) {
+            if (($definition['driver'] ?? null) !== 'eloquent') {
+                continue;
+            }
+
+            $originalModel = $definition['model'] ?? null;
+            if (is_string($originalModel) && $originalModel !== '') {
+                $originalModels[$provider] = $originalModel;
+            }
+
+            config()->set("auth.providers.{$provider}.model", $userModel);
+        }
+
+        config()->set('upsoftware.auth.original_provider_models', $originalModels);
     }
 
     /*

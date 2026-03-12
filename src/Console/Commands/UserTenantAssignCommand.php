@@ -22,10 +22,7 @@ class UserTenantAssignCommand extends CoreCommand
         try {
             $this->ensureTenancyEnabled();
 
-            $userModelClass = $this->resolveModelClass(
-                'upsoftware.models.user',
-                config('auth.providers.users.model', \App\Models\User::class)
-            );
+            $userModelClass = $this->resolveUserModelClass();
             $tenantModelClass = $this->resolveModelClass('upsoftware.models.tenant', \Upsoftware\Svarium\Models\Tenant::class);
 
             $this->validatePrerequisites($userModelClass, $tenantModelClass);
@@ -251,7 +248,7 @@ class UserTenantAssignCommand extends CoreCommand
             return [];
         }
 
-        $modelType = ltrim($user::class, '\\');
+        $modelType = svarium_model_type($user);
         $connection = $this->resolveConnectionFromConfiguredModel(
             (string) config('upsoftware.models.model_has_tenant', \Upsoftware\Svarium\Models\ModelHasTenant::class)
         );
@@ -280,7 +277,7 @@ class UserTenantAssignCommand extends CoreCommand
             throw new RuntimeException('Brak ID użytkownika.');
         }
 
-        $modelType = ltrim($user::class, '\\');
+        $modelType = svarium_model_type($user);
 
         $connection = $this->resolveConnectionFromConfiguredModel(
             (string) config('upsoftware.models.model_has_tenant', \Upsoftware\Svarium\Models\ModelHasTenant::class)
@@ -358,6 +355,33 @@ class UserTenantAssignCommand extends CoreCommand
         return $model;
     }
 
+    /**
+     * @return class-string<Model>
+     */
+    protected function resolveUserModelClass(): string
+    {
+        try {
+            if (function_exists('get_model')) {
+                $model = get_model('user');
+                if (is_string($model) && trim($model) !== '' && class_exists($model) && is_subclass_of($model, Model::class)) {
+                    return $model;
+                }
+            }
+        } catch (Throwable) {
+            // Fallback below.
+        }
+
+        $trackingUserModel = config('upsoftware.tracking.user_model', config('upsoftware.user_model'));
+        if (is_string($trackingUserModel) && trim($trackingUserModel) !== '' && class_exists($trackingUserModel) && is_subclass_of($trackingUserModel, Model::class)) {
+            return $trackingUserModel;
+        }
+
+        return $this->resolveModelClass(
+            'upsoftware.models.user',
+            \Upsoftware\Svarium\Models\User::class
+        );
+    }
+
     protected function resolveConnectionFromConfiguredModel(string $modelClass): ?string
     {
         if (! is_string($modelClass) || ! class_exists($modelClass) || ! is_subclass_of($modelClass, Model::class)) {
@@ -375,4 +399,3 @@ class UserTenantAssignCommand extends CoreCommand
         }
     }
 }
-

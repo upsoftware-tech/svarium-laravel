@@ -4,7 +4,11 @@ namespace Upsoftware\Svarium\Panel;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Upsoftware\Svarium\Http\RedirectResult;
+use Upsoftware\Svarium\Panel\Resource\ResourceFormTab;
 use Upsoftware\Svarium\Panel\Table\TableBuilder;
+use Upsoftware\Svarium\Services\ResourceImportService;
+use Upsoftware\Svarium\UI\Component;
 
 abstract class Resource
 {
@@ -47,13 +51,70 @@ abstract class Resource
     |--------------------------------------------------------------------------
     */
 
-    abstract public function form(): array;
+    public function form(?Model $record = null): array
+    {
+        return [];
+    }
 
     abstract public function table(): TableBuilder;
 
     public function fields(): array
     {
         return [];
+    }
+
+    /**
+     * @return array<int, ResourceFormTab>
+     */
+    public function formTabs(PanelContext $context, ?Model $record = null): array
+    {
+        return [];
+    }
+
+    /**
+     * @return array<int, ResourceFormTab>
+     */
+    public function createTabs(PanelContext $context): array
+    {
+        return $this->formTabs($context);
+    }
+
+    /**
+     * @return array<int, ResourceFormTab>
+     */
+    public function editTabs(PanelContext $context, Model $record): array
+    {
+        return $this->formTabs($context, $record);
+    }
+
+    public function formTabPosition(PanelContext $context, ?Model $record = null): string
+    {
+        return 'top';
+    }
+
+    public function formConfig(PanelContext $context, ?Model $record = null): array
+    {
+        return [];
+    }
+
+    public function formTabConfig(PanelContext $context, ?Model $record = null): array
+    {
+        return $this->resolveFormConfig($context, $record)['tab'];
+    }
+
+    public function formTabHeader(PanelContext $context, ?Model $record = null): Component|array|string|\Closure|null
+    {
+        return null;
+    }
+
+    public function formTabHeaderTitle(PanelContext $context, ?Model $record = null): Component|array|string|\Closure|null
+    {
+        return null;
+    }
+
+    public function formTabHeaderAside(PanelContext $context, ?Model $record = null): Component|array|string|\Closure|null
+    {
+        return null;
     }
 
     /*
@@ -71,7 +132,34 @@ abstract class Resource
     public function beforeDelete(Model $model): void {}
     public function afterDelete(Model $model): void {}
 
+    /**
+     * Handle custom form action from create/edit forms (e.g. `_action=test_connection`).
+     */
+    public function handleFormAction(
+        PanelContext $context,
+        string $action,
+        array $data,
+        ?Model $record = null
+    ): ?RedirectResult {
+        return null;
+    }
+
+    /**
+     * Extra form footer actions rendered next to the default save action.
+     *
+     * @return array<int, Component>
+     */
+    public function formActions(PanelContext $context, ?Model $record = null): array
+    {
+        return [];
+    }
+
     public function canCreate(PanelContext $context): bool
+    {
+        return true;
+    }
+
+    public function canList(PanelContext $context): bool
     {
         return true;
     }
@@ -94,6 +182,19 @@ abstract class Resource
     public function canPreview(PanelContext $context): bool
     {
         return true;
+    }
+
+    public function canImport(PanelContext $context): bool
+    {
+        return true;
+    }
+
+    public function import(PanelContext $context, array $files, TableBuilder $builder): mixed
+    {
+        /** @var ResourceImportService $importer */
+        $importer = app(ResourceImportService::class);
+
+        return $importer->import($this, $files);
     }
 
     public function access(): array
@@ -126,6 +227,11 @@ abstract class Resource
     public function previewTitle(PanelContext $context, Model $record): string
     {
         return "Preview {$this->resourceTitleLabel()}";
+    }
+
+    public function importTitle(PanelContext $context): string
+    {
+        return "Import {$this->resourceTitleLabel()}";
     }
 
     public function previewForm(Model $record): array
@@ -174,6 +280,64 @@ abstract class Resource
     protected function tableBuilder(): TableBuilder
     {
         return TableBuilder::make($this->tableQuery());
+    }
+
+    public function resolveFormConfig(?PanelContext $context = null, ?Model $record = null): array
+    {
+        $defaults = [
+            'tab' => [
+                'position' => 'top',
+                'variant' => 'default',
+                'title' => true,
+            ],
+            'language' => [
+                'display' => 'inline',
+                'multiple' => false,
+                'showIcon' => false,
+                'showLabel' => true,
+            ],
+        ];
+
+        $configured = config('upsoftware.resource.form', []);
+
+        if (is_array($configured)) {
+            $defaults = array_replace_recursive($defaults, $configured);
+        }
+
+        $custom = $context instanceof PanelContext
+            ? $this->formConfig($context, $record)
+            : [];
+
+        if (! is_array($custom)) {
+            $custom = [];
+        }
+
+        return array_replace_recursive($defaults, $this->normalizeFormConfig($custom, $context, $record));
+    }
+
+    protected function normalizeFormConfig(array $config, ?PanelContext $context = null, ?Model $record = null): array
+    {
+        if (array_key_exists('position', $config) || array_key_exists('variant', $config)) {
+            $config['tab'] = array_filter([
+                'position' => $config['position'] ?? ($context instanceof PanelContext
+                    ? $this->formTabPosition($context, $record)
+                    : 'top'),
+                'variant' => $config['variant'] ?? 'default',
+                'title' => $config['title'] ?? true,
+            ], static fn ($value) => $value !== null);
+
+            unset($config['position'], $config['variant'], $config['title']);
+        }
+
+        if (! isset($config['tab']) || ! is_array($config['tab'])) {
+            $config['tab'] = [
+                'position' => $context instanceof PanelContext
+                    ? $this->formTabPosition($context, $record)
+                    : 'top',
+            ];
+        }
+
+        return $config;
     }
 
     public function getFormFieldNames(): array

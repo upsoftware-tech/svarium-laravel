@@ -11,6 +11,7 @@ use Upsoftware\Svarium\Panel\Resource\Operations\ResourceCreateOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDeleteOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDuplicateOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceEditOperation;
+use Upsoftware\Svarium\Panel\Resource\Operations\ResourceImportOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceListOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourcePreviewOperation;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
@@ -38,7 +39,19 @@ class ResourceRegistry
             'resource' => $resourceClass,
         ]);
 
+        $registry->register($panel, ['GET', 'POST'], "{$slug}/create/{tab}", ResourceCreateOperation::class, [
+            'resource' => $resourceClass,
+        ]);
+
+        $registry->register($panel, ['GET', 'POST'], "{$slug}/import", ResourceImportOperation::class, [
+            'resource' => $resourceClass,
+        ]);
+
         $registry->register($panel, ['GET', 'POST'], "{$slug}/{id}/edit", ResourceEditOperation::class, [
+            'resource' => $resourceClass,
+        ]);
+
+        $registry->register($panel, ['GET', 'POST'], "{$slug}/{id}/edit/{tab}", ResourceEditOperation::class, [
             'resource' => $resourceClass,
         ]);
 
@@ -106,8 +119,11 @@ class ResourceRegistry
             $module = (string) str($slug)->singular()->snake();
         }
 
+        $panelInstance = app(PanelRegistry::class)->get($panel);
+        $panelPrefix = $panelInstance?->prefix;
+
         $base = trim(implode('/', array_filter([
-            trim($panel, '/'),
+            trim((string) $panelPrefix, '/'),
             trim($slug, '/'),
         ])), '/');
 
@@ -118,7 +134,10 @@ class ResourceRegistry
         $routes = [
             "module:{$module}" => $base,
             "module:{$module}.create" => "{$base}/create",
+            "module:{$module}.create.tab" => "{$base}/create/{tab}",
+            "module:{$module}.import" => "{$base}/import",
             "module:{$module}.edit" => "{$base}/{id}/edit",
+            "module:{$module}.edit.tab" => "{$base}/{id}/edit/{tab}",
             "module:{$module}.preview" => "{$base}/{id}/preview",
             "module:{$module}.delete" => "{$base}/{id}/delete",
             "module:{$module}.duplicate" => "{$base}/{id}/duplicate",

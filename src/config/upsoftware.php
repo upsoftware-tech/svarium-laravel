@@ -1,5 +1,6 @@
 <?php
 
+use Upsoftware\Svarium\Layouts\Panel\FormTabLayout;
 use Upsoftware\Svarium\Services\DeviceTracking\DeviceHijackingDetectorDefault;
 
 return [
@@ -35,16 +36,64 @@ return [
             'nextButtonLabel' => null,
             'lastButtonLabel' => null,
         ],
-        'condesed' => false,
+        'condensed' => false,
         'searchbar' => false,
+        'exported' => true,
+        'imported' => true,
+    ],
+    'resource' => [
+        // Layout wrapper used to render form tab content in Resource create/edit screens.
+        'form_tab_layout' => FormTabLayout::class,
+        'form' => [
+            'tab' => [
+                'position' => 'top',
+                'variant' => 'default',
+                'title' => true,
+            ],
+            'language' => [
+                // inline = checklist/inline options, select = Select component.
+                'display' => 'inline',
+                // Used when display = select.
+                'multiple' => false,
+                // Show flag icon in inline language selector.
+                'showIcon' => false,
+                // Show label text in inline language selector.
+                'showLabel' => true,
+            ],
+        ],
+    ],
+    'colors' => [
+        // Default file used by "php artisan svarium:app.colors".
+        'css_file' => 'resources/css/app.css',
+        // Default neutral tone (slate|gray|zinc|neutral|stone|taupe|mauve|mist|olive).
+        'tone' => 'zinc',
+        // Default PRIMARY color for light and dark themes.
+        'primary' => [
+            'light' => [
+                'color' => 'blue',
+                'shade' => 500,
+            ],
+            'dark' => [
+                'color' => 'blue',
+                'shade' => 500,
+            ],
+        ],
     ],
     'panel' => [
         'enabled' => true,
         'name' => env('SVARIUM_PANEL_NAME', 'admin'),
+        // Legacy auth route prefix used for backward compatibility aliases.
         'route_prefix' => 'panel.auth',
         'prefix' => '',
         'root_layout' => 'CleanLayout',
         'definition_layout_types' => ['AuthLayout'],
+        'auth' => [
+            // true: register auth routes per panel (e.g. panel.admin.auth.login).
+            // false: register one global auth route prefix (legacy mode).
+            'per_panel' => true,
+            // Optional default panel name used for compatibility aliases (panel.auth.*).
+            'default_panel' => null,
+        ],
         'public_auth_route_patterns' => [
             'panel.auth.login',
             'panel.auth.login.*',
@@ -126,6 +175,12 @@ return [
                 ],
             ],
         ],
+        // Role keys that can log in with tenant bypass in column tenancy mode.
+        'tenant_bypass_role_keys' => ['superadmin'],
+        // Scope of tenant bypass for roles above:
+        // - all_tenants: role can log in on every tenant/domain context.
+        // - tenant: role must exist for current tenant (or global role with null tenant_id).
+        'tenant_bypass_scope' => 'all_tenants',
         'otp' => [
             /**************************************************************************
              * Służy do:
@@ -315,8 +370,13 @@ return [
         'permission' => \Spatie\Permission\Models\Permission::class,
         'role' => \Upsoftware\Svarium\Models\Role::class,
         'setting' => \Upsoftware\Svarium\Models\Setting::class,
+        'subscription_module' => \Upsoftware\Svarium\Models\SubscriptionModule::class,
+        'subscription_limit_tier' => \Upsoftware\Svarium\Models\SubscriptionLimitTier::class,
+        'system_mailbox' => \Upsoftware\Svarium\Models\SystemMailbox::class,
         'tenant' => \Upsoftware\Svarium\Models\Tenant::class,
         'tenant_profile' => \Upsoftware\Svarium\Models\TenantProfile::class,
+        'tenant_subscription' => \Upsoftware\Svarium\Models\TenantSubscription::class,
+        'tenant_subscription_item' => \Upsoftware\Svarium\Models\TenantSubscriptionItem::class,
         'domain' => \Upsoftware\Svarium\Models\Domain::class,
         'tenant_domain' => \Upsoftware\Svarium\Models\TenantDomain::class,
         'user' => \Upsoftware\Svarium\Models\User::class,
@@ -325,6 +385,108 @@ return [
     ],
     'components' => [
         'prefix' => '',
+    ],
+    'ui' => [
+        'sidebar_user' => [
+            // Enable items registered for user dropdown.
+            'menu_enabled' => true,
+            // Navigation key consumed by SidebarUser component.
+            'menu_navigation_id' => 'sidebar_user',
+        ],
+    ],
+    'modules' => [
+        'builtin' => [
+            // Built-in package modules toggles.
+            'media' => true,
+            'user' => true,
+            'role' => true,
+            'dictionary' => true,
+            'my_profile' => true,
+            'otp' => true,
+            'activity_log' => true,
+            'system_mailboxes' => true,
+            'otp_code_logs' => true,
+            'system_mail_templates' => true,
+            'languages' => true,
+            'translation' => true,
+            'subscriptions' => true,
+        ],
+        'placements' => [
+            // Available target values:
+            // - main_menu: registers in panel navigation
+            // - sidebar_user: registers in SidebarUser dropdown
+            // - none: do not register menu item
+            //
+            // Optional values:
+            // - path: submenu path (for main_menu or grouped sidebar entries)
+            // - path_ids: stable submenu identifiers matching path segments (language independent)
+            // - order: sort order inside target container
+            // - icon: icon name override
+            // - group_icon: icon for auto-generated path group node (for example "System setting")
+            // - navigation_id: custom navigation key
+            'my_profile' => [
+                'target' => 'sidebar_user',
+                'order' => 10,
+                'icon' => 'lucide:user-round',
+            ],
+            'otp' => [
+                'target' => 'sidebar_user',
+                'order' => 20,
+                'icon' => 'lucide:shield-check',
+            ],
+            'activity_log' => [
+                'target' => 'sidebar_user',
+                'order' => 30,
+                'icon' => 'lucide:history',
+            ],
+            'system_mailboxes' => [
+                'target' => 'main_menu',
+                'path' => ['System setting'],
+                'path_ids' => ['system'],
+                'order' => 40,
+                'icon' => '',
+                'group_icon' => 'lucide:sliders',
+            ],
+            'otp_code_logs' => [
+                'target' => 'main_menu',
+                'path' => ['System setting'],
+                'path_ids' => ['system'],
+                'order' => 45,
+                'icon' => 'lucide:key-round',
+            ],
+            'system_mail_templates' => [
+                'target' => 'main_menu',
+                'path' => ['System setting'],
+                'path_ids' => ['system'],
+                'order' => 50,
+                'icon' => '',
+                'group_icon' => 'lucide:sliders',
+            ],
+            'languages' => [
+                'target' => 'main_menu',
+                'path' => ['System setting'],
+                'path_ids' => ['system'],
+                'order' => 60,
+                'icon' => '',
+                'group_icon' => 'lucide:sliders',
+            ],
+            'translation' => [
+                'target' => 'main_menu',
+                'path' => ['System setting'],
+                'path_ids' => ['system'],
+                'order' => 70,
+                'icon' => '',
+                'group_icon' => 'lucide:sliders',
+            ],
+            'subscriptions' => [
+                'target' => 'main_menu',
+                'path' => ['System setting'],
+                'path_ids' => ['system'],
+                'order' => 80,
+                'icon' => '',
+                'group_icon' => 'lucide:sliders',
+            ],
+        ],
     ],
     'logo' => [],
 ];

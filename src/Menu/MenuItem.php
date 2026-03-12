@@ -63,6 +63,13 @@ class MenuItem
         return $this;
     }
 
+    public function permission(?string $permission): static
+    {
+        $this->data['permission'] = $permission;
+
+        return $this;
+    }
+
     public function url(string $url): static
     {
         $this->data['url'] = $url;
@@ -87,6 +94,37 @@ class MenuItem
     public function path(string|array $path): static
     {
         $this->data['path'] = $path;
+
+        return $this;
+    }
+
+    public function pathIds(string|array $pathIds): static
+    {
+        $this->data['path_ids'] = $pathIds;
+
+        return $this;
+    }
+
+    public function pathKeys(string|array $pathKeys): static
+    {
+        return $this->pathIds($pathKeys);
+    }
+
+    public function pathId(string $pathId): static
+    {
+        $this->data['path_id'] = $pathId;
+
+        return $this;
+    }
+
+    public function pathKey(string $pathKey): static
+    {
+        return $this->pathId($pathKey);
+    }
+
+    public function parent(string $parent): static
+    {
+        $this->data['parent'] = $parent;
 
         return $this;
     }

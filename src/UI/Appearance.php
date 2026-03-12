@@ -285,8 +285,12 @@ class Appearance
         return $this->prop('borderRadius', $value);
     }
 
-    public function rounded(string|int|float $rounded): static
+    public function rounded(string|int|float|null $rounded = 'base'): static
     {
+        if ($rounded === null) {
+            $rounded = 'base';
+        }
+
         return $this->borderRadius($rounded);
     }
 
@@ -689,6 +693,16 @@ class Appearance
         ]);
     }
 
+    public function colSpan(string|int $value): static
+    {
+        return $this->applyGridSpan($value, 'col-span');
+    }
+
+    public function rowSpan(string|int $value): static
+    {
+        return $this->applyGridSpan($value, 'row-span');
+    }
+
     protected function applyUtilityProperty(
         string|int|float $value,
         string $classPrefix,
@@ -718,6 +732,35 @@ class Appearance
         return $this->style([
             $styleProperty => $raw,
         ]);
+    }
+
+    protected function applyGridSpan(string|int $value, string $prefix): static
+    {
+        $raw = trim((string) $value);
+
+        if ($raw === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($raw);
+
+        if (str_starts_with($normalized, $prefix.'-')) {
+            return $this->appendClass($normalized);
+        }
+
+        if ($normalized === 'full') {
+            return $this->appendClass($prefix.'-'.$normalized);
+        }
+
+        if ($normalized === 'auto') {
+            return $this->appendClass(str_starts_with($prefix, 'col-') ? 'col-auto' : 'row-auto');
+        }
+
+        if (preg_match('/^\d+$/', $normalized)) {
+            return $this->appendClass($prefix.'-'.$normalized);
+        }
+
+        return $this;
     }
 
     protected function shouldTreatAsCssValue(string $value): bool
@@ -773,6 +816,22 @@ class Appearance
         if (preg_match('/^-?\d+(\.\d+)?px$/i', $normalized)) {
             return $this->style([
                 $styleProperty => $normalized,
+            ]);
+        }
+
+        if (
+            str_starts_with($normalized, 'calc(')
+            || str_starts_with($normalized, 'clamp(')
+            || str_starts_with($normalized, 'min(')
+            || str_starts_with($normalized, 'max(')
+            || str_starts_with($normalized, 'var(')
+        ) {
+            $normalizedFunctionValue = str_starts_with($normalized, 'calc(')
+                ? $this->normalizeCalcExpression($raw)
+                : $raw;
+
+            return $this->style([
+                $styleProperty => $normalizedFunctionValue,
             ]);
         }
 
@@ -911,6 +970,32 @@ class Appearance
             ...$current,
             ...$style,
         ]);
+    }
+
+    protected function normalizeCalcExpression(string $value): string
+    {
+        $trimmed = trim($value);
+        $lower = strtolower($trimmed);
+
+        if (! str_starts_with($lower, 'calc(')) {
+            return $trimmed;
+        }
+
+        $openPosition = strpos($trimmed, '(');
+        $closePosition = strrpos($trimmed, ')');
+
+        if ($openPosition === false || $closePosition === false || $closePosition <= $openPosition) {
+            return $trimmed;
+        }
+
+        $prefix = substr($trimmed, 0, $openPosition + 1);
+        $inside = substr($trimmed, $openPosition + 1, $closePosition - $openPosition - 1);
+        $suffix = substr($trimmed, $closePosition);
+
+        $inside = preg_replace('/\s*([+\-*\/])\s*/', ' $1 ', $inside) ?? $inside;
+        $inside = preg_replace('/\s+/', ' ', trim($inside)) ?? trim($inside);
+
+        return $prefix.$inside.$suffix;
     }
 
     public function toArray(): array

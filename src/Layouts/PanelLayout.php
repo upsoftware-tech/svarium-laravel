@@ -55,7 +55,7 @@ class PanelLayout extends BasePanelLayout
                                     Block::make()->flex(1)
                                         ->children([
                                             ScrollArea::make()
-                                                ->height('full')
+                                                ->height('calc(100vh-70px)')
                                                 ->children([
                                                     Block::make()
                                                         ->padding(6)

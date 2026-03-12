@@ -43,8 +43,8 @@ class RegisterController extends Controller
             'submitLabel' => $config['submitLabel'] ?? __('Create account'),
             'loginLabel' => $config['loginLabel'] ?? __('Already have an account?'),
             'loginLinkLabel' => $config['loginLinkLabel'] ?? __('Sign in'),
-            'loginLink' => $config['loginLink'] ?? 'panel.auth.login',
-            'action' => $config['action'] ?? 'panel.auth.register.set',
+            'loginLink' => $config['loginLink'] ?? $this->authRouteName('login'),
+            'action' => $config['action'] ?? $this->authRouteName('register.set'),
             'layout' => $config['layout'] ?? 'CleanLayout',
             'schema' => $this->serializeComponents($schema),
             'fields' => $config['fields'] ?? [],
@@ -105,7 +105,7 @@ class RegisterController extends Controller
                 ->with(['success' => $successMessage]);
         }
 
-        $loginRoute = (string) ($config['login_redirect_route'] ?? 'panel.auth.login');
+        $loginRoute = $this->authRouteName((string) ($config['login_redirect_route'] ?? 'login'));
 
         return redirect()->route($loginRoute)
             ->with(['success' => $successMessage]);
@@ -659,7 +659,7 @@ class RegisterController extends Controller
             $userAuth = get_model('user_auth')::setToken($user, 'register');
             $userAuth->sendEmail('register');
 
-            $route = (string) ($activation['verification_route'] ?? 'panel.auth.verification');
+            $route = $this->authRouteName((string) ($activation['verification_route'] ?? 'verification'));
             $type = (string) ($activation['verification_type'] ?? 'register');
 
             return redirect()->route($route, [
@@ -675,7 +675,7 @@ class RegisterController extends Controller
                 $user->sendEmailVerificationNotification();
             }
 
-            $route = (string) ($activation['link_sent_redirect_route'] ?? ($config['login_redirect_route'] ?? 'panel.auth.login'));
+            $route = $this->authRouteName((string) ($activation['link_sent_redirect_route'] ?? ($config['login_redirect_route'] ?? 'login')));
 
             return redirect()->route($route)
                 ->with(['success' => __('Verification link has been sent to your email address.')]);
@@ -888,7 +888,7 @@ class RegisterController extends Controller
         return [
             'type' => 'Form',
             'props' => [
-                'action' => $pageProps['action'] ?? 'panel.auth.register.set',
+                'action' => $pageProps['action'] ?? $this->authRouteName('register.set'),
             ],
             'children' => [
                 ...$schema,
@@ -910,7 +910,7 @@ class RegisterController extends Controller
     {
         if ($component === 'BlockFormRegister') {
             return [
-                'action' => $pageProps['action'] ?? 'panel.auth.register.set',
+                'action' => $pageProps['action'] ?? $this->authRouteName('register.set'),
                 'submitLabel' => $pageProps['submitLabel'] ?? __('Create account'),
                 'schema' => $pageProps['schema'] ?? [],
                 'fields' => $pageProps['fields'] ?? [],
@@ -933,6 +933,27 @@ class RegisterController extends Controller
         }
 
         return $normalized;
+    }
+
+    protected function authRouteName(string $name): string
+    {
+        $value = trim($name);
+
+        if ($value === '') {
+            return panel_route_name('login', $this->resolvePanel()?->name);
+        }
+
+        $isAuthReference =
+            str_starts_with($value, 'auth.')
+            || str_starts_with($value, 'panel.')
+            || preg_match('/^[a-z0-9_-]+\.auth\./i', $value) === 1
+            || ! str_contains($value, '.');
+
+        if (! $isAuthReference) {
+            return $value;
+        }
+
+        return panel_route_name($value, $this->resolvePanel()?->name);
     }
 
     protected function makeLayoutNode(string $layout, array $pageProps = []): array

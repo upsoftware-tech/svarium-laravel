@@ -84,6 +84,15 @@ class InstallTenantCommand extends CoreCommand
             return self::FAILURE;
         }
 
+        $addedCentralEnvKeys = $this->ensureConnectionEnvKeys(
+            envPrefix: 'SVARIUM_CENTRAL',
+            template: $templateConfig
+        );
+        $addedTenantEnvKeys = $this->ensureConnectionEnvKeys(
+            envPrefix: 'SVARIUM_TENANT',
+            template: $templateConfig
+        );
+
         try {
             $config = ArrayFile::open($databasePath);
 
@@ -170,6 +179,12 @@ class InstallTenantCommand extends CoreCommand
         $this->line("Tenancy mode: {$tenancyMode}");
         $this->line('Tenancy enabled: '.($enableTenancy ? 'true' : 'false'));
         $this->line('Domains enabled: '.($enableDomains ? 'true' : 'false'));
+        if ($addedCentralEnvKeys !== []) {
+            $this->line('Dodano brakujące klucze ENV (CENTRAL): '.implode(', ', $addedCentralEnvKeys));
+        }
+        if ($addedTenantEnvKeys !== []) {
+            $this->line('Dodano brakujące klucze ENV (TENANT): '.implode(', ', $addedTenantEnvKeys));
+        }
         $this->line('Tenant owner binding enabled: '.($ownerEnabled ? 'true' : 'false'));
         $this->line('Tenant profile enabled: '.($profileEnabled ? 'true' : 'false'));
         if ($profileEnabled) {
@@ -244,13 +259,13 @@ class InstallTenantCommand extends CoreCommand
 
         return [
             'driver' => $driver,
-            'url' => null,
-            'host' => '127.0.0.1',
-            'port' => '3306',
-            'database' => $defaultDatabase,
-            'username' => 'svarium',
-            'password' => '',
-            'unix_socket' => '',
+            'url' => $this->normalizeNullableString($template['url'] ?? null),
+            'host' => $this->normalizeNonEmptyString($template['host'] ?? null, '127.0.0.1'),
+            'port' => $this->normalizeNonEmptyString($template['port'] ?? null, '3306'),
+            'database' => $this->normalizeNonEmptyString($template['database'] ?? null, $defaultDatabase),
+            'username' => $this->normalizeNonEmptyString($template['username'] ?? null, 'svarium'),
+            'password' => (string) ($template['password'] ?? ''),
+            'unix_socket' => (string) ($template['unix_socket'] ?? ''),
             'charset' => $charset,
             'collation' => $collation,
         ];
@@ -273,6 +288,94 @@ class InstallTenantCommand extends CoreCommand
         $value = str_replace("'", "\\'", (string) $default);
 
         return "env('{$envKey}', '{$value}')";
+    }
+
+    /**
+     * @param array<string, mixed> $template
+     * @return list<string>
+     */
+    protected function ensureConnectionEnvKeys(string $envPrefix, array $template): array
+    {
+        $map = [
+            'DB_DRIVER' => $this->normalizeNonEmptyString($template['driver'] ?? null, 'mysql'),
+            'DB_URL' => $this->normalizeNullableString($template['url'] ?? null) ?? '',
+            'DB_HOST' => $this->normalizeNonEmptyString($template['host'] ?? null, '127.0.0.1'),
+            'DB_PORT' => $this->normalizeNonEmptyString($template['port'] ?? null, '3306'),
+            'DB_DATABASE' => $this->normalizeNonEmptyString(
+                $template['database'] ?? null,
+                str_contains($envPrefix, 'TENANT') ? 'svarium_tenant' : 'svarium_central'
+            ),
+            'DB_USERNAME' => $this->normalizeNonEmptyString($template['username'] ?? null, 'root'),
+            'DB_PASSWORD' => (string) ($template['password'] ?? ''),
+            'DB_SOCKET' => (string) ($template['unix_socket'] ?? ''),
+            'DB_CHARSET' => $this->normalizeNonEmptyString($template['charset'] ?? null, 'utf8mb4'),
+            'DB_COLLATION' => $this->normalizeNonEmptyString($template['collation'] ?? null, 'utf8mb4_unicode_ci'),
+        ];
+
+        $existing = $this->readExistingEnvKeys();
+        $added = [];
+
+        foreach ($map as $suffix => $value) {
+            $envKey = "{$envPrefix}_{$suffix}";
+
+            if (isset($existing[$envKey])) {
+                continue;
+            }
+
+            $this->addEnvKey($envKey, $value);
+            $existing[$envKey] = true;
+            $added[] = $envKey;
+        }
+
+        return $added;
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    protected function readExistingEnvKeys(): array
+    {
+        $path = base_path('.env');
+        if (! is_file($path)) {
+            return [];
+        }
+
+        $content = file_get_contents($path);
+        if (! is_string($content) || $content === '') {
+            return [];
+        }
+
+        preg_match_all('/^\s*([A-Z0-9_]+)\s*=/m', $content, $matches);
+
+        $keys = [];
+        foreach ((array) ($matches[1] ?? []) as $key) {
+            $normalized = trim((string) $key);
+            if ($normalized !== '') {
+                $keys[$normalized] = true;
+            }
+        }
+
+        return $keys;
+    }
+
+    protected function normalizeNullableString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+
+        return (string) $value;
+    }
+
+    protected function normalizeNonEmptyString(mixed $value, string $default): string
+    {
+        $normalized = trim((string) ($value ?? ''));
+
+        return $normalized !== '' ? $normalized : $default;
     }
 
     protected function resolveEnableTenancy(): bool

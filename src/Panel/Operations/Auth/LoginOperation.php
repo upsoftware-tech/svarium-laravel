@@ -135,7 +135,7 @@ class LoginOperation extends Operation
         return $registerEnabled && $showRegisterLink;
     }
 
-    public function buttonGroupSocials(?array $setting = null): ButtonGroupSocials
+    public function buttonGroupSocials(?array $setting = null, ?string $panel = null): ButtonGroupSocials
     {
         $setting ??= $this->settingSocials();
 
@@ -144,7 +144,7 @@ class LoginOperation extends Operation
             ->minimal($setting['minimal'])
             ->cols($setting['cols'])
             ->onlySocialName($setting['onlySocialName'])
-            ->redirectRoute('panel.auth.redirect');
+            ->redirectRoute(panel_route_name('redirect', $panel));
     }
 
     public function schema(PanelContext $context): array
@@ -152,13 +152,23 @@ class LoginOperation extends Operation
         $setting = $this->settingSocials();
         $hasSocials = $this->hasSocials($setting);
         $showRegisterBlock = $this->canShowRegisterLink($setting);
-        $registerHref = panel_href('auth/register');
+        $panel = $context->panel()->name;
+        $registerHref = route_panel('register', [], true, $panel);
 
         if (isset($setting['registerLink']) && is_string($setting['registerLink']) && trim($setting['registerLink']) !== '') {
             $registerLink = trim($setting['registerLink']);
-            $registerHref = str_contains($registerLink, '.')
-                ? route($registerLink)
-                : panel_href($registerLink);
+            if (str_contains($registerLink, '.')) {
+                $isAuthRouteReference =
+                    str_starts_with($registerLink, 'auth.')
+                    || str_starts_with($registerLink, 'panel.')
+                    || preg_match('/^[a-z0-9_-]+\.auth\./i', $registerLink) === 1;
+
+                $registerHref = route(
+                    $isAuthRouteReference ? panel_route_name($registerLink, $panel) : $registerLink
+                );
+            } else {
+                $registerHref = panel_href($registerLink, $panel);
+            }
         }
 
         return [
@@ -177,7 +187,7 @@ class LoginOperation extends Operation
                 ->type('submit')
                 ->width('full'),
             Separator::make(__($setting['orLabel']))->margin('t-2')->if($hasSocials),
-            $this->buttonGroupSocials($setting)->if($hasSocials),
+            $this->buttonGroupSocials($setting, $panel)->if($hasSocials),
             Block::make()
                 ->if($showRegisterBlock)
                 ->appearance('border-t border-border py-6 text-center flex justify-center gap-2 mt-2')
@@ -245,7 +255,7 @@ class LoginOperation extends Operation
 
             if (($result['status'] ?? null) === AuthLoginService::STATUS_INVALID) {
                 throw ValidationException::withMessages([
-                    'email' => [__('svarium::validation.Invalid email address or password')],
+                    'email' => [__('Invalid email address or password')],
                 ]);
             }
 
@@ -258,13 +268,13 @@ class LoginOperation extends Operation
             }
 
             throw ValidationException::withMessages([
-                'email' => [__('svarium::validation.Invalid email address or password')],
+                'email' => [__('Invalid email address or password')],
             ]);
         } catch (ValidationException $exception) {
             throw $exception;
         } catch (Throwable) {
             throw ValidationException::withMessages([
-                'email' => [__('svarium::validation.Invalid email address or password')],
+                'email' => [__('Invalid email address or password')],
             ]);
         }
     }

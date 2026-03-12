@@ -1,6 +1,7 @@
 {
     "version": "1.0.1+31",
-    "name": "upsoftware/svarium",
+    "name": "upsoftware/svarium-laravel",
+    "type": "library",
     "description": "Svarium Commercial System",
     "license": "proprietary",
     "autoload": {
@@ -37,9 +38,9 @@
         "laravel/socialite": "^5.24",
         "vinkla/hashids": "^13.0",
         "nativephp/mobile": "^3.0",
-        "psr/http-message": "^1.1",
+        "psr/http-message": "^1.1 || ^2.0",
         "spatie/laravel-activitylog": "^4.11",
-        "spatie/laravel-permission": "^6.24",
+        "spatie/laravel-permission": "^6.24 || ^7.0",
         "spatie/laravel-translatable": "^6.12",
         "tightenco/ziggy": "^2.6",
         "barryvdh/laravel-ide-helper": "^3.6",

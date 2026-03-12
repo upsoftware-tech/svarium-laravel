@@ -20,6 +20,7 @@ use Upsoftware\Svarium\UI\Components\DrawerTitle;
 use Upsoftware\Svarium\UI\Components\DrawerTrigger;
 use Upsoftware\Svarium\UI\Components\Dialog;
 use Upsoftware\Svarium\UI\Components\Dropdown;
+use Upsoftware\Svarium\UI\Components\EmptyState;
 use Upsoftware\Svarium\UI\Components\Icon;
 use Upsoftware\Svarium\UI\Components\Radio;
 use Upsoftware\Svarium\UI\Components\Search\DropdownSearch;
@@ -42,7 +43,7 @@ use Upsoftware\Svarium\UI\Components\Text;
 
 class TableBuilder
 {
-    protected const EXPORT_FORMATS = ['sql', 'csv', 'txt'];
+    protected const EXPORT_FORMATS = ['csv', 'tsv', 'xlsx', 'xls', 'ods', 'json', 'xml', 'sql', 'pdf'];
 
     protected $query;
 
@@ -130,13 +131,15 @@ class TableBuilder
 
     protected bool $selected = true;
 
-    protected ?bool $condesed = null;
+    protected ?bool $condensed = null;
 
     protected string $filterInputSize = 'default';
 
     protected ?string $id = null;
 
     protected bool|array $exported = true;
+
+    protected bool $imported = true;
 
     public function searchbar($searchbar): static
     {
@@ -209,6 +212,29 @@ class TableBuilder
 
                 if (! $hasRowsPerPage) {
                     $this->rowsPerPage($perPageValue);
+                }
+            }
+        }
+
+        if (is_array($tableConfig) && array_key_exists('exported', $tableConfig)) {
+            $configuredExported = $tableConfig['exported'];
+
+            if (is_bool($configuredExported)) {
+                $this->exported($configuredExported);
+            } elseif (is_string($configuredExported) || is_array($configuredExported)) {
+                $this->exported($configuredExported);
+            }
+        }
+
+        if (is_array($tableConfig) && array_key_exists('imported', $tableConfig)) {
+            $configuredImported = $tableConfig['imported'];
+
+            if (is_bool($configuredImported)) {
+                $this->imported($configuredImported);
+            } elseif (is_string($configuredImported)) {
+                $parsed = filter_var($configuredImported, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($parsed !== null) {
+                    $this->imported($parsed);
                 }
             }
         }
@@ -398,8 +424,21 @@ class TableBuilder
         return $this;
     }
 
-    public function actions(array $actions): static
+    public function actions(array|bool $actions): static
     {
+        if (is_bool($actions)) {
+            if ($actions === false) {
+                $this->actions = [];
+                $this->useDefaultActions = false;
+
+                return $this;
+            }
+
+            $this->useDefaultActions = true;
+
+            return $this;
+        }
+
         $this->actions = $actions;
 
         return $this;
@@ -590,16 +629,11 @@ class TableBuilder
         return $this;
     }
 
-    public function condesed(bool $state = true): static
-    {
-        $this->condesed = $state;
-
-        return $this;
-    }
-
     public function condensed(bool $state = true): static
     {
-        return $this->condesed($state);
+        $this->condensed = $state;
+
+        return $this;
     }
 
     public function exported(bool|array|string ...$config): static
@@ -616,6 +650,22 @@ class TableBuilder
             return $this;
         }
 
+        if (count($config) === 1 && is_string($config[0])) {
+            $normalized = strtolower(trim($config[0]));
+
+            if (in_array($normalized, ['false', '0', 'off', 'no'], true)) {
+                $this->exported = false;
+
+                return $this;
+            }
+
+            if (in_array($normalized, ['true', '1', 'on', 'yes'], true)) {
+                $this->exported = true;
+
+                return $this;
+            }
+        }
+
         $formats = $this->normalizeExportFormats($config);
 
         if ($formats === []) {
@@ -623,6 +673,13 @@ class TableBuilder
         }
 
         $this->exported = $formats;
+
+        return $this;
+    }
+
+    public function imported(bool $state = true): static
+    {
+        $this->imported = $state;
 
         return $this;
     }
@@ -1347,6 +1404,117 @@ class TableBuilder
             ->map(fn ($view) => (object) $view);
     }
 
+    protected function resolveSavedView(string $viewKey): ?object
+    {
+        $normalized = trim($viewKey);
+        if ($normalized === '') {
+            return null;
+        }
+
+        foreach ($this->getSavedViews() as $view) {
+            $key = trim((string) ($view->key ?? ''));
+            if ($key === '') {
+                continue;
+            }
+
+            if ($key === $normalized) {
+                return $view;
+            }
+        }
+
+        return null;
+    }
+
+    public function applySavedView(EloquentBuilder $query, string $viewKey, bool $applySort = true): ?object
+    {
+        $view = $this->resolveSavedView($viewKey);
+        if ($view === null) {
+            return null;
+        }
+
+        $filters = is_array($view->filters ?? null) ? $view->filters : [];
+        foreach ($filters as $definition) {
+            if (! is_array($definition)) {
+                continue;
+            }
+
+            $field = trim((string) ($definition['field'] ?? ''));
+            if ($field === '') {
+                continue;
+            }
+
+            $operator = $this->normalizeFilterOperatorName((string) ($definition['operator'] ?? '='));
+            $value = $definition['value'] ?? null;
+
+            $this->applySavedViewFilter($query, $field, $operator, $value);
+        }
+
+        if ($applySort && is_array($view->sort ?? null)) {
+            $sortField = trim((string) ($view->sort['field'] ?? ''));
+            if ($sortField !== '') {
+                $direction = strtolower(trim((string) ($view->sort['direction'] ?? 'asc')));
+                $query->orderBy($sortField, $direction === 'desc' ? 'desc' : 'asc');
+            }
+        }
+
+        return $view;
+    }
+
+    protected function applySavedViewFilter(EloquentBuilder $query, string $field, string $operator, mixed $value): void
+    {
+        switch ($operator) {
+            case 'contains':
+                $query->where($field, 'like', '%'.(string) $value.'%');
+                return;
+            case 'starts_with':
+                $query->where($field, 'like', (string) $value.'%');
+                return;
+            case 'ends_with':
+                $query->where($field, 'like', '%'.(string) $value);
+                return;
+            case 'in':
+                if (is_array($value) && $value !== []) {
+                    $query->whereIn($field, $value);
+                }
+                return;
+            case 'not_in':
+                if (is_array($value) && $value !== []) {
+                    $query->whereNotIn($field, $value);
+                }
+                return;
+            case 'between':
+                if (is_array($value) && count($value) >= 2) {
+                    $query->whereBetween($field, [array_values($value)[0], array_values($value)[1]]);
+                }
+                return;
+            case 'is_null':
+                $query->whereNull($field);
+                return;
+            case 'is_not_null':
+                $query->whereNotNull($field);
+                return;
+            case 'is_empty':
+                $query->where(function (EloquentBuilder $nested) use ($field) {
+                    $nested->whereNull($field)->orWhere($field, '=', '');
+                });
+                return;
+            case 'is_not_empty':
+                $query->where(function (EloquentBuilder $nested) use ($field) {
+                    $nested->whereNotNull($field)->where($field, '!=', '');
+                });
+                return;
+            case 'after':
+                $query->where($field, '>', $value);
+                return;
+            case 'before':
+                $query->where($field, '<', $value);
+                return;
+            default:
+                $query->where($field, $operator, $value);
+                return;
+        }
+    }
+
     protected function buildTabs(): ?Tab
     {
         $items = $this->tabs ?? [];
@@ -1365,7 +1533,22 @@ class TableBuilder
             return null;
         }
 
-        $default = $items[0]->getProp('value') ?? null;
+        $allowedValues = [];
+        foreach ($items as $item) {
+            if (! $item instanceof TabItem) {
+                continue;
+            }
+
+            $value = trim((string) ($item->getProp('value') ?? ''));
+            if ($value !== '') {
+                $allowedValues[] = $value;
+            }
+        }
+
+        $requested = trim((string) (request()?->query('view') ?? ''));
+        $default = $requested !== '' && in_array($requested, $allowedValues, true)
+            ? $requested
+            : ($items[0]->getProp('value') ?? null);
 
         return Tab::make('table_tabs')
             ->prop('defaultValue', $default)
@@ -1474,6 +1657,27 @@ class TableBuilder
         }
 
         return $components;
+    }
+
+    protected function resolveEmptyCreateAction(): ?array
+    {
+        foreach ($this->headerComponents as $component) {
+            if (! $component instanceof Action) {
+                continue;
+            }
+
+            if (strtolower(trim($component->getType())) !== 'create') {
+                continue;
+            }
+
+            $action = clone $component;
+            $action->baseUri($this->baseUri ?? '');
+            $resolved = $action->toArray();
+
+            return is_array($resolved) ? $resolved : null;
+        }
+
+        return null;
     }
 
     protected function resolveFilterComponents(array $filters)
@@ -2052,9 +2256,53 @@ class TableBuilder
             }
         }
 
+        if ($rows === []) {
+            $rows[] = $this->buildEmptyRow($bulkMode, $numberingMode, ! empty($resolvedActions));
+        }
+
         return TableBody::make()
             ->props($this->bodyAppearanceProps)
             ->children($rows);
+    }
+
+    protected function buildEmptyRow(?string $bulkMode, ?string $numberingMode, bool $hasActions): TableRow
+    {
+        return TableRow::make()->children([
+            TableCell::make()
+                ->prop('colspan', $this->resolveBodyColspan($bulkMode, $numberingMode, $hasActions))
+                ->appearance(
+                    Appearance::make()
+                        ->padding('y-8')
+                )
+                ->children([
+                    EmptyState::make()
+                        ->title(__('No results found'))
+                        ->icon('lucide:inbox'),
+                ]),
+        ]);
+    }
+
+    protected function resolveBodyColspan(?string $bulkMode, ?string $numberingMode, bool $hasActions): int
+    {
+        $columnsCount = count($this->columnObjects);
+
+        if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
+            $columnsCount++;
+        }
+
+        if ($bulkMode !== null) {
+            $columnsCount++;
+        }
+
+        if ($numberingMode !== null) {
+            $columnsCount++;
+        }
+
+        if ($hasActions) {
+            $columnsCount++;
+        }
+
+        return max(1, $columnsCount);
     }
 
     protected function resolveNumberingStart(LengthAwarePaginator $paginator, string $numberingMode): int
@@ -2937,9 +3185,17 @@ class TableBuilder
         $resolvedRowsPerPage = $this->resolvedRowsPerPage ?? $paginator->perPage();
         $resolvedRowsPerPageOptions = $this->getPerPageOptions();
         $resolvedTableId = $this->resolveTableIdentifier();
+        $hasRecords = $paginator->total() > 0;
+        $emptyCreateAction = $this->resolveEmptyCreateAction();
 
         $table = Table::make()
             ->prop('id', $resolvedTableId)
+            ->prop('hasRecords', $hasRecords)
+            ->prop('emptyState', [
+                'title' => __('No results found'),
+                'icon' => 'lucide:inbox',
+            ])
+            ->prop('emptyCreateAction', $emptyCreateAction)
             ->prop('columns', $this->serializeColumns())
             ->children($tableChildren)
             ->actions($resolvedActions)
@@ -2959,8 +3215,9 @@ class TableBuilder
             ->prop('numberingMode', $numberingMode)
             ->prop('sticky', $this->stickySections)
             ->prop('columnSelection', $this->selected)
-            ->prop('condesed', $this->resolveCondesed())
+            ->prop('condensed', $this->resolveCondensed())
             ->prop('exported', $this->exported)
+            ->prop('imported', $this->imported)
             ->prop('rowSelectionColumn', $this->shouldRenderRowMultiSelectColumn($bulkMode))
             ->prop('hasActions', $hasActions)
             ->prop('footer', $footer)
@@ -3151,13 +3408,13 @@ class TableBuilder
         return 'index';
     }
 
-    protected function resolveCondesed(): bool
+    protected function resolveCondensed(): bool
     {
-        if ($this->condesed !== null) {
-            return $this->condesed;
+        if ($this->condensed !== null) {
+            return $this->condensed;
         }
 
-        $configured = config('upsoftware.table.condesed');
+        $configured = config('upsoftware.table.condensed');
 
         if ($configured === null) {
             $configured = config('upsoftware.table.condensed', false);

@@ -5,6 +5,7 @@ namespace Upsoftware\Svarium\Http\Middleware;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Upsoftware\Svarium\Panel\Panel;
 
 class AuthenticateMiddleware
 {
@@ -15,7 +16,9 @@ class AuthenticateMiddleware
      */
     public function handle(Request $request, Closure $next)
     {
-        if ($this->isPublicAuthRequest($request)) {
+        $panelName = $this->resolvePanelNameFromRequest($request);
+
+        if ($this->isPublicAuthRequest($request, $panelName)) {
             return $next($request);
         }
 
@@ -24,63 +27,23 @@ class AuthenticateMiddleware
                 return response()->json(['message' => 'Unauthenticated.'], 401);
             }
 
-            return redirect()->guest(svarium_login_url());
+            return redirect()->guest(svarium_login_url(false, $panelName));
         }
 
         return $next($request);
     }
 
-    protected function isPublicAuthRequest(Request $request): bool
+    protected function isPublicAuthRequest(Request $request, ?string $panel = null): bool
     {
-        $defaultRoutePatterns = [
-            'panel.auth.login',
-            'panel.auth.login.*',
-            'panel.auth.reset',
-            'panel.auth.reset.*',
-            'panel.auth.register',
-            'panel.auth.register.*',
-            'panel.auth.method',
-            'panel.auth.method.*',
-            'panel.auth.verification',
-            'panel.auth.verification.*',
-            'panel.auth.redirect',
-            'panel.auth.callback',
-        ];
+        return svarium_is_public_auth_request($request, $panel);
+    }
 
-        $routePatterns = config('upsoftware.panel.public_auth_route_patterns', $defaultRoutePatterns);
-        if (! is_array($routePatterns)) {
-            $routePatterns = $defaultRoutePatterns;
-        }
+    protected function resolvePanelNameFromRequest(Request $request): ?string
+    {
+        $panel = svarium_resolve_panel(null, $request);
 
-        foreach ($routePatterns as $pattern) {
-            if (is_string($pattern) && $pattern !== '' && $request->routeIs($pattern)) {
-                return true;
-            }
-        }
-
-        $panelPrefix = trim((string) config('upsoftware.panel.prefix', ''), '/');
-        $base = $panelPrefix !== '' ? $panelPrefix.'/' : '';
-
-        $defaultPathPatterns = [
-            $base.'auth/login',
-            $base.'auth/login/*',
-            $base.'auth/reset',
-            $base.'auth/reset/*',
-            $base.'auth/register',
-            $base.'auth/register/*',
-        ];
-
-        $pathPatterns = config('upsoftware.panel.public_auth_path_patterns', $defaultPathPatterns);
-        if (! is_array($pathPatterns)) {
-            $pathPatterns = $defaultPathPatterns;
-        }
-
-        foreach ($pathPatterns as $pattern) {
-            if (is_string($pattern) && $pattern !== '' && $request->is($pattern)) {
-                return true;
-            }
-        }
-
-        return false;
+        return $panel instanceof Panel
+            ? trim((string) $panel->name)
+            : null;
     }
 }

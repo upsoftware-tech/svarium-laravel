@@ -254,6 +254,146 @@ Generates style equivalent to:
 <div style="width: 120px"></div>
 ```
 
+## `Grid`
+
+`Grid` works similarly to `Flex`, but it builds CSS grid layout and accepts responsive column and row definitions.
+
+## `Container`
+
+`Container` jest opisany osobno tutaj:
+
+- [Komponent `Container`](./container-component.md)
+
+```php
+use Upsoftware\Svarium\UI\Components\Grid;
+
+Grid::make()
+    ->cols(3)
+    ->gap(4)
+    ->children([
+        // ...
+    ]);
+```
+
+### Columns
+
+You can define columns in three ways:
+
+```php
+Grid::make()->cols(3);
+Grid::make()->columns(3);
+Grid::make()->cols([
+    'xs' => 1,
+    'md' => 2,
+    'lg' => 4,
+    '2xl' => 6,
+]);
+```
+
+Breakpoints supported:
+
+- `xs` (base/default, no Tailwind prefix)
+- `sm`
+- `md`
+- `lg`
+- `xl`
+- `2xl`
+
+Alias `xxl` is also accepted and mapped to `2xl`.
+
+### Incremental breakpoint helpers
+
+Instead of passing one full array, you can register breakpoints one by one:
+
+```php
+Grid::make()
+    ->col('xs', 1)
+    ->col('md', 2)
+    ->col('lg', 4);
+```
+
+Shortcuts:
+
+- `->colXs(1)`
+- `->colSm(2)`
+- `->colMd(3)`
+- `->colLg(4)`
+- `->colXl(5)`
+- `->col2xl(6)`
+
+### Rows
+
+Rows follow the same convention:
+
+```php
+Grid::make()
+    ->rows([
+        'xs' => 1,
+        'lg' => 2,
+    ]);
+```
+
+Or:
+
+```php
+Grid::make()
+    ->row('xs', 1)
+    ->row('lg', 2);
+```
+
+Shortcuts:
+
+- `->rowXs(...)`
+- `->rowSm(...)`
+- `->rowMd(...)`
+- `->rowLg(...)`
+- `->rowXl(...)`
+- `->row2xl(...)`
+
+### Gaps
+
+`Grid` supports the same gap helpers as `Flex`:
+
+```php
+Grid::make()
+    ->cols(3)
+    ->gap(4)
+    ->gapX(6)
+    ->gapY(2);
+```
+
+### Child span helpers
+
+Grid children can use span helpers through `Appearance` shortcuts available on components:
+
+```php
+Block::make()
+    ->colSpan(6)
+    ->rowSpan(2);
+```
+
+Supported values:
+
+- integer span, for example `->colSpan(6)`
+- `full`, for example `->colSpan('full')`
+- `auto`, for example `->rowSpan('auto')`
+
+### Example
+
+```php
+Grid::make()
+    ->colXs(1)
+    ->colMd(2)
+    ->colLg(4)
+    ->gap(4)
+    ->children([
+        Block::make('A')->colSpan(2),
+        Block::make('B'),
+        Block::make('C'),
+        Block::make('D')->rowSpan(2),
+    ]);
+```
+
 ## Related docs
 
 - Registration page layout options: `docs/register-panel-config.md`

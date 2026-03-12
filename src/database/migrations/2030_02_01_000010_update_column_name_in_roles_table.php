@@ -5,6 +5,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 return new class extends Migration
 {
@@ -91,6 +92,60 @@ return new class extends Migration
             && str_contains($message, "doesn't exist");
     }
 
+    private function resolveRoleDisplayName(mixed $name, string $locale): string
+    {
+        if (is_array($name)) {
+            $candidate = $name[$locale] ?? reset($name);
+
+            return is_string($candidate) ? trim($candidate) : '';
+        }
+
+        if (! is_string($name)) {
+            return '';
+        }
+
+        $decoded = json_decode($name, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            $candidate = $decoded[$locale] ?? reset($decoded);
+
+            return is_string($candidate) ? trim($candidate) : '';
+        }
+
+        return trim($name);
+    }
+
+    private function resolveRoleKey(string $displayName, int|string|null $id = null): string
+    {
+        $normalized = Str::of($displayName)
+            ->lower()
+            ->ascii()
+            ->replaceMatches('/[^a-z0-9]+/', '_')
+            ->trim('_')
+            ->toString();
+
+        if (in_array($normalized, ['superadministrator', 'super_admin', 'superadmin'], true)) {
+            return 'superadmin';
+        }
+
+        if (in_array($normalized, ['administrator', 'admin'], true)) {
+            return 'admin';
+        }
+
+        if (in_array($normalized, ['pacjent', 'patient'], true)) {
+            return 'patient';
+        }
+
+        if (in_array($normalized, ['specjalista', 'specialist', 'therapist', 'terapeuta'], true)) {
+            return 'specialist';
+        }
+
+        if ($normalized !== '') {
+            return $normalized;
+        }
+
+        return $id !== null && $id !== '' ? 'role_'.$id : 'role';
+    }
+
     public function up(): void
     {
         $locale = app()->getLocale(); // stała wartość zapisana w strukturze DB
@@ -146,14 +201,75 @@ return new class extends Migration
 
         // 6. generated column (dla indeksu spatie)
         if (! $this->columnExists('roles', 'name_locale') && $this->columnExists('roles', 'name')) {
-            DB::statement("
-                ALTER TABLE roles
-                ADD COLUMN name_locale VARCHAR(191)
-                GENERATED ALWAYS AS (JSON_UNQUOTE(JSON_EXTRACT(name, '$.\"{$locale}\"'))) STORED
-            ");
+            if ($this->isSqlite()) {
+                Schema::table('roles', function (Blueprint $table) {
+                    $table->string('name_locale', 191)->nullable();
+                });
+
+                DB::table('roles')
+                    ->select(['id', 'name'])
+                    ->orderBy('id')
+                    ->chunkById(100, function ($roles) use ($locale) {
+                        foreach ($roles as $role) {
+                            $displayName = $this->resolveRoleDisplayName($role->name ?? null, $locale);
+
+                            DB::table('roles')
+                                ->where('id', $role->id)
+                                ->update(['name_locale' => $displayName !== '' ? $displayName : null]);
+                        }
+                    });
+            } else {
+                DB::statement("
+                    ALTER TABLE roles
+                    ADD COLUMN name_locale VARCHAR(191)
+                    GENERATED ALWAYS AS (JSON_UNQUOTE(JSON_EXTRACT(name, '$.\"{$locale}\"'))) STORED
+                ");
+            }
         }
 
-        // 7. odtwórz unique index
+        // 7. klucz systemowy roli (np. superadmin/admin) do logiki niezależnej od tłumaczeń
+        if (! $this->columnExists('roles', 'role_key')) {
+            $afterColumn = $this->columnExists('roles', 'name_locale')
+                ? 'name_locale'
+                : ($this->columnExists('roles', 'guard_name') ? 'guard_name' : null);
+
+            Schema::table('roles', function (Blueprint $table) use ($afterColumn) {
+                $column = $table->string('role_key', 191)->nullable();
+
+                if (is_string($afterColumn) && $afterColumn !== '') {
+                    $column->after($afterColumn);
+                }
+            });
+        }
+
+        if ($this->columnExists('roles', 'role_key') && $this->columnExists('roles', 'name')) {
+            DB::table('roles')
+                ->select(['id', 'name', 'role_key'])
+                ->orderBy('id')
+                ->chunkById(100, function ($roles) use ($locale) {
+                    foreach ($roles as $role) {
+                        $currentKey = strtolower(trim((string) ($role->role_key ?? '')));
+                        if ($currentKey !== '') {
+                            continue;
+                        }
+
+                        $displayName = $this->resolveRoleDisplayName($role->name ?? null, $locale);
+                        $roleKey = $this->resolveRoleKey($displayName, $role->id ?? null);
+
+                        DB::table('roles')
+                            ->where('id', $role->id)
+                            ->update(['role_key' => $roleKey]);
+                    }
+                });
+        }
+
+        if (! $this->indexExists('roles', 'roles_role_key_index') && $this->columnExists('roles', 'role_key')) {
+            Schema::table('roles', function (Blueprint $table) {
+                $table->index('role_key', 'roles_role_key_index');
+            });
+        }
+
+        // 8. odtwórz unique index
         if (! $this->indexExists('roles', 'roles_name_guard_name_unique') && $this->columnExists('roles', 'name_locale')) {
             Schema::table('roles', function (Blueprint $table) {
                 $table->unique(['name_locale', 'guard_name'], 'roles_name_guard_name_unique');
@@ -172,6 +288,14 @@ return new class extends Migration
          */
         if ($this->indexExists('roles', 'roles_name_guard_name_unique')) {
             DB::statement('ALTER TABLE `roles` DROP INDEX `roles_name_guard_name_unique`');
+        }
+
+        if ($this->indexExists('roles', 'roles_role_key_index')) {
+            DB::statement('ALTER TABLE `roles` DROP INDEX `roles_role_key_index`');
+        }
+
+        if ($this->columnExists('roles', 'role_key')) {
+            DB::statement('ALTER TABLE `roles` DROP COLUMN `role_key`');
         }
 
         /*

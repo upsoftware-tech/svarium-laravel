@@ -68,7 +68,7 @@ trait BelongsToTenant
                             ->selectRaw('1')
                             ->from($model->getTenantModelMapTableName())
                             ->where('tenant_id', $tenantKey)
-                            ->where('model_type', $model::class)
+                            ->where('model_type', svarium_model_type($model))
                             ->whereColumn('model_id', $model->qualifyColumn($model->getKeyName()));
                     });
 
@@ -84,7 +84,7 @@ trait BelongsToTenant
                             ->selectRaw('1')
                             ->from($model->getDomainTenantMapTableName())
                             ->where($domainColumn, $domainId)
-                            ->where('model_type', $model::class)
+                            ->where('model_type', svarium_model_type($model))
                             ->whereColumn('model_id', $model->qualifyColumn($model->getKeyName()));
                     });
                 }
@@ -100,14 +100,14 @@ trait BelongsToTenant
                         $subQuery
                             ->selectRaw('1')
                             ->from($model->getDomainTenantMapTableName())
-                            ->where('model_type', $model::class)
+                            ->where('model_type', svarium_model_type($model))
                             ->whereColumn('model_id', $model->qualifyColumn($model->getKeyName()));
                     })->orWhereExists(function ($subQuery) use ($model, $domainId, $domainColumn): void {
                         $subQuery
                             ->selectRaw('1')
                             ->from($model->getDomainTenantMapTableName())
                             ->where($domainColumn, $domainId)
-                            ->where('model_type', $model::class)
+                            ->where('model_type', svarium_model_type($model))
                             ->whereColumn('model_id', $model->qualifyColumn($model->getKeyName()));
                     });
                 });
@@ -215,7 +215,7 @@ trait BelongsToTenant
 
         $keys = [
             $domainColumn => (int) $tenantDomainId,
-            'model_type' => static::class,
+            'model_type' => svarium_model_type($this),
             'model_id' => (string) $this->getKey(),
         ];
 
@@ -259,7 +259,7 @@ trait BelongsToTenant
 
         $table = $this->newQuery()->getConnection()->table($tableName);
 
-        $table->where('model_type', static::class)
+        $table->where('model_type', svarium_model_type($this))
             ->where('model_id', (string) $this->getKey());
 
         if ($hasTenantColumn) {
@@ -276,7 +276,7 @@ trait BelongsToTenant
         $rows = array_map(function (int $id) use ($resolvedTenantId, $now, $domainColumn, $hasTenantColumn): array {
             $row = [
                 $domainColumn => $id,
-                'model_type' => static::class,
+                'model_type' => svarium_model_type($this),
                 'model_id' => (string) $this->getKey(),
                 'created_at' => $now,
                 'updated_at' => $now,

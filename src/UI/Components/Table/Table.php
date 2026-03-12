@@ -17,7 +17,7 @@ class Table extends Component
 {
     use HasChildren;
 
-    protected const EXPORT_FORMATS = ['sql', 'csv', 'txt'];
+    protected const EXPORT_FORMATS = ['csv', 'tsv', 'xlsx', 'xls', 'ods', 'json', 'xml', 'sql', 'pdf'];
 
     protected ?string $model = null;
 
@@ -27,9 +27,11 @@ class Table extends Component
 
     protected ?TableActionDisplay $actionDisplay = null;
 
-    protected ?bool $condesed = null;
+    protected ?bool $condensed = null;
 
     protected bool|array $exported = true;
+
+    protected bool $imported = true;
 
     protected ?string $id = null;
 
@@ -109,8 +111,18 @@ class Table extends Component
     |--------------------------------------------------------------------------
     */
 
-    public function actions(array $actions): static
+    public function actions(array|bool $actions): static
     {
+        if (is_bool($actions)) {
+            if ($actions === false) {
+                $this->actions = [];
+
+                return $this;
+            }
+
+            return $this;
+        }
+
         $this->actions = $actions;
 
         return $this;
@@ -167,17 +179,12 @@ class Table extends Component
         return $this;
     }
 
-    public function condesed(bool $state = true): static
-    {
-        $this->condesed = $state;
-        $this->prop('condesed', $state);
-
-        return $this;
-    }
-
     public function condensed(bool $state = true): static
     {
-        return $this->condesed($state);
+        $this->condensed = $state;
+        $this->prop('condensed', $state);
+
+        return $this;
     }
 
     public function exported(bool|array|string ...$config): static
@@ -196,6 +203,24 @@ class Table extends Component
             return $this;
         }
 
+        if (count($config) === 1 && is_string($config[0])) {
+            $normalized = strtolower(trim($config[0]));
+
+            if (in_array($normalized, ['false', '0', 'off', 'no'], true)) {
+                $this->exported = false;
+                $this->prop('exported', false);
+
+                return $this;
+            }
+
+            if (in_array($normalized, ['true', '1', 'on', 'yes'], true)) {
+                $this->exported = true;
+                $this->prop('exported', true);
+
+                return $this;
+            }
+        }
+
         $formats = $this->normalizeExportFormats($config);
         if ($formats === []) {
             throw new \InvalidArgumentException('Export formats list cannot be empty.');
@@ -203,6 +228,14 @@ class Table extends Component
 
         $this->exported = $formats;
         $this->prop('exported', $formats);
+
+        return $this;
+    }
+
+    public function imported(bool $state = true): static
+    {
+        $this->imported = $state;
+        $this->prop('imported', $state);
 
         return $this;
     }
@@ -254,8 +287,8 @@ class Table extends Component
             $this->prop('id', $this->resolveTableIdentifier());
         }
 
-        if (! array_key_exists('condesed', $this->props)) {
-            $configured = config('upsoftware.table.condesed');
+        if (! array_key_exists('condensed', $this->props)) {
+            $configured = config('upsoftware.table.condensed');
             if ($configured === null) {
                 $configured = config('upsoftware.table.condensed', false);
             }
@@ -264,11 +297,32 @@ class Table extends Component
                 ? $configured
                 : filter_var($configured, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
 
-            $this->prop('condesed', $value ?? false);
+            $this->prop('condensed', $value ?? false);
         }
 
         if (! array_key_exists('exported', $this->props)) {
-            $this->prop('exported', $this->exported);
+            $configured = config('upsoftware.table.exported', $this->exported);
+
+            if (is_bool($configured)) {
+                $this->exported($configured);
+            } elseif (is_string($configured) || is_array($configured)) {
+                $this->exported($configured);
+            } else {
+                $this->prop('exported', $this->exported);
+            }
+        }
+
+        if (! array_key_exists('imported', $this->props)) {
+            $configuredImported = config('upsoftware.table.imported', $this->imported);
+
+            if (is_bool($configuredImported)) {
+                $this->imported($configuredImported);
+            } elseif (is_string($configuredImported)) {
+                $parsed = filter_var($configuredImported, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                $this->imported($parsed ?? $this->imported);
+            } else {
+                $this->prop('imported', $this->imported);
+            }
         }
 
         return parent::toArray();

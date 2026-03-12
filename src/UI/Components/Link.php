@@ -36,9 +36,9 @@ class Link extends Component
         return $this;
     }
 
-    public function panelRoute(string $name, array $params = []): static
+    public function panelRoute(string $name, array $params = [], ?string $panel = null): static
     {
-        return $this->route(panel_route_name($name), $params);
+        return $this->route(panel_route_name($name, $panel), $params);
     }
 
     public function panelHref(string $path = '', ?string $panel = null): static

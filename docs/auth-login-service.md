@@ -48,6 +48,20 @@ $allowedMethods = $service->allowedOtpMethods(); // ['email', 'sms', 'app']
 $canDisableOtp = $service->canUserDisableOtp();
 ```
 
+## Bypass tenanta dla superadmin/admin
+
+Login może omijać standardowe sprawdzanie tenanta dla ról systemowych (`role_key`), zgodnie z konfiguracją:
+
+```php
+'auth' => [
+    'tenant_bypass_role_keys' => ['superadmin', 'admin'],
+    'tenant_bypass_scope' => 'all_tenants', // all_tenants | tenant
+],
+```
+
+- `all_tenants` – użytkownik z taką rolą zaloguje się na każdej domenie tenantowej.
+- `tenant` – bypass działa tylko, jeśli rola jest przypięta do bieżącego tenanta (lub globalnie przez `tenant_id = null`).
+
 ## Włączenie/wyłączenie OTP dla użytkownika
 
 ```php

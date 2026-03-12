@@ -24,7 +24,7 @@ class ResetController extends Controller
         $has_role = false;
 
         if ($user) {
-            $modelType = ltrim($user::class, '\\');
+            $modelType = svarium_model_type($user);
             $roleModel = get_model('model_has_role');
             $queryRole = $roleModel::query()
                 ->where('model_id', $user->id)
@@ -81,6 +81,6 @@ class ResetController extends Controller
             $session = $authSession->hash;
         }
 
-        return redirect()->route('panel.auth.verification', ['type' => 'reset', 'userAuth' => $session])->with(['alert_info' => ['text' => __('If an account associated with this email address exists, you will receive a message with a verification code'), 'duration' => 0]]);
+        return redirect()->to(route_panel('verification', ['type' => 'reset', 'userAuth' => $session]))->with(['alert_info' => ['text' => __('If an account associated with this email address exists, you will receive a message with a verification code'), 'duration' => 0]]);
     }
 }

@@ -5,6 +5,7 @@ Svarium pozwala rejestrować pozycje menu bezpośrednio w kodzie modułów i str
 Najważniejsze:
 - jeden moduł może dodać wiele wpisów menu,
 - można budować drzewo wielopoziomowe przez `path`,
+- można budować stabilne drzewo po identyfikatorach przez `pathId` / `parent` (niezależnie od tłumaczeń),
 - wpisy są rejestrowane runtime (bez ręcznego klikania w panelu),
 - menu panelu może działać bez tabeli `navigations` przez komponent `PanelNavigation`.
 
@@ -103,6 +104,46 @@ albo skrótem tekstowym:
 'Menu 1/Podmenu 1.1/Podmenu 1.1.1'
 ```
 
+## Stabilne ID gałęzi (zalecane)
+
+Jeśli etykiety są tłumaczone (`Ustawienia` / `Settings` / `Einstellungen`), budowanie tylko po `path` może tworzyć duplikaty gałęzi.
+
+Dlatego zalecane jest użycie identyfikatorów technicznych:
+
+- `->pathId('ksef')` - ID bieżącego węzła,
+- `->parent('ksef')` - rodzic po ID (bez zależności od label),
+- `->pathIds(['settings', 'ksef'])` - pełna ścieżka ID,
+- `->path([...])` zostaje do etykiet i prezentacji.
+
+Przykład:
+
+```php
+MenuItem::make('KSeF')
+    ->pathId('ksef')
+    ->icon('lucide:file-check')
+    ->order(36);
+
+MenuItem::make('Połączenie i certyfikaty')
+    ->parent('ksef')
+    ->pathId('connection_certificates')
+    ->url(panel_href('ksef/connection-certificates'))
+    ->order(1);
+```
+
+Przykład z `pathIds`:
+
+```php
+MenuItem::make('Szablony mailowe')
+    ->path([__('Ustawienia')])
+    ->pathIds(['settings', 'mail_templates'])
+    ->url(panel_href('system-mail-templates'));
+```
+
+Ważne:
+- `pathId`/`parent`/`pathIds` są opcjonalne.
+- Dotychczasowe `path([...])` działa bez zmian.
+- ID powinny być techniczne: małe litery, bez tłumaczeń, np. `settings`, `ksef`, `mail_templates`.
+
 ## Moduł: `menu(): array`
 
 W module dodaj metodę `menu()`:
@@ -196,7 +237,11 @@ register_menu([
 - `->routeName('route.name')` albo `->url('/path')`
 - `->icon('lucide:home')`
 - `->path([...])` / `->under([...])`
+- `->pathId('ksef')` / `->pathKey('ksef')` (ID bieżącego węzła)
+- `->parent('ksef')` (rodzic po technicznym ID)
+- `->pathIds([...])` / `->pathKeys([...])` (ścieżka technicznych ID)
 - `->order(10)`
+- `->permission('resource.patient.list')` (opcjonalnie, wymusza widoczność wg konkretnego permission)
 - `->navigation(1)` (opcjonalnie przypisanie do konkretnego root navigation)
 - `->menu('main_menu')` (alias do `navigation`, wygodny dla kluczy tekstowych)
 - `->children([...])` (zagnieżdżanie)
@@ -208,4 +253,39 @@ MenuItem::make('Lista pacjentów')
     ->url(module_route('patient'))
     ->path(['Pacjenci'])
     ->menu('main_menu');
+```
+
+## Widoczność wg uprawnień
+
+Menu runtime jest automatycznie filtrowane po dostępie użytkownika:
+
+- jeśli `MenuItem` ma `routeName(...)`, Svarium sprawdza docelową operation i jej `authorize(...)`,
+- jeśli `MenuItem` ma `permission(...)`, sprawdzany jest bezpośrednio ten permission,
+- jeśli użytkownik nie ma dostępu, wpis nie jest renderowany,
+- puste grupy (bez widocznych dzieci) są usuwane automatycznie.
+
+Przykład:
+
+```php
+MenuItem::make('Użytkownicy')
+    ->routeName('module:user')
+    ->permission('resource.user.list');
+```
+
+## Debug mapy menu
+
+Do podglądu całej struktury (z ID i path_id) użyj:
+
+```bash
+php artisan svarium:menu.map
+```
+
+Warianty:
+
+```bash
+# tylko konkretna nawigacja (np. dropdown użytkownika)
+php artisan svarium:menu.map --navigation=sidebar_user
+
+# wygodny format do kopiowania / automatyzacji
+php artisan svarium:menu.map --json
 ```

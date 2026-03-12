@@ -2,24 +2,202 @@
 
 namespace Upsoftware\Svarium\Console\Commands;
 
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Upsoftware\Svarium\Traits\HasTailwindColor;
+use LaravelLang\Locales\Facades\Locales;
+
 use function Laravel\Prompts\confirm;
+use function Laravel\Prompts\multiselect;
 use function Laravel\Prompts\select;
 use function Laravel\Prompts\text;
 
 class InitCommand extends CoreCommand
 {
-    use HasTailwindColor;
-
     protected $signature = 'svarium:app.init';
 
     protected $description = 'Initialize the application (adds required configuration)';
+
     protected $descriptionKey = 'app.init';
+
+    protected function tt(string $key, string $fallback, array $replace = []): string
+    {
+        $translationKey = "svarium::commands.{$key}";
+        $translated = __($translationKey, $replace);
+
+        if (is_string($translated) && $translated !== '' && $translated !== $translationKey) {
+            return $translated;
+        }
+
+        foreach ($replace as $name => $value) {
+            $fallback = str_replace(':'.$name, (string) $value, $fallback);
+        }
+
+        return $fallback;
+    }
+
+    protected function switchConsoleLocale(string $locale): void
+    {
+        $normalized = trim($locale);
+        if ($normalized === '') {
+            return;
+        }
+
+        config(['app.locale' => $normalized]);
+        app()->setLocale($normalized);
+        $this->translateDescription();
+    }
+
+    /**
+     * Returns selected locale code.
+     */
+    protected function configureApplicationLocale(): string
+    {
+        $currentLocale = $this->normalizeLocaleCode((string) config('app.locale', 'en')) ?? 'en';
+        $selectedLocale = $this->promptForLocaleCode(
+            $this->tt('app.init_ui.app_locale_prompt', 'Podaj domyślny język aplikacji (APP_LOCALE)'),
+            $currentLocale
+        );
+
+        $this->info($this->tt('app.init_ui.installing_language', 'Instalowanie plików językowych dla: :locale ...', [
+            'locale' => $selectedLocale,
+        ]));
+        $this->call('svarium:lang.add', ['lang' => [$selectedLocale]]);
+        $this->persistLocaleSetting($selectedLocale);
+
+        if ($selectedLocale !== $currentLocale) {
+            $switchConsole = confirm(
+                $this->tt(
+                    'app.init_ui.switch_console_locale_prompt',
+                    'Czy przełączyć język interfejsu konsoli na wskazany (:locale)?',
+                    ['locale' => $selectedLocale]
+                ),
+                true,
+                $this->tt('common.yes', 'Tak'),
+                $this->tt('common.no', 'Nie')
+            );
+
+            $this->addEnvKey('APP_LOCALE', $selectedLocale, true);
+            $this->info($this->tt('app.init_ui.app_locale_updated', 'Zaktualizowano APP_LOCALE w pliku .env na: :locale', [
+                'locale' => $selectedLocale,
+            ]));
+
+            if ($switchConsole) {
+                $this->switchConsoleLocale($selectedLocale);
+                $this->info($this->tt('app.init_ui.console_locale_switched', 'Przełączono język interfejsu konsoli na: :locale', [
+                    'locale' => $selectedLocale,
+                ]));
+            }
+        }
+
+        return $selectedLocale;
+    }
+
+    protected function promptForLocaleCode(string $label, ?string $default = null): string
+    {
+        $normalizedDefault = $this->normalizeLocaleCode((string) ($default ?? ''));
+
+        while (true) {
+            $input = trim((string) $this->ask($label, $normalizedDefault ?? ''));
+            $locale = $this->normalizeLocaleCode($input);
+
+            if ($locale === null) {
+                $this->warn($this->tt('app.init_ui.empty_language_code', 'Nie podano kodu języka. Spróbuj ponownie.'));
+
+                continue;
+            }
+
+            if ($this->findLocaleMetadata($locale) === null) {
+                $this->warn($this->tt('app.init_ui.invalid_language_code', 'Nieprawidłowy kod języka [:locale]. Spróbuj ponownie.', [
+                    'locale' => $locale,
+                ]));
+
+                continue;
+            }
+
+            return $locale;
+        }
+    }
+
+    protected function normalizeLocaleCode(string $value): ?string
+    {
+        $normalized = strtolower(trim($value));
+        $normalized = preg_replace('/[^a-z0-9_-]/', '', $normalized) ?? '';
+        $normalized = trim($normalized);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    protected function findLocaleMetadata(string $locale): ?array
+    {
+        $normalizedLocale = $this->normalizeLocaleCode($locale);
+        if ($normalizedLocale === null) {
+            return null;
+        }
+
+        foreach (Locales::available() as $availableLocale) {
+            $code = $this->normalizeLocaleCode((string) ($availableLocale->code ?? ''));
+            if ($code !== $normalizedLocale) {
+                continue;
+            }
+
+            $data = json_decode(json_encode($availableLocale), true);
+            if (! is_array($data) || $data === []) {
+                return null;
+            }
+
+            if (! empty($data['regional']) && strlen((string) $data['regional']) === 5) {
+                $data['flag'] = strtolower(explode('_', (string) $data['regional'])[1] ?? '');
+            }
+
+            return $data;
+        }
+
+        return null;
+    }
+
+    protected function persistLocaleSetting(string $locale): void
+    {
+        $localeData = $this->findLocaleMetadata($locale);
+        if ($localeData === null) {
+            return;
+        }
+
+        $this->settingModel::setSettingGlobal('locales', [$locale => $localeData]);
+    }
+
+    protected function ensureMysqlDatabaseConnection(): bool
+    {
+        $defaultConnection = trim((string) config('database.default', ''));
+
+        if ($defaultConnection === '') {
+            $this->error('Brak domyślnego połączenia bazy danych (database.default).');
+
+            return false;
+        }
+
+        $driver = strtolower(trim((string) config("database.connections.{$defaultConnection}.driver", '')));
+        if ($driver !== 'mysql') {
+            $this->error("Svarium init wymaga połączenia MySQL. Aktualny driver [{$defaultConnection}]: {$driver}");
+
+            return false;
+        }
+
+        try {
+            DB::connection($defaultConnection)->select('SELECT 1');
+        } catch (\Throwable $e) {
+            $this->error("Nie udało się połączyć z bazą danych [{$defaultConnection}] (mysql).");
+            $this->line($e->getMessage());
+
+            return false;
+        }
+
+        $this->info("Połączenie z bazą [{$defaultConnection}] (mysql): OK");
+
+        return true;
+    }
 
     protected function readEnvValue(string $key): ?string
     {
@@ -74,23 +252,34 @@ class InitCommand extends CoreCommand
 
     protected function resolveUserModelClass(): string
     {
+        try {
+            if (function_exists('get_model')) {
+                $configuredSvariumModel = get_model('user');
+                if (is_string($configuredSvariumModel) && trim($configuredSvariumModel) !== '') {
+                    return trim($configuredSvariumModel);
+                }
+            }
+        } catch (\Throwable) {
+            // Fallback to config keys below.
+        }
+
         $configuredUserModel = config('upsoftware.models.user');
         if (is_string($configuredUserModel) && trim($configuredUserModel) !== '') {
             return trim($configuredUserModel);
         }
 
-        $authUserModel = config('auth.providers.users.model');
-        if (is_string($authUserModel) && trim($authUserModel) !== '') {
-            return trim($authUserModel);
+        $trackingUserModel = config('upsoftware.tracking.user_model', config('upsoftware.user_model'));
+        if (is_string($trackingUserModel) && trim($trackingUserModel) !== '') {
+            return trim($trackingUserModel);
         }
 
-        return \App\Models\User::class;
+        return \Upsoftware\Svarium\Models\User::class;
     }
 
     protected function resolveGuardNameForUserModel(string $userModelClass, string $fallbackGuard = 'web'): string
     {
         try {
-            $user = new $userModelClass();
+            $user = new $userModelClass;
 
             if (method_exists($user, 'getDefaultGuardName')) {
                 // Keep exact guard expected by Spatie (even empty string).
@@ -204,9 +393,12 @@ class InitCommand extends CoreCommand
 
         $content = preg_replace('/use App\\\\Http\\\\Middleware\\\\HandleInertiaRequests( as BaseHandleInertiaRequests)?;\n/', '', $content);
         $content = preg_replace('/use Upsoftware\\\\Svarium\\\\Http\\\\Middleware\\\\HandleInertiaRequests;\n/', '', $content);
+        $content = preg_replace('/use Illuminate\\\\Http\\\\Request;\n/', '', $content);
+        $content = preg_replace('/use Throwable;\n/', '', $content);
 
-        $newImports = "\nuse Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;\n" .
-            "use App\Http\Middleware\HandleInertiaRequests as BaseHandleInertiaRequests;";
+        $newImports = "\nuse Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;\n".
+            "use App\Http\Middleware\HandleInertiaRequests as BaseHandleInertiaRequests;\n".
+            "use Illuminate\Http\Request;";
         $content = preg_replace('/(?<=<?php\n)/', $newImports, $content);
 
         $content = preg_replace('/^\s*(Base)?HandleInertiaRequests::class,?\n/m', '', $content);
@@ -214,7 +406,39 @@ class InitCommand extends CoreCommand
         $replacement = "append: [\n            BaseHandleInertiaRequests::class,\n            HandleInertiaRequests::class,";
 
         if (str_contains($content, 'append: [')) {
-            $content = preg_replace('/append: \[\s*/', $replacement . "\n            ", $content, 1);
+            $content = preg_replace('/append: \[\s*/', $replacement."\n            ", $content, 1);
+        }
+
+        if (! str_contains($content, "alert_warning")) {
+            $exceptionHandler = <<<'PHP'
+$exceptions->respond(function ($response, \Throwable $exception, Request $request) {
+            if ($response->getStatusCode() !== 419 || $request->expectsJson()) {
+                return $response;
+            }
+
+            $path = trim($request->path(), '/');
+            $message = __('Session expired. The form has been refreshed. Please try again.');
+
+            if (preg_match('#(^|/)auth/(login|register|reset)/verification/[^/]+(?:/resend)?$#', $path) === 1) {
+                return redirect()->to($request->fullUrl(), 303)
+                    ->with('alert_warning', $message);
+            }
+
+            if (preg_match('#(^|/)auth/(login|register|reset)(?:/.*)?$#', $path) === 1) {
+                return redirect()->to($request->fullUrl(), 303)
+                    ->with('alert_warning', $message);
+            }
+
+            return back(303)->with('alert_warning', __('Session expired. Refresh the page and try again.'));
+        });
+PHP;
+
+            $content = preg_replace(
+                '/->withExceptions\(function \(Exceptions \$exceptions\): void \{\s*(.*?)\s*\}\)/s',
+                "->withExceptions(function (Exceptions \$exceptions): void {\n        {$exceptionHandler}\n    })",
+                $content,
+                1
+            );
         }
 
         $content = preg_replace("/\n{3,}/", "\n\n", $content);
@@ -225,11 +449,13 @@ class InitCommand extends CoreCommand
     public function updateUserModel(): void
     {
         $path = app_path('Models/User.php');
-        if (!file_exists($path)) return;
+        if (! file_exists($path)) {
+            return;
+        }
 
         $lines = file($path);
         $traits = [
-            'HasRoles'   => 'Spatie\Permission\Traits\HasRoles',
+            'HasRoles' => 'Spatie\Permission\Traits\HasRoles',
             'HasSetting' => 'Upsoftware\Svarium\Traits\HasSetting',
             'UseDevices' => 'Upsoftware\Svarium\Traits\UseDevices',
         ];
@@ -241,22 +467,28 @@ class InitCommand extends CoreCommand
             $lastUseIndex = -1;
 
             foreach ($lines as $index => $line) {
-                if (str_contains($line, "use {$namespace};")) $importExists = true;
-                if (str_contains($line, "class User")) $classLineIndex = $index;
-                if ($classLineIndex === -1 && str_starts_with(trim($line), "use ")) $lastUseIndex = $index;
+                if (str_contains($line, "use {$namespace};")) {
+                    $importExists = true;
+                }
+                if (str_contains($line, 'class User')) {
+                    $classLineIndex = $index;
+                }
+                if ($classLineIndex === -1 && str_starts_with(trim($line), 'use ')) {
+                    $lastUseIndex = $index;
+                }
 
                 if ($classLineIndex !== -1 && preg_match("/\buse\b[^;]*\b{$name}\b/", $line)) {
                     $traitExists = true;
                 }
             }
 
-            if (!$importExists) {
+            if (! $importExists) {
                 $insertAt = ($lastUseIndex !== -1) ? $lastUseIndex + 1 : 2;
                 array_splice($lines, $insertAt, 0, ["use {$namespace};\n"]);
                 $classLineIndex++;
             }
 
-            if (!$traitExists) {
+            if (! $traitExists) {
                 $traitAdded = false;
                 for ($i = $classLineIndex; $i < count($lines); $i++) {
                     if (preg_match('/^\s*use\s+([^;]+);/', $lines[$i], $matches)) {
@@ -266,7 +498,7 @@ class InitCommand extends CoreCommand
                     }
                 }
 
-                if (!$traitAdded) {
+                if (! $traitAdded) {
                     for ($i = $classLineIndex; $i < count($lines); $i++) {
                         if (str_contains($lines[$i], '{')) {
                             array_splice($lines, $i + 1, 0, ["    use {$name};\n"]);
@@ -277,10 +509,11 @@ class InitCommand extends CoreCommand
             }
         }
 
-        file_put_contents($path, implode("", $lines));
+        file_put_contents($path, implode('', $lines));
     }
 
-    protected function addLoginConfiguration() {
+    protected function addLoginConfiguration()
+    {
         $config = [];
 
         $config['title'] = $this->ask('Tytuł strony logowania', 'Welcome back!');
@@ -311,44 +544,52 @@ class InitCommand extends CoreCommand
         $this->settingModel::setSettingGlobal('login.config', $config);
     }
 
-    public function resources() {
-        $component_ts_stub = __DIR__ . '/../../stubs/components.ts.stub';
-        $app_ts_stub = __DIR__ . '/../../stubs/app.ts.stub';
-        $resolver_ts_stub = __DIR__ . '/../../stubs/resolver.ts.stub';
-        $app_css_stub = __DIR__ . '/../../stubs/app.css.stub';
-        $routes_web_stub = __DIR__ . '/../../stubs/routes.web.stub';
-        $app_blade_php_stub = __DIR__ . '/../../stubs/app.blade.php.stub';
+    public function resources()
+    {
+        $component_ts_stub = __DIR__.'/../../stubs/components.ts.stub';
+        $app_ts_stub = __DIR__.'/../../stubs/app.ts.stub';
+        $resolver_ts_stub = __DIR__.'/../../stubs/resolver.ts.stub';
+        $routes_web_stub = __DIR__.'/../../stubs/routes.web.stub';
+        $app_blade_php_stub = __DIR__.'/../../stubs/app.blade.php.stub';
 
         $APP_NAME = env('APP_NAME');
 
         $resource_js = resource_path('js');
-        $resource_css = resource_path('css');
         $resource_views = resource_path('views');
         $routes = base_path('routes');
 
-
-        if(file_exists($component_ts_stub)) {
+        if (file_exists($component_ts_stub)) {
             $component_ts_content = file_get_contents($component_ts_stub);
-            $component_ts_path = $resource_js . '/components.ts';
+            $component_ts_path = $resource_js.'/components.ts';
             if (file_exists($component_ts_path)) {
-                $force = confirm('Czy nadpisać plik: '.$component_ts_path, false, 'Tak', 'Nie');
+                $force = confirm(
+                    $this->tt('app.init_ui.overwrite_file_prompt', 'Czy nadpisać plik: :path', ['path' => $component_ts_path]),
+                    false,
+                    $this->tt('common.yes', 'Tak'),
+                    $this->tt('common.no', 'Nie')
+                );
                 if ($force) {
-                    $this->info('Nadpisany plik: '.$component_ts_path);
+                    $this->info($this->tt('app.init_ui.file_overwritten', 'Nadpisany plik: :path', ['path' => $component_ts_path]));
                     file_put_contents($component_ts_path, $component_ts_content);
                 }
             } else {
-                $this->info('Utworzono plik: '.$component_ts_path);
+                $this->info($this->tt('app.init_ui.file_created', 'Utworzono plik: :path', ['path' => $component_ts_path]));
                 file_put_contents($component_ts_path, $component_ts_content);
             }
         }
 
-        if(file_exists($app_ts_stub)) {
+        if (file_exists($app_ts_stub)) {
             $save = true;
             $app_ts_content = file_get_contents($app_ts_stub);
-            $app_ts_path = $resource_js . '/app.ts';
+            $app_ts_path = $resource_js.'/app.ts';
             if (file_exists($app_ts_path)) {
-                $force = confirm('Czy nadpisać plik: '.$app_ts_path, false, 'Tak', 'Nie');
-                if (!$force) {
+                $force = confirm(
+                    $this->tt('app.init_ui.overwrite_file_prompt', 'Czy nadpisać plik: :path', ['path' => $app_ts_path]),
+                    false,
+                    $this->tt('common.yes', 'Tak'),
+                    $this->tt('common.no', 'Nie')
+                );
+                if (! $force) {
                     $save = false;
                 }
             }
@@ -359,91 +600,77 @@ class InitCommand extends CoreCommand
                 $escapedAppName = str_replace("'", "\\'", (string) $APP_NAME);
                 $app_ts_content = strtr($app_ts_content, ['{{PREFIX}}' => $escapedPrefix, '{{APP_NAME}}' => $escapedAppName]);
                 $app_ts_content = $this->applyAppTsPrefixFallback($app_ts_content, $escapedPrefix);
-                $this->info('Utworzyłem plik: '.$app_ts_path);
+                $this->info($this->tt('app.init_ui.file_created', 'Utworzono plik: :path', ['path' => $app_ts_path]));
                 file_put_contents($app_ts_path, $app_ts_content);
             }
         }
 
-        if(file_exists($resolver_ts_stub)) {
+        if (file_exists($resolver_ts_stub)) {
             $save = true;
             $resolver_ts_content = file_get_contents($resolver_ts_stub);
-            $resolver_ts_path = $resource_js . '/resolver.ts';
+            $resolver_ts_path = $resource_js.'/resolver.ts';
             if (file_exists($resolver_ts_path)) {
-                $force = confirm('Czy nadpisać plik: '.$resolver_ts_path, false, 'Tak', 'Nie');
-                if (!$force) {
+                $force = confirm(
+                    $this->tt('app.init_ui.overwrite_file_prompt', 'Czy nadpisać plik: :path', ['path' => $resolver_ts_path]),
+                    false,
+                    $this->tt('common.yes', 'Tak'),
+                    $this->tt('common.no', 'Nie')
+                );
+                if (! $force) {
                     $save = false;
                 }
             }
 
             if ($save) {
-                $this->info('Utworzyłem plik: '.$resolver_ts_path);
+                $this->info($this->tt('app.init_ui.file_created', 'Utworzono plik: :path', ['path' => $resolver_ts_path]));
                 file_put_contents($resolver_ts_path, $resolver_ts_content);
             }
         }
 
-        if(file_exists($app_css_stub)) {
-            $app_css_path = $resource_css . '/app.css';
-            $save = true;
-            if (file_exists($app_css_path)) {
-                $force = confirm('Czy nadpisać plik: '.$app_css_path, false, 'Tak', 'Nie');
-                if (!$force) {
-                    $save = false;
-                }
-            }
-
-            if ($save) {
-                $tailwindColor = select('Wybierz kolor podstawowy jasny (primary)', $this->tailwindColors());
-                $tailwindColorPalette = select('Wybierz odcień', [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]);
-                $palette = $this->tailwindPalette();
-                $PRIMARY = $palette[$tailwindColor][$tailwindColorPalette];
-
-                $sameColor = confirm('Czy ten sam kolor dodać jako kolor ciemny?', true, 'Tak', 'Nie');
-                if ($sameColor) {
-                    $PRIMARY_DARK = $PRIMARY;
-                    $tailwindColorDark = $tailwindColor;
-                    $tailwindColorDarkPalette = $tailwindColorPalette;
-                } else {
-                    $tailwindColorDark = select('Wybierz kolor podstawowy ciemny (primary)', $this->tailwindColors());
-                    $tailwindColorDarkPalette = select('Wybierz odcień', [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]);
-                    $PRIMARY_DARK = $palette[$tailwindColorDark][$tailwindColorDarkPalette];
-                }
-
-                $this->info('Kolor podstawowy (jasny/light): ' . $tailwindColor . ' (' . $tailwindColorPalette . ') - ' . $PRIMARY);
-                $this->info('Kolor podstawowy (ciemny/dark): ' . $tailwindColorDark . ' (' . $tailwindColorDarkPalette . ') - ' . $PRIMARY_DARK);
-                $app_css_content = file_get_contents($app_css_stub);
-                $app_css_content = strtr($app_css_content, ['{{PRIMARY}}' => $PRIMARY, '{{PRIMARY_DARK}}' => $PRIMARY_DARK]);
-
-                $this->info('Utworzyłem plik: ' . $app_css_path);
-                file_put_contents($app_css_path, $app_css_content);
-            }
+        $colorsExitCode = $this->call('svarium:app.colors', [
+            '--file' => 'resources/css/app.css',
+            '--initialize' => true,
+        ]);
+        if ($colorsExitCode !== self::SUCCESS) {
+            $this->warn($this->tt('app.init_ui.colors_initialize_failed', 'Nie udało się uruchomić komendy svarium:app.colors w trybie initialize.'));
         }
 
-        if(file_exists($routes_web_stub)) {
+        if (file_exists($routes_web_stub)) {
             $routes_web_content = file_get_contents($routes_web_stub);
-            $routes_web_path = $routes . '/web.php';
+            $routes_web_path = $routes.'/web.php';
             if (file_exists($routes_web_path)) {
-                $force = confirm('Czy nadpisać plik: '.$routes_web_path, false, 'Tak', 'Nie');
+                $force = confirm(
+                    $this->tt('app.init_ui.overwrite_file_prompt', 'Czy nadpisać plik: :path', ['path' => $routes_web_path]),
+                    false,
+                    $this->tt('common.yes', 'Tak'),
+                    $this->tt('common.no', 'Nie')
+                );
                 if ($force) {
-                    $this->info('Nadpisany plik: '.$routes_web_path);
+                    $this->info($this->tt('app.init_ui.file_overwritten', 'Nadpisany plik: :path', ['path' => $routes_web_path]));
                     file_put_contents($routes_web_path, $routes_web_content);
                 }
             } else {
-                $this->info('Utworzyłem plik: '.$routes_web_path);
+                $this->info($this->tt('app.init_ui.file_created', 'Utworzono plik: :path', ['path' => $routes_web_path]));
                 file_put_contents($routes_web_path, $routes_web_content);
             }
         }
 
-        if(file_exists($app_blade_php_stub)) {
+        if (file_exists($app_blade_php_stub)) {
             $app_blade_php_content = file_get_contents($app_blade_php_stub);
-            $app_blade_php_path = $resource_views . '/app.blade.php';
+            $app_blade_php_path = $resource_views.'/app.blade.php';
             if (file_exists($app_blade_php_path)) {
-                $force = confirm('Czy nadpisać plik: '.$app_blade_php_path, false, 'Tak', 'Nie');
+                $force = confirm(
+                    $this->tt('app.init_ui.overwrite_file_prompt', 'Czy nadpisać plik: :path', ['path' => $app_blade_php_path]),
+                    false,
+                    $this->tt('common.yes', 'Tak'),
+                    $this->tt('common.no', 'Nie')
+                );
                 if ($force) {
-                    $this->info('Nadpisany plik: '.$app_blade_php_path);
+                    $this->info($this->tt('app.init_ui.file_overwritten', 'Nadpisany plik: :path', ['path' => $app_blade_php_path]));
                     file_put_contents($app_blade_php_path, $app_blade_php_content);
                 }
             } else {
-                $this->info('Utworzyłem plik: '.$app_blade_php_path);
+                $this->info($this->tt('app.init_ui.file_created', 'Utworzono plik: :path', ['path' => $app_blade_php_path]));
                 file_put_contents($app_blade_php_path, $app_blade_php_content);
             }
         }
@@ -452,7 +679,7 @@ class InitCommand extends CoreCommand
     protected function configureCoreOptions(): array
     {
         $this->newLine();
-        $this->info('Konfiguracja podstawowa Svarium');
+        $this->info($this->tt('app.init_ui.core_configuration', 'Konfiguracja podstawowa Svarium'));
 
         $defaultPanelName = trim((string) config('upsoftware.panel.name', env('SVARIUM_PANEL_NAME', 'admin')));
         if ($defaultPanelName === '') {
@@ -580,56 +807,63 @@ class InitCommand extends CoreCommand
         $tenancyDomainsEnabled = (bool) config('upsoftware.tenancy.domains.enabled', true);
         $tenancyDomainTablesEnabled = (bool) config('upsoftware.tenancy.column.model_maps.domains.enabled', true);
         $tenancyCentralDomains = [];
-        $installTenantDatabaseConnections = false;
+        $runTenantInstallCommand = false;
 
         if ($tenancyEnabled) {
-            $tenancyMode = select(
-                'Wybierz tryb tenancy',
-                [
-                    'column' => 'column (tenant_id w tabelach)',
-                    'database' => 'database (osobna baza per tenant)',
-                ],
-                $tenancyMode
-            );
-
-            $tenancyDomainTablesEnabled = confirm(
-                'Czy włączyć domeny tenantów (tabele domains/model_has_domains)?',
-                $tenancyDomainTablesEnabled,
+            $runTenantInstallCommand = confirm(
+                'Czy uruchomić teraz konfigurację tenancy przez komendę svarium:tenant.install?',
+                true,
                 'Tak',
                 'Nie'
             );
 
-            if ($tenancyDomainTablesEnabled) {
-                $tenancyDomainsEnabled = confirm(
-                    'Czy rozpoznawać tenantów po domenie (host requestu)?',
-                    $tenancyDomainsEnabled,
+            if (! $runTenantInstallCommand) {
+                $tenancyMode = select(
+                    'Wybierz tryb tenancy',
+                    [
+                        'column' => 'column (tenant_id w tabelach)',
+                        'database' => 'database (osobna baza per tenant)',
+                    ],
+                    $tenancyMode
+                );
+
+                $tenancyDomainTablesEnabled = confirm(
+                    'Czy włączyć domeny tenantów (tabele domains/model_has_domains)?',
+                    $tenancyDomainTablesEnabled,
                     'Tak',
                     'Nie'
                 );
 
-                $defaultDomains = config('upsoftware.tenancy.domains.central_domains', []);
-                $domainsString = is_array($defaultDomains) ? implode(',', $defaultDomains) : '';
-                $rawDomains = trim((string) text('Centralne domeny (po przecinku, opcjonalnie)', $domainsString));
-                if ($rawDomains !== '') {
-                    $tenancyCentralDomains = array_values(array_filter(array_map(
-                        static fn ($domain) => trim((string) $domain),
-                        explode(',', $rawDomains)
-                    )));
+                if ($tenancyDomainTablesEnabled) {
+                    $tenancyDomainsEnabled = confirm(
+                        'Czy rozpoznawać tenantów po domenie (host requestu)?',
+                        $tenancyDomainsEnabled,
+                        'Tak',
+                        'Nie'
+                    );
+
+                    $defaultDomains = config('upsoftware.tenancy.domains.central_domains', []);
+                    $domainsString = is_array($defaultDomains) ? implode(',', $defaultDomains) : '';
+                    $rawDomains = trim((string) text('Centralne domeny (po przecinku, opcjonalnie)', $domainsString));
+                    if ($rawDomains !== '') {
+                        $tenancyCentralDomains = array_values(array_filter(array_map(
+                            static fn ($domain) => trim((string) $domain),
+                            explode(',', $rawDomains)
+                        )));
+                    }
+                } else {
+                    $tenancyDomainsEnabled = false;
+                    $tenancyCentralDomains = [];
                 }
-            } else {
-                $tenancyDomainsEnabled = false;
-                $tenancyCentralDomains = [];
-            }
-
-            if ($tenancyMode === 'database') {
-                $installTenantDatabaseConnections = confirm(
-                    'Czy skonfigurować połączenia central/tenant w config/database.php?',
-                    true,
-                    'Tak',
-                    'Nie'
-                );
             }
         }
+
+        $subscriptionsEnabled = confirm(
+            'Czy aktywować moduł subskrypcji?',
+            (bool) config('upsoftware.modules.builtin.subscriptions', false),
+            'Tak',
+            'Nie'
+        );
 
         return [
             'panel_name' => $panelName,
@@ -648,7 +882,8 @@ class InitCommand extends CoreCommand
             'tenancy_domain_tables_enabled' => $tenancyDomainTablesEnabled,
             'tenancy_domains_enabled' => $tenancyDomainsEnabled,
             'tenancy_central_domains' => $tenancyCentralDomains,
-            'install_tenant_database_connections' => $installTenantDatabaseConnections,
+            'run_tenant_install_command' => $runTenantInstallCommand,
+            'subscriptions_enabled' => $subscriptionsEnabled,
         ];
     }
 
@@ -772,11 +1007,16 @@ PHP;
 
         if (
             $tenancyEnabled
-            && $tenancyMode === 'database'
-            && (bool) ($config['install_tenant_database_connections'] ?? false)
+            && (bool) ($config['run_tenant_install_command'] ?? false)
         ) {
             $this->call('svarium:tenant.install');
         }
+
+        $subscriptionsEnabled = (bool) ($config['subscriptions_enabled'] ?? false);
+        $this->call('svarium:subscription.install', [
+            '--enable' => $subscriptionsEnabled ? 'true' : 'false',
+            '--migrate' => $subscriptionsEnabled ? 'true' : 'false',
+        ]);
 
         $this->ensurePanelsFile($panelName, $panelPrefix);
     }
@@ -784,7 +1024,7 @@ PHP;
     protected function configureRolesAndAdmin(): array
     {
         $this->newLine();
-        $this->info('Konfiguracja ról i konta administratora');
+        $this->info('Konfiguracja ról i konta');
 
         $manageRoles = confirm(
             'Czy dodać role do systemu?',
@@ -793,58 +1033,118 @@ PHP;
             'Nie'
         );
 
-        $roles = ['Administrator'];
+        $roles = ['Administrator', 'Superadministrator'];
         if ($manageRoles) {
-            $rolesInput = trim((string) text(
-                'Dodatkowe role (oddzielone przecinkami, bez Administrator)',
-                ''
-            ));
+            while (confirm(
+                'Czy dodać kolejną rolę?',
+                false,
+                'Tak',
+                'Nie'
+            )) {
+                while (true) {
+                    $roleName = trim((string) text(
+                        'Nazwa roli',
+                        ''
+                    ));
 
-            if ($rolesInput !== '') {
-                $additionalRoles = array_values(array_filter(array_map(
-                    static fn (string $role) => trim($role),
-                    explode(',', $rolesInput)
-                )));
+                    if ($roleName === '') {
+                        $this->warn('Nazwa roli nie może być pusta.');
 
-                $roles = array_values(array_unique(array_merge($roles, $additionalRoles)));
+                        continue;
+                    }
+
+                    if (in_array($roleName, $roles, true)) {
+                        $this->warn('Ta rola jest już dodana.');
+
+                        continue;
+                    }
+
+                    $roles[] = $roleName;
+
+                    break;
+                }
             }
         }
 
-        $createAdminUser = confirm(
-            'Czy utworzyć konto administratora?',
+        $roleOptions = [];
+        foreach ($roles as $roleName) {
+            $roleOptions[$roleName] = $roleName;
+        }
+
+        $defaultBypassRoles = array_values(array_filter(
+            $roles,
+            static fn (string $roleName): bool => strtolower(trim($roleName)) === 'superadministrator'
+        ));
+
+        $bypassRoles = $this->input->isInteractive()
+            ? array_values(array_filter(array_map(
+                static fn (mixed $value): string => trim((string) $value),
+                (array) multiselect(
+                    label: 'Wybierz role z bypass tenancy',
+                    options: $roleOptions,
+                    default: $defaultBypassRoles
+                )
+            ), static fn (string $value): bool => $value !== ''))
+            : $defaultBypassRoles;
+
+        $createAccount = confirm(
+            'Czy utworzyć konto?',
             true,
             'Tak',
             'Nie'
         );
 
-        $adminName = 'Administrator';
-        $adminEmail = '';
-        $adminPassword = '';
+        $accountName = 'Administrator';
+        $accountEmail = '';
+        $accountPassword = '';
+        $accountRoles = ['Administrator'];
 
-        if ($createAdminUser) {
-            $adminName = trim((string) text('Nazwa administratora', 'Administrator'));
-            if ($adminName === '') {
-                $adminName = 'Administrator';
+        if ($createAccount) {
+            $accountName = trim((string) text('Nazwa konta', 'Administrator'));
+            if ($accountName === '') {
+                $accountName = 'Administrator';
             }
 
-            $adminEmail = trim((string) text(
-                'E-mail administratora (puste = losowy)',
+            $accountEmail = trim((string) text(
+                'E-mail konta (puste = losowy)',
                 ''
             ));
 
-            $adminPassword = (string) text(
-                'Hasło administratora (puste = losowe)',
+            $accountPassword = (string) text(
+                'Hasło konta (puste = losowe)',
                 ''
             );
+
+            while (true) {
+                $selectedRoles = $this->input->isInteractive()
+                    ? array_values(array_filter(array_map(
+                        static fn (mixed $value): string => trim((string) $value),
+                        (array) multiselect(
+                            label: 'Wybierz role',
+                            options: $roleOptions,
+                            default: $accountRoles
+                        )
+                    ), static fn (string $value): bool => $value !== ''))
+                    : $accountRoles;
+
+                if ($selectedRoles !== []) {
+                    $accountRoles = array_values(array_unique($selectedRoles));
+                    break;
+                }
+
+                $this->warn('Wybierz przynajmniej jedną rolę.');
+            }
         }
 
         return [
             'manage_roles' => $manageRoles,
             'roles' => $roles,
-            'create_admin_user' => $createAdminUser,
-            'admin_name' => $adminName,
-            'admin_email' => $adminEmail,
-            'admin_password' => $adminPassword,
+            'bypass_roles' => $bypassRoles,
+            'create_account' => $createAccount,
+            'account_name' => $accountName,
+            'account_email' => $accountEmail,
+            'account_password' => $accountPassword,
+            'account_roles' => $accountRoles,
         ];
     }
 
@@ -857,6 +1157,9 @@ PHP;
 
         if (! in_array('Administrator', $roles, true)) {
             array_unshift($roles, 'Administrator');
+        }
+        if (! in_array('Superadministrator', $roles, true)) {
+            $roles[] = 'Superadministrator';
         }
 
         $guard = trim((string) config('auth.defaults.guard', 'web'));
@@ -898,86 +1201,137 @@ PHP;
             }
         }
 
-        if (! (bool) ($config['create_admin_user'] ?? false)) {
+        $bypassRoleKeys = array_values(array_filter(array_map(
+            fn (mixed $roleName): string => $this->resolveRoleKey((string) $roleName),
+            (array) ($config['bypass_roles'] ?? [])
+        ), static fn (string $value): bool => $value !== ''));
+
+        $bypassRoleKeys = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $value): string => strtolower(trim((string) $value)),
+            $bypassRoleKeys
+        ))));
+
+        $this->addConfigKey('upsoftware.php', 'auth.tenant_bypass_role_keys', $bypassRoleKeys, true);
+
+        if (! (bool) ($config['create_account'] ?? false)) {
             return;
         }
 
         if (! class_exists($userModelClass)) {
             $this->warn("Nie znaleziono modelu użytkownika: {$userModelClass}");
+
             return;
         }
 
-        $adminName = trim((string) ($config['admin_name'] ?? 'Administrator'));
-        if ($adminName === '') {
-            $adminName = 'Administrator';
+        try {
+            $this->createUserWithRoles(
+                userModelClass: $userModelClass,
+                roleModelClass: $roleModelClass,
+                roleNameIsJson: $roleNameIsJson,
+                guard: $guard,
+                roleNames: (array) ($config['account_roles'] ?? ['Administrator']),
+                userName: (string) ($config['account_name'] ?? 'Administrator'),
+                userEmail: (string) ($config['account_email'] ?? ''),
+                userPassword: (string) ($config['account_password'] ?? ''),
+                generatedEmailPrefix: 'account',
+                accountLabel: 'konta'
+            );
+        } catch (\Throwable $e) {
+            $this->warn('Nie udało się utworzyć konta: '.$e->getMessage());
+        }
+    }
+
+    protected function createUserWithRoles(
+        string $userModelClass,
+        string $roleModelClass,
+        bool $roleNameIsJson,
+        string $guard,
+        array $roleNames,
+        string $userName,
+        string $userEmail,
+        string $userPassword,
+        string $generatedEmailPrefix,
+        string $accountLabel
+    ): void {
+        $userName = trim($userName);
+        if ($userName === '') {
+            $userName = 'User';
         }
 
-        $adminEmail = trim((string) ($config['admin_email'] ?? ''));
+        $userEmail = trim($userEmail);
         $generatedEmail = false;
-        if ($adminEmail === '') {
+        if ($userEmail === '') {
             $slug = Str::of((string) env('APP_NAME', 'app'))->lower()->slug('-')->toString();
             if ($slug === '') {
                 $slug = 'app';
             }
 
-            $adminEmail = 'admin+'.Str::lower(Str::random(8)).'@'.$slug.'.local';
+            $prefix = trim($generatedEmailPrefix) !== '' ? trim($generatedEmailPrefix) : 'user';
+            $userEmail = $prefix.'+'.Str::lower(Str::random(8)).'@'.$slug.'.local';
             $generatedEmail = true;
         }
 
-        $adminPassword = (string) ($config['admin_password'] ?? '');
+        $userPassword = (string) $userPassword;
         $generatedPassword = false;
-        if (trim($adminPassword) === '') {
-            $adminPassword = Str::random(20);
+        if (trim($userPassword) === '') {
+            $userPassword = Str::random(20);
             $generatedPassword = true;
         }
 
-        try {
-            $userPrototype = new $userModelClass();
-            $usersTable = $userPrototype->getTable();
+        $userPrototype = new $userModelClass;
+        $usersTable = $userPrototype->getTable();
 
-            $emailColumnExists = Schema::hasColumn($usersTable, 'email');
-            $passwordColumnExists = Schema::hasColumn($usersTable, 'password');
+        $emailColumnExists = Schema::hasColumn($usersTable, 'email');
+        $passwordColumnExists = Schema::hasColumn($usersTable, 'password');
 
-            if (! $emailColumnExists || ! $passwordColumnExists) {
-                $this->warn("Tabela {$usersTable} nie ma wymaganych kolumn email/password.");
-                return;
-            }
+        if (! $emailColumnExists || ! $passwordColumnExists) {
+            throw new \RuntimeException("Tabela {$usersTable} nie ma wymaganych kolumn email/password.");
+        }
 
-            $user = $userModelClass::query()->firstOrNew(['email' => $adminEmail]);
+        $user = $userModelClass::query()->firstOrNew(['email' => $userEmail]);
 
-            if (Schema::hasColumn($usersTable, 'name')) {
-                $user->name = $adminName;
-            }
+        if (Schema::hasColumn($usersTable, 'name')) {
+            $user->name = $userName;
+        }
 
-            if (Schema::hasColumn($usersTable, 'email_verified_at') && empty($user->email_verified_at)) {
-                $user->email_verified_at = now();
-            }
+        if (Schema::hasColumn($usersTable, 'email_verified_at') && empty($user->email_verified_at)) {
+            $user->email_verified_at = now();
+        }
 
-            $user->password = Hash::make($adminPassword);
-            $user->save();
+        $user->password = Hash::make($userPassword);
+        $user->save();
 
-            [$adminRole] = $this->findOrCreateRole(
+        $roleNames = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $roleName): string => trim((string) $roleName),
+            $roleNames
+        ), static fn (string $roleName): bool => $roleName !== '')));
+
+        if ($roleNames === []) {
+            $roleNames = ['Administrator'];
+        }
+
+        foreach ($roleNames as $roleName) {
+            [$role] = $this->findOrCreateRole(
                 $roleModelClass,
-                'Administrator',
+                $roleName,
                 $guard,
                 $roleNameIsJson
             );
 
-            $this->attachRoleToUser($user, $adminRole);
+            $this->attachRoleToUser($user, $role);
+        }
 
-            $this->info('Konto administratora jest gotowe.');
-            $this->line('Email: '.$adminEmail);
-            $this->line('Hasło: '.$adminPassword);
+        $this->info('Konto '.$accountLabel.' jest gotowe.');
+        $this->line('Email: '.$userEmail);
+        $this->line('Hasło: '.$userPassword);
+        $this->line('Role: '.implode(', ', $roleNames));
 
-            if ($generatedEmail) {
-                $this->warn('Email administratora został wygenerowany automatycznie.');
-            }
+        if ($generatedEmail) {
+            $this->warn('Email został wygenerowany automatycznie.');
+        }
 
-            if ($generatedPassword) {
-                $this->warn('Hasło administratora zostało wygenerowane automatycznie.');
-            }
-        } catch (\Throwable $e) {
-            $this->warn('Nie udało się utworzyć konta administratora: '.$e->getMessage());
+        if ($generatedPassword) {
+            $this->warn('Hasło zostało wygenerowane automatycznie.');
         }
     }
 
@@ -1008,6 +1362,7 @@ PHP;
         $modelKeyColumn = (string) config('permission.column_names.model_morph_key', 'model_id');
         $userKey = method_exists($user, 'getKey') ? $user->getKey() : ($user->{$modelKeyColumn} ?? $user->id ?? null);
         $roleId = $role->id ?? null;
+        $userModelType = svarium_model_type($user);
 
         if (! Schema::hasTable($table)) {
             $this->warn("Brak tabeli {$table}. Nie mogę przypisać roli administratora.");
@@ -1023,7 +1378,7 @@ PHP;
 
         $attributes = [
             'role_id' => $roleId,
-            'model_type' => $user::class,
+            'model_type' => $userModelType,
             $modelKeyColumn => $userKey,
         ];
 
@@ -1041,7 +1396,7 @@ PHP;
         $connection = null;
 
         if (class_exists($modelHasRoleClass)) {
-            $connection = (new $modelHasRoleClass())->getConnectionName();
+            $connection = (new $modelHasRoleClass)->getConnectionName();
         }
 
         $query = is_string($connection) && $connection !== ''
@@ -1062,7 +1417,7 @@ PHP;
         }
 
         try {
-            $roleModel = new $roleModelClass();
+            $roleModel = new $roleModelClass;
             $table = $roleModel->getTable();
 
             if (! Schema::hasColumn($table, 'name')) {
@@ -1083,11 +1438,30 @@ PHP;
         string $guard,
         bool $roleNameIsJson
     ): array {
+        $roleKey = $this->resolveRoleKey($roleName);
+        $hasRoleKeyColumn = $this->roleTableHasRoleKeyColumn($roleModelClass);
+
+        if ($hasRoleKeyColumn && $roleKey !== '') {
+            $existingByKey = $roleModelClass::query()
+                ->where('guard_name', $guard)
+                ->where('role_key', $roleKey)
+                ->first();
+
+            if ($existingByKey) {
+                return [$existingByKey, false];
+            }
+        }
+
         if (! $roleNameIsJson) {
             $role = $roleModelClass::query()->firstOrCreate([
                 'name' => $roleName,
                 'guard_name' => $guard,
             ]);
+
+            if ($hasRoleKeyColumn && trim((string) $role->getAttribute('role_key')) === '') {
+                $role->setAttribute('role_key', $roleKey);
+                $role->save();
+            }
 
             return [$role, (bool) $role->wasRecentlyCreated];
         }
@@ -1098,6 +1472,11 @@ PHP;
 
         foreach ($roles as $existingRole) {
             if ($this->resolveRoleDisplayName($existingRole) === $roleName) {
+                if ($hasRoleKeyColumn && trim((string) $existingRole->getAttribute('role_key')) === '') {
+                    $existingRole->setAttribute('role_key', $roleKey);
+                    $existingRole->save();
+                }
+
                 return [$existingRole, false];
             }
         }
@@ -1107,13 +1486,17 @@ PHP;
             $locale = 'en';
         }
 
-        $role = new $roleModelClass();
+        $role = new $roleModelClass;
         $role->guard_name = $guard;
 
         if (method_exists($role, 'setTranslation')) {
             $role->setTranslation('name', $locale, $roleName);
         } else {
             $role->name = json_encode([$locale => $roleName], JSON_UNESCAPED_UNICODE);
+        }
+
+        if ($hasRoleKeyColumn) {
+            $role->setAttribute('role_key', $roleKey);
         }
 
         $role->save();
@@ -1142,6 +1525,7 @@ PHP;
             $decoded = json_decode($name, true);
             if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                 $candidate = $decoded[$locale] ?? reset($decoded);
+
                 return is_string($candidate) ? trim($candidate) : '';
             }
 
@@ -1150,56 +1534,96 @@ PHP;
 
         if (is_array($name)) {
             $candidate = $name[$locale] ?? reset($name);
+
             return is_string($candidate) ? trim($candidate) : '';
         }
 
         return '';
     }
 
+    protected function roleTableHasRoleKeyColumn(string $roleModelClass): bool
+    {
+        if (! class_exists($roleModelClass)) {
+            return false;
+        }
+
+        try {
+            $roleModel = new $roleModelClass;
+            $table = $roleModel->getTable();
+
+            return Schema::hasTable($table) && Schema::hasColumn($table, 'role_key');
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    protected function resolveRoleKey(string $roleName): string
+    {
+        $normalized = Str::of($roleName)
+            ->lower()
+            ->ascii()
+            ->replaceMatches('/[^a-z0-9]+/', '_')
+            ->trim('_')
+            ->toString();
+
+        if (in_array($normalized, ['superadministrator', 'super_admin', 'superadmin'], true)) {
+            return 'superadmin';
+        }
+
+        if (in_array($normalized, ['administrator', 'admin'], true)) {
+            return 'admin';
+        }
+
+        return $normalized !== '' ? $normalized : 'role';
+    }
+
     public function handle()
     {
+        if (! $this->ensureMysqlDatabaseConnection()) {
+            return self::FAILURE;
+        }
+
         if ($this->isSvariumConfigured()) {
             $shouldReconfigure = confirm(
-                'Wykryto aktywną konfigurację Svarium (SVARIUM=enabled). Czy chcesz ponownie rekonfigurować?',
+                $this->tt(
+                    'app.init_ui.reconfigure_prompt',
+                    'Wykryto aktywną konfigurację Svarium (SVARIUM=enabled). Czy chcesz ponownie rekonfigurować?'
+                ),
                 false,
-                'Tak',
-                'Nie'
+                $this->tt('common.yes', 'Tak'),
+                $this->tt('common.no', 'Nie')
             );
 
             if (! $shouldReconfigure) {
-                $this->info('Przerwano. Konfiguracja nie została zmieniona.');
+                $this->info($this->tt('app.init_ui.reconfigure_cancelled', 'Przerwano. Konfiguracja nie została zmieniona.'));
 
                 return self::SUCCESS;
             }
         }
 
-        $this->updateUserModel();
-        $this->updateAppBootstrap();
-        $this->resources();
-
-        passthru('php artisan ide-helper:generate');
-        passthru('php artisan ide-helper:models -N');
-        passthru('php artisan ide-helper:meta');
-
-        $this->info('Publikowanie Spatie Permission...');
         $this->call('vendor:publish', [
-            '--provider' => "Spatie\\Permission\\PermissionServiceProvider"
+            '--provider' => 'Spatie\\Permission\\PermissionServiceProvider',
         ]);
 
-        $this->info('Publikowanie Laravel Lang...');
         $this->call('vendor:publish', [
-            '--provider' => "LaravelLang\Config\ServiceProvider"
+            '--provider' => "LaravelLang\Config\ServiceProvider",
         ]);
 
-        $this->info('Publikowanie Hashids...');
         $this->call('vendor:publish', [
-            '--provider' => "Vinkla\Hashids\HashidsServiceProvider"
+            '--provider' => "Vinkla\Hashids\HashidsServiceProvider",
         ]);
 
         passthru('php artisan vendor:publish --tag=upsoftware');
         passthru('php artisan vendor:publish --provider="Spatie\Activitylog\ActivitylogServiceProvider" --tag="activitylog-migrations"');
         passthru('php artisan vendor:publish --provider="Spatie\Activitylog\ActivitylogServiceProvider" --tag="activitylog-config"');
         passthru('php artisan vendor:publish --provider="hisorange\BrowserDetect\ServiceProvider"');
+        passthru('SVARIUM_ALLOW_MIGRATE=1 php artisan migrate');
+
+        $this->configureApplicationLocale();
+
+        $this->updateUserModel();
+        $this->updateAppBootstrap();
+        $this->resources();
 
         $this->addConfigKey('activitylog.php', 'activity_model', '\Upsoftware\Svarium\Models\Activity::class', true);
         $this->addConfigKey('browser-detect.php', 'cache.interval', 0, true);
@@ -1207,40 +1631,43 @@ PHP;
         $this->applyCoreConfiguration($coreConfig);
         $this->syncAppTsPrefixFallback((string) ($coreConfig['component_prefix'] ?? ''));
 
-
         passthru('SVARIUM_ALLOW_MIGRATE=1 php artisan migrate');
-        passthru("php artisan native:install");
+        if (confirm(
+            $this->tt('app.init_ui.native_install_prompt', 'Czy uruchomić instalację natywną (php artisan svarium:native install)?'),
+            true,
+            $this->tt('common.yes', 'Tak'),
+            $this->tt('common.no', 'Nie')
+        )) {
+            $nativeExitCode = $this->call('svarium:native', [
+                'action' => 'install',
+            ]);
+
+            if ($nativeExitCode !== self::SUCCESS) {
+                $this->warn($this->tt('app.init_ui.native_install_failed', 'Komenda svarium:native install zakończyła się błędem.'));
+            }
+        }
 
         $rolesAndAdminConfig = $this->configureRolesAndAdmin();
         $this->applyRolesAndAdmin($rolesAndAdminConfig);
 
-        $currentLocale = config('app.locale');
-        $selectedLocale = $this->ask('Podaj domyślny język aplikacji (APP_LOCALE)', $currentLocale);
-        $this->info("Instalowanie plików językowych dla: $selectedLocale ...");
-        passthru("php artisan svarium:lang.add $selectedLocale");
-
-        if ($selectedLocale !== $currentLocale) {
-            $this->addEnvKey('APP_LOCALE', $selectedLocale, true);
-            $this->info("Zaktualizowano APP_LOCALE w pliku .env na: $selectedLocale");
-
-            config(['app.locale' => $selectedLocale]);
-        }
-
         while (true) {
-            if (! confirm('Czy chcesz dodać język (lub kolejny)?', true, 'Tak', 'Nie')) {
+            if (! confirm(
+                $this->tt('app.init_ui.add_next_language_confirm', 'Czy chcesz dodać język (lub kolejny)?'),
+                true,
+                $this->tt('common.yes', 'Tak'),
+                $this->tt('common.no', 'Nie')
+            )) {
                 break;
             }
 
             while (true) {
-                $code = $this->ask('Wpisz kod języka (np. pl, en, de, es)');
+                $code = $this->promptForLocaleCode(
+                    $this->tt('app.init_ui.enter_language_code', 'Wpisz kod języka (np. pl, en, de, es)')
+                );
 
-                if (empty($code)) {
-                    $this->warn('Nie podano kodu języka. Spróbuj ponownie.');
-                    continue;
-                }
-
-                $this->info("Dodawanie języka: $code ...");
-                passthru("php artisan svarium:lang.add $code");
+                $this->info($this->tt('app.init_ui.adding_language', 'Dodawanie języka: :locale ...', ['locale' => $code]));
+                $this->call('svarium:lang.add', ['lang' => [$code]]);
+                $this->persistLocaleSetting($code);
                 $this->newLine();
 
                 break;
@@ -1256,8 +1683,8 @@ PHP;
         $this->addLoginConfiguration();
 
         $this->markSvariumConfigured();
-        $this->info('Ustawiono flagę konfiguracji: SVARIUM=enabled');
+        $this->info($this->tt('app.init_ui.config_flag_set', 'Ustawiono flagę konfiguracji: SVARIUM=enabled'));
 
-        $this->info('Gotowe!');
+        $this->info($this->tt('app.init_ui.done', 'Gotowe!'));
     }
 }

@@ -18,10 +18,13 @@ return new class extends Migration
                 $table->string('model_type')->nullable();
                 $table->string('model_id')->nullable();
                 $table->string('key')->nullable();
+                $table->unsignedBigInteger('user_id')->nullable();
                 $table->longText('value');
 
                 $table->index(['model_type', 'model_id']);
                 $table->unique(['model_type', 'model_id']);
+                $table->index('key', 'settings_key_index');
+                $table->unique(['user_id', 'key'], 'settings_user_id_key_unique');
             });
         }
     }

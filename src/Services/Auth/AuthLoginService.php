@@ -63,7 +63,7 @@ class AuthLoginService
                 'user' => $user,
                 'requires_otp' => true,
                 'otp_disabled_by_user' => false,
-                'otp_url' => route('panel.auth.method', [
+                'otp_url' => route_panel('method', [
                     'type' => 'login',
                     'userAuth' => $userAuth->hash,
                 ]),
@@ -232,12 +232,16 @@ class AuthLoginService
     {
         $tenantId = tenant()?->id;
         $modelHasRole = get_model('model_has_role');
-        $modelType = ltrim($user::class, '\\');
+        $modelType = svarium_model_type($user);
 
         $query = $modelHasRole::query()
             ->where('model_id', $user->id)
             ->where('model_type', $modelType)
             ->where('status', 1);
+
+        if ($this->hasTenantBypassRole((clone $query), $user, $tenantId, $modelHasRole)) {
+            return true;
+        }
 
         if (! svarium_tenancy_column_mode()) {
             return $query->exists();
@@ -273,6 +277,94 @@ class AuthLoginService
         return $this->userBelongsToTenant($user, $tenantId);
     }
 
+    protected function hasTenantBypassRole(
+        mixed $query,
+        mixed $user,
+        mixed $tenantId,
+        mixed $modelHasRole
+    ): bool
+    {
+        $keys = config('upsoftware.auth.tenant_bypass_role_keys', ['superadmin']);
+        if (is_string($keys)) {
+            $keys = explode(',', $keys);
+        }
+
+        if (! is_array($keys)) {
+            return false;
+        }
+
+        $keys = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $value): string => strtolower(trim((string) $value)),
+            $keys
+        ))));
+
+        if ($keys === []) {
+            return false;
+        }
+
+        $scope = $this->tenantBypassScope();
+
+        if ($scope === 'tenant' && svarium_tenancy_column_mode() && ($tenantId === null || $tenantId === '')) {
+            return false;
+        }
+
+        $roleModel = get_model('role');
+        if (! is_string($roleModel) || ! class_exists($roleModel)) {
+            return false;
+        }
+
+        try {
+            $model = new $roleModel();
+            $table = (string) $model->getTable();
+            $connection = $model->getConnectionName();
+
+            if ($table === '') {
+                return false;
+            }
+
+            $hasRoleKey = is_string($connection) && $connection !== ''
+                ? Schema::connection($connection)->hasColumn($table, 'role_key')
+                : Schema::hasColumn($table, 'role_key');
+
+            if (! $hasRoleKey) {
+                return false;
+            }
+
+            $bypassQuery = $query
+                ->whereHas('role', function ($builder) use ($keys): void {
+                    $builder->whereIn('role_key', $keys);
+                });
+
+            if (! svarium_tenancy_column_mode() || $scope === 'all_tenants') {
+                return $bypassQuery->exists();
+            }
+
+            if ($this->roleTableHasTenantColumn($modelHasRole)) {
+                return $bypassQuery
+                    ->where(function ($builder) use ($tenantId): void {
+                        $builder->where('tenant_id', $tenantId)
+                            ->orWhereNull('tenant_id')
+                            ->orWhere('tenant_id', '');
+                    })
+                    ->exists();
+            }
+
+            return $bypassQuery->exists()
+                && $this->userBelongsToTenant($user, $tenantId);
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    protected function tenantBypassScope(): string
+    {
+        $scope = strtolower(trim((string) config('upsoftware.auth.tenant_bypass_scope', 'all_tenants')));
+
+        return in_array($scope, ['all_tenants', 'tenant'], true)
+            ? $scope
+            : 'all_tenants';
+    }
+
     protected function roleTableHasTenantColumn(mixed $modelHasRole): bool
     {
         if (! is_string($modelHasRole) || ! class_exists($modelHasRole)) {
@@ -304,7 +396,7 @@ class AuthLoginService
             return false;
         }
 
-        $modelType = ltrim($user::class, '\\');
+        $modelType = svarium_model_type($user);
 
         try {
             return $modelHasTenant::query()
@@ -408,7 +500,7 @@ class AuthLoginService
             // Ignorujemy niedostępność DB/logów.
         }
 
-        return redirect()->intended('/')->getTargetUrl();
+        return $this->resolvePostLoginRedirectUrl($request);
     }
 
     protected function invalidResult(): array
@@ -430,6 +522,47 @@ class AuthLoginService
         return is_string($userAuthModel)
             && class_exists($userAuthModel)
             && method_exists($userAuthModel, $methodName);
+    }
+
+    protected function resolvePostLoginRedirectUrl(Request $request): string
+    {
+        $panelName = $this->resolvePanelNameFromRequest($request);
+        $defaultUrl = panel_href('', $panelName);
+        $intendedUrl = redirect()->intended($defaultUrl)->getTargetUrl();
+
+        if ($this->shouldIgnoreIntendedUrl($intendedUrl, $request, $panelName)) {
+            return $defaultUrl;
+        }
+
+        return $intendedUrl;
+    }
+
+    protected function shouldIgnoreIntendedUrl(string $url, Request $request, ?string $panelName = null): bool
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+        if (! is_string($path) || trim($path, '/') === '') {
+            return false;
+        }
+
+        $normalizedPath = '/'.trim($path, '/');
+        $currentPath = '/'.trim($request->path(), '/');
+
+        if ($normalizedPath === $currentPath) {
+            return true;
+        }
+
+        $syntheticRequest = Request::create($normalizedPath, 'GET');
+
+        return svarium_is_public_auth_request($syntheticRequest, $panelName);
+    }
+
+    protected function resolvePanelNameFromRequest(Request $request): ?string
+    {
+        $panel = $request->attributes->get('panel');
+
+        return is_string($panel) && trim($panel) !== ''
+            ? trim($panel)
+            : null;
     }
 
     protected function userHasAnyValue(mixed $user, array $attributes): bool

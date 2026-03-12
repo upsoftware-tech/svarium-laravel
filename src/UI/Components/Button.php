@@ -14,7 +14,7 @@ class Button extends Component
 
     protected ?string $name = null;
 
-    protected ?string $value = 'save_and_back';
+    protected mixed $value = 'save_and_back';
     protected ?string $size = null;
 
     protected string $componentButtonType = 'Button';
@@ -56,7 +56,7 @@ class Button extends Component
         return $this;
     }
 
-    public function value(string $value): static
+    public function value(mixed $value): static
     {
         $this->value = $value;
 

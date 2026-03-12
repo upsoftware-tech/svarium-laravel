@@ -31,7 +31,7 @@ class UserAddCommand extends CoreCommand
     public function handle(): int
     {
         try {
-            $userModelClass = $this->resolveModelClass('upsoftware.models.user', config('auth.providers.users.model', \App\Models\User::class));
+            $userModelClass = $this->resolveUserModelClass();
             $roleModelClass = $this->resolveModelClass('permission.models.role', \Spatie\Permission\Models\Role::class);
             $tenantModelClass = $this->resolveOptionalModelClass('upsoftware.models.tenant');
             $this->validatePrerequisitesBeforePrompt($userModelClass, $roleModelClass, $tenantModelClass);
@@ -507,7 +507,7 @@ class UserAddCommand extends CoreCommand
         }
 
         $modelKeyColumn = (string) config('permission.column_names.model_morph_key', 'model_id');
-        $modelType = ltrim($user::class, '\\');
+        $modelType = svarium_model_type($user);
         $userKey = $user->getKey();
         $roleId = $role->id ?? null;
 
@@ -568,7 +568,7 @@ class UserAddCommand extends CoreCommand
             return;
         }
 
-        $modelType = ltrim($user::class, '\\');
+        $modelType = svarium_model_type($user);
         $modelId = $user->getKey();
         if ($modelId === null) {
             return;
@@ -732,6 +732,30 @@ class UserAddCommand extends CoreCommand
         $fallback = trim($fallbackGuard);
 
         return $fallback !== '' ? $fallback : 'web';
+    }
+
+    /**
+     * @return class-string<Model>
+     */
+    protected function resolveUserModelClass(): string
+    {
+        try {
+            if (function_exists('get_model')) {
+                $model = get_model('user');
+                if (is_string($model) && trim($model) !== '' && class_exists($model) && is_subclass_of($model, Model::class)) {
+                    return $model;
+                }
+            }
+        } catch (Throwable) {
+            // Fallback below.
+        }
+
+        $trackingUserModel = config('upsoftware.tracking.user_model', config('upsoftware.user_model'));
+        if (is_string($trackingUserModel) && trim($trackingUserModel) !== '' && class_exists($trackingUserModel) && is_subclass_of($trackingUserModel, Model::class)) {
+            return $trackingUserModel;
+        }
+
+        return $this->resolveModelClass('upsoftware.models.user', \Upsoftware\Svarium\Models\User::class);
     }
 
     /**

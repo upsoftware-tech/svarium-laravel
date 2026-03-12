@@ -9,6 +9,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 use Upsoftware\Svarium\Enums\ExecutionMode;
+use Upsoftware\Svarium\Http\OperationResult;
 use Upsoftware\Svarium\Http\RedirectResult;
 use Upsoftware\Svarium\Layouts\AuthLayout;
 use Upsoftware\Svarium\Panel\Operation;
@@ -138,27 +139,39 @@ class MethodOperation extends Operation
         ];
     }
 
+    protected function handleForm(PanelContext $context, ...$args): OperationResult
+    {
+        if (! $context->isPost()) {
+            $userAuth = $this->resolveUserAuth($context);
+            $autoMethod = $this->resolveSingleAutoMethod($userAuth->user);
+
+            if ($autoMethod !== null) {
+                try {
+                    return $this->processMethodSelection($context, $userAuth, $this->resolveType($context), $autoMethod);
+                } catch (ValidationException) {
+                    // fall through to normal form rendering if dispatch fails validation
+                }
+            }
+        }
+
+        return parent::handleForm($context, ...$args);
+    }
+
     protected function save(PanelContext $context): RedirectResult
     {
         $userAuth = $this->resolveUserAuth($context);
         $type = $this->resolveType($context);
         $method = strtolower(trim((string) ($context->validated()['method'] ?? '')));
-        $verificationUrl = route('panel.auth.verification', [
+        return $this->processMethodSelection($context, $userAuth, $type, $method);
+    }
+
+    protected function processMethodSelection(PanelContext $context, mixed $userAuth, string $type, string $method): RedirectResult
+    {
+        $panel = $context->panel()->name;
+        $verificationUrl = route_panel('verification', [
             'type' => $type,
             'userAuth' => $userAuth->hash,
-        ]);
-
-        $cooldownSeconds = $this->resendCooldownSecondsFromLastCode($userAuth);
-        if ($cooldownSeconds > 0) {
-            return RedirectResult::to($verificationUrl)
-                ->warning(__('Too many resend requests. Try again in :seconds seconds.', ['seconds' => $cooldownSeconds]));
-        }
-
-        $limitSeconds = $this->resendRateLimitSeconds($context, $userAuth);
-        if ($limitSeconds > 0) {
-            return RedirectResult::to($verificationUrl)
-                ->warning(__('Too many resend requests. Try again in :seconds seconds.', ['seconds' => $limitSeconds]));
-        }
+        ], true, $panel);
 
         $availableMethods = array_values(array_map(
             static fn (array $item): string => (string) ($item['id'] ?? ''),
@@ -174,6 +187,22 @@ class MethodOperation extends Operation
             ]);
         }
 
+        if ($this->hasActiveVerificationCodeForMethod($userAuth, $method)) {
+            return RedirectResult::to($verificationUrl);
+        }
+
+        $cooldownSeconds = $this->resendCooldownSecondsFromLastCode($userAuth, $method);
+        if ($cooldownSeconds > 0) {
+            return RedirectResult::to($verificationUrl)
+                ->warning(__('Too many resend requests. Try again in :seconds seconds.', ['seconds' => $cooldownSeconds]));
+        }
+
+        $limitSeconds = $this->resendRateLimitSeconds($context, $userAuth);
+        if ($limitSeconds > 0) {
+            return RedirectResult::to($verificationUrl)
+                ->warning(__('Too many resend requests. Try again in :seconds seconds.', ['seconds' => $limitSeconds]));
+        }
+
         $methodName = 'send'.ucfirst($method);
         if (method_exists($userAuth, $methodName)) {
             try {
@@ -187,10 +216,32 @@ class MethodOperation extends Operation
 
         $this->hitResendRateLimit($context, $userAuth);
 
-        return RedirectResult::to(route('panel.auth.verification', [
+        return RedirectResult::to(route_panel('verification', [
             'type' => $type,
             'userAuth' => $userAuth->hash,
-        ]));
+        ], true, $panel));
+    }
+
+    protected function resolveSingleAutoMethod(mixed $user): ?string
+    {
+        $authLoginService = app(\Upsoftware\Svarium\Services\Auth\AuthLoginService::class);
+
+        if ($authLoginService->showAllOtpMethods()) {
+            return null;
+        }
+
+        $availableMethods = array_values(array_filter(
+            $this->getAvailableMethods($user),
+            static fn (array $item): bool => ($item['disabled'] ?? true) === false
+        ));
+
+        if (count($availableMethods) !== 1) {
+            return null;
+        }
+
+        $method = strtolower(trim((string) ($availableMethods[0]['id'] ?? '')));
+
+        return $method !== '' ? $method : null;
     }
 
     protected function resolveType(PanelContext $context): string
@@ -296,7 +347,7 @@ class MethodOperation extends Operation
         return max(0, $value);
     }
 
-    protected function resendCooldownSecondsFromLastCode(mixed $userAuth): int
+    protected function resendCooldownSecondsFromLastCode(mixed $userAuth, ?string $method = null): int
     {
         $cooldown = $this->resendSeconds();
 
@@ -304,9 +355,13 @@ class MethodOperation extends Operation
             return 0;
         }
 
-        $latestCreatedAt = $userAuth->code()
-            ->latest('id')
-            ->value('created_at');
+        $query = $userAuth->code();
+
+        if (is_string($method) && trim($method) !== '') {
+            $query->where('method', strtolower(trim($method)));
+        }
+
+        $latestCreatedAt = $query->latest('id')->value('created_at');
 
         if (! $latestCreatedAt) {
             return 0;
@@ -325,6 +380,24 @@ class MethodOperation extends Operation
         }
 
         return max(1, (int) now()->diffInSeconds($availableAt));
+    }
+
+    protected function hasActiveVerificationCodeForMethod(mixed $userAuth, string $method): bool
+    {
+        $normalizedMethod = strtolower(trim($method));
+
+        if ($normalizedMethod === '') {
+            return false;
+        }
+
+        return $userAuth->code()
+            ->where('method', $normalizedMethod)
+            ->where(function ($query) {
+                $query->whereNull('is_used')
+                    ->orWhere('is_used', false);
+            })
+            ->where('expired_at', '>=', now())
+            ->exists();
     }
 
     protected function resendRateLimitKey(PanelContext $context, mixed $userAuth): string

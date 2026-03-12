@@ -6,11 +6,15 @@ Ten dokument opisuje wszystkie komendy Artisan rejestrowane przez paczkę `svari
 
 | Komenda | Opis |
 |---|---|
+| `svarium:app:install` | Instaluje Svarium w istniejącej aplikacji Laravel i uruchamia interaktywny init. |
 | `svarium:app.init` | Interaktywna inicjalizacja aplikacji pod Svarium. |
+| `svarium:native install` | Uruchamia instalację natywną (`native:install`) i (opcjonalnie) ide-helper. |
 | `svarium:app.layout` | Interaktywna konfiguracja layoutu panelu. |
-| `svarium:app.colors` | Podmienia neutralną tonację OKLCH w `app.css` (`:root` i `.dark`). |
+| `svarium:app.colors` | Tworzy/nadpisuje `app.css` ze stuba (PRIMARY/PRIMARY_DARK) i podmienia neutralną tonację OKLCH (`:root`, `.dark`). |
 | `svarium:panel.add` | Dodaje panel do `app/Svarium/panels.php`. |
 | `svarium:menu.add` | Dodaje pozycję menu. |
+| `svarium:menu.map` | Pokazuje mapę runtime menu (drzewo + ID/path_id). |
+| `svarium:route:list` | Pokazuje trasy operation i aliasy nazwanych tras Svarium (z filtrami). |
 | `svarium:attribute.add` | Dodaje atrybut pola globalnie lub do wskazanego modułu. |
 | `svarium:attribute.move` | Przenosi atrybut pola między plikiem globalnym i modułami. |
 | `svarium:attribute.remove` | Usuwa atrybut pola z globalnego pliku lub modułu. |
@@ -18,11 +22,15 @@ Ten dokument opisuje wszystkie komendy Artisan rejestrowane przez paczkę `svari
 | `svarium:translation.move` | Przenosi tłumaczenia między globalnym plikiem i modułami. |
 | `svarium:translation.remove` | Usuwa tłumaczenia z globalnego pliku lub modułu. |
 | `svarium:permission` | Tworzy bazowe role/uprawnienia. |
+| `svarium:permission.sync` | Synchronizuje permissiony Svarium z zasobów i operation. |
+| `svarium:role.module` | Przypisuje/odbiera wszystkie permissiony wskazanego modułu do roli. |
 | `svarium:user.add` | Dodaje użytkownika, przypisuje rolę i tenanty. |
+| `svarium:user.access` | Przypisuje/odbiera użytkownikowi role lub bezpośrednie uprawnienia. |
 | `svarium:diagnose.database.connection` | Diagnozuje połączenie DB dla wybranego modelu (`upsoftware.models`). |
 | `svarium:auth.socials.install` | Konfigurator logowania social (Google/Facebook/Apple itd.). |
 | `svarium:make.resource` | Generator zasobu (resource). |
 | `svarium:make.module` | Generator modułu. |
+| `svarium:make.notification` | Generator Notification (globalnie lub w module). |
 | `svarium:make.layout` | Generator klasy layoutu. |
 | `svarium:make.plugin` | Generator szkieletu pluginu. |
 | `svarium:make.tenant` | Tworzy tenant + domenę główną (oraz dane DB w trybie `database`). |
@@ -42,9 +50,38 @@ Ten dokument opisuje wszystkie komendy Artisan rejestrowane przez paczkę `svari
 
 ## 1) Konfiguracja aplikacji i panelu
 
+### `svarium:app:install`
+
+To jest preferowana komenda po instalacji pakietu do istniejącego projektu Laravel:
+
+```bash
+composer require upsoftware/svarium-laravel
+php artisan svarium:app:install
+```
+
+Komenda działa jako prosty instalator wejściowy i deleguje cały interaktywny flow do:
+
+```bash
+php artisan svarium:app.init
+```
+
+Dzięki temu masz jeden spójny proces konfiguracji, ale prostszą ścieżkę startu po `composer require`.
+
 ### `svarium:app.init`
 
 Inicjalizacja aplikacji Svarium (panel, auth routes prefix, i18n, API, tenancy, role/admin itd.).
+
+Najważniejsze zachowanie:
+
+- na starcie komenda sprawdza połączenie domyślne `database.default`,
+- wymagany jest driver `mysql`,
+- wykonywany jest test połączenia (`SELECT 1`),
+- jeśli check nie przejdzie, init kończy się błędem i nie uruchamia dalszych kroków,
+- komenda pyta, czy uruchomić `php artisan svarium:native install`,
+- podczas przygotowania plików `init` uruchamia `php artisan svarium:app.colors --initialize`,
+- w sekcji ról pyta o bypass tenancy jako wybór z listy ról (również tych dodanych ręcznie) i zapisuje wynik do `upsoftware.auth.tenant_bypass_role_keys`,
+- tworzenie konta jest ogólne (`Czy utworzyć konto?`) i pozwala przypisać jednocześnie wiele ról (`Wybierz role`), które trafiają do `model_has_roles`,
+- `ide-helper:*` nie jest już uruchamiany bezpośrednio w `init`.
 
 ```bash
 php artisan svarium:app.init
@@ -54,6 +91,28 @@ Najczęściej używane:
 
 ```bash
 php artisan svarium:app.init
+```
+
+### `svarium:native install`
+
+Uruchamia instalację natywną i helpery IDE:
+
+- `ide-helper:generate` (jeśli dostępne),
+- `ide-helper:models --nowrite` (jeśli dostępne),
+- `ide-helper:meta` (jeśli dostępne),
+- `native:install` (wymagane).
+
+Składnia:
+
+```bash
+php artisan svarium:native install {--without-ide-helper}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:native install
+php artisan svarium:native install --without-ide-helper
 ```
 
 ### `svarium:app.layout`
@@ -66,8 +125,23 @@ php artisan svarium:app.layout
 
 ### `svarium:app.colors`
 
-Interaktywnie zmienia neutralną tonację kolorów w `resources/css/app.css`.
-Komenda podmienia tokeny CSS w sekcjach `:root` i `.dark` (m.in. `--muted`, `--secondary`, `--accent`, `--border`, `--ring`, `--sidebar-*`).
+Komenda obsługuje trzy kroki:
+
+1. `--initialize`:
+- tworzy/nadpisuje `resources/css/app.css` na bazie stuba `stubs/app.css.stub`,
+- pyta o kolor `PRIMARY` (light) i `PRIMARY_DARK` (dark),
+- zapisuje podstawowy plik CSS.
+
+2. tonacja neutralna:
+- podmienia tokeny CSS w sekcjach `:root` i `.dark` (m.in. `--muted`, `--secondary`, `--accent`, `--border`, `--ring`, `--sidebar-*`).
+- domyślna tonacja jest pobierana z `config('upsoftware.colors.tone')`.
+
+3. `PRIMARY` / `PRIMARY_DARK` bez `--initialize`:
+- przy zwykłym uruchomieniu komenda pyta, czy zmienić `PRIMARY`,
+- możesz wskazać kolory/odcienie interaktywnie lub opcjami CLI,
+- domyślne wartości kolorów/odcieni są pobierane z `config('upsoftware.colors.primary.*')`,
+- aby pominąć ten krok użyj `--skip-primary`.
+- po wykonaniu komendy wybrane wartości są zapisywane do `config/upsoftware.php` (`colors.*`) i używane jako domyślne przy kolejnym uruchomieniu.
 
 Dostępne tonacje:
 
@@ -84,13 +158,16 @@ Dostępne tonacje:
 Składnia:
 
 ```bash
-php artisan svarium:app.colors {--file=resources/css/app.css} {--tone=}
+php artisan svarium:app.colors {--file=} {--initialize} {--force} {--skip-primary} {--primary-color=} {--primary-shade=} {--primary-dark-color=} {--primary-dark-shade=} {--tone=}
 ```
 
 Przykłady:
 
 ```bash
 php artisan svarium:app.colors
+php artisan svarium:app.colors --initialize
+php artisan svarium:app.colors --initialize --force
+php artisan svarium:app.colors --primary-color=amber --primary-shade=500 --primary-dark-color=amber --primary-dark-shade=600
 php artisan svarium:app.colors --tone=slate
 php artisan svarium:app.colors --tone=mauve --file=resources/css/app.css
 ```
@@ -120,6 +197,67 @@ Interaktywne dodawanie pozycji menu.
 php artisan svarium:menu.add
 ```
 
+### `svarium:menu.map`
+
+Wyświetla pełną mapę runtime menu z technicznymi identyfikatorami:
+
+- `id` (wewnętrzny identyfikator węzła),
+- `menu_key`,
+- `path_id` / `path_ids` (stabilne ID gałęzi),
+- `url`, `icon`.
+
+Przydatne, gdy chcesz łatwo dopisać nowe elementy przez `parent('...')` i `pathId('...')`.
+
+Składnia:
+
+```bash
+php artisan svarium:menu.map {--navigation=} {--json}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:menu.map
+php artisan svarium:menu.map --navigation=sidebar_user
+php artisan svarium:menu.map --json
+```
+
+### `svarium:route:list`
+
+Pokazuje dwie sekcje:
+
+- `Operation routes` (panel, moduł, metody, URI, klasa operation, bazowa nazwa aliasu),
+- `Named aliases` (wszystkie nazwane aliasy Laravel wskazujące na `SvariumHttpKernel`).
+
+W sekcji `Operation routes` komenda pokazuje też:
+
+- `Permission` - permission wymagany do wejścia na operation,
+- `Access levels` - role, które mają ten permission (zawsze zawiera `superadmin` jako bypass).
+
+To samo jest pokazywane w sekcji `Named aliases` (dla aliasów, które mapują się do operation w panelu).
+
+Przydatne do debugowania nazw tras typu:
+
+- `module:ksef.documents`,
+- `module:admin.ksef.documents`,
+- aliasów metod (`.get`, `.post`) i akcji (`.index`, `.store`, `.update`, `.delete`).
+
+Składnia:
+
+```bash
+php artisan svarium:route:list {--panel=} {--module=} {--name=} {--json}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:route:list
+php artisan svarium:route:list --panel=admin
+php artisan svarium:route:list --module=ksef
+php artisan svarium:route:list --name=module:ksef
+php artisan svarium:route:list --json
+```
+
 ### `svarium:attribute.add`
 
 Dodaje atrybut pola:
@@ -141,7 +279,7 @@ Obsługiwane flagi:
 - `--field=` - nazwa pola, np. `first_name`
 - `--label=` - etykieta, np. `First name`
 - `--module=` - szybki wybór modułu, np. `Patient`
-- `--translations` - automatycznie dodaje tłumaczenia etykiety (klucz i wartość = etykieta) w lokalizacji globalnej lub modułowej.
+- `--translations` - po zapisaniu atrybutu uruchamia od razu interaktywną pętlę tłumaczeń dla wszystkich locale w lokalizacji globalnej lub modułowej; pusta wartość oznacza `klucz = wartość domyślna`.
 
 Składnia:
 
@@ -365,6 +503,82 @@ Interaktywne tworzenie bazowych ról/uprawnień.
 php artisan svarium:permission
 ```
 
+### `svarium:permission.sync`
+
+Synchronizuje permissiony Svarium na podstawie:
+
+- zasobów (`Resource`)
+- zwykłych operation (`Operation`)
+
+Komenda:
+
+- tworzy brakujące rekordy w tabeli `permissions`,
+- pomija resource operations i auth operations,
+- czyści cache permissionów Spatie po synchronizacji.
+
+Składnia:
+
+```bash
+php artisan svarium:permission.sync {--guard=*}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:permission.sync
+php artisan svarium:permission.sync --guard=web
+php artisan svarium:permission.sync --guard=web --guard=api
+```
+
+To jest właściwa komenda do rejestracji katalogu permissionów po:
+
+- dodaniu nowych modułów,
+- dodaniu nowych operation,
+- zmianie wbudowanych modułów `User` / `Role`.
+
+### `svarium:role.module`
+
+Przypisuje wszystkie permissiony modułu do roli lub je odbiera.
+
+Jak działa:
+
+- zbiera permissiony modułu z:
+  - resource permissionów (`resource.{resource}.{action}`),
+  - operation permissionów (`operation.{...}`),
+- działa na wybranym guardzie,
+- ma tryb podglądu (`--list`) bez zmian w bazie.
+
+Składnia:
+
+```bash
+php artisan svarium:role.module {--target=} {--role=} {--module=} {--guard=} {--action=} {--revoke} {--list}
+```
+
+Flow interaktywny (bez flag):
+
+1. Dodaj/Odbierz dostęp
+2. Cel dostępu: `Rola` albo `Użytkownik`
+3. Dla `Rola`: wybór roli i modułu:
+- dla `Dodaj` tylko moduły, których rola jeszcze nie ma,
+- dla `Odbierz` tylko moduły już przypisane do roli.
+4. Dla `Użytkownik`: komenda przełącza flow na `svarium:user.access`.
+
+Przykłady:
+
+```bash
+# podgląd permissionów modułu
+php artisan svarium:role.module --module=patient --list
+
+# przypisanie wszystkich permissionów modułu patient do roli admin
+php artisan svarium:role.module --role=admin --module=patient --guard=web
+
+# odebranie permissionów modułu patient od roli admin
+php artisan svarium:role.module --role=admin --module=patient --revoke
+
+# uruchomienie flow użytkownika z tej komendy
+php artisan svarium:role.module --target=user
+```
+
 ### `svarium:user.add`
 
 Interaktywnie tworzy użytkownika:
@@ -408,6 +622,50 @@ php artisan svarium:user.add
 php artisan svarium:user.add --name="Jan Kowalski" --email="jan@example.com" --random-password
 php artisan svarium:user.add --email="anna@example.com" --role=1 --tenant=tenant_01 --tenant=tenant_02
 php artisan svarium:user.add --email="user@example.com" --password="haslo1234"
+```
+
+### `svarium:user.access`
+
+Przypisuje albo odbiera użytkownikowi:
+
+- role (`role`)
+- bezpośrednie uprawnienia (`permission`)
+
+Flow interaktywny (bez flag):
+
+1. Dodaj/Odbierz dostęp
+2. Rola/Uprawnienie
+3. Guard
+4. Użytkownik (`ID` albo `email`)
+5. Wybór elementów do przypisania/odebrania
+
+Dla typu `Uprawnienie` lista zawiera także grupy modułowe (wildcard), np.:
+
+- `resource.customer.*`
+- `operation.customer.*`
+
+Wybranie wildcardu przypisuje/odbiera cały zestaw uprawnień z tej grupy.
+Wildcard działa także dla nowych akcji dodanych później (np. nowe route/operation w module) bez ponownej edycji przypisań.
+
+Składnia:
+
+```bash
+php artisan svarium:user.access \
+  {--user=} {--action=} {--type=} {--guard=} \
+  {--role=*} {--permission=*}
+```
+
+Przykłady:
+
+```bash
+# interaktywnie
+php artisan svarium:user.access
+
+# przypisz role użytkownikowi
+php artisan svarium:user.access --user=1 --action=add --type=role --guard=web --role=admin
+
+# odbierz bezpośrednie uprawnienia użytkownikowi
+php artisan svarium:user.access --user=jan@example.com --action=revoke --type=permission --permission=operation.patient.index
 ```
 
 ### `svarium:diagnose.database.connection`
@@ -478,6 +736,29 @@ Przykłady:
 ```bash
 php artisan svarium:make.module Patient
 php artisan svarium:make.module
+```
+
+### `svarium:make.notification`
+
+Tworzy nową klasę Notification w jednym z dwóch miejsc:
+
+- globalnie: `app/Svarium/Notifications`
+- modułowo: `app/Svarium/Modules/{Module}/Notifications`
+
+Interaktywnie komenda pyta, gdzie zapisać plik (katalog ogólny Svarium lub wybrany moduł).
+
+Składnia:
+
+```bash
+php artisan svarium:make.notification {name?} {--module=} {--force}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:make.notification UserRegisteredNotification
+php artisan svarium:make.notification SendCodeNotification --module=Patient
+php artisan svarium:make.notification SendCodeNotification --module=Patient --force
 ```
 
 ### `svarium:make.layout`

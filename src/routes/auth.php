@@ -6,6 +6,8 @@ use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;
 use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
 use Upsoftware\Svarium\Http\Middleware\ResolveDomainContext;
+use Upsoftware\Svarium\Panel\Panel;
+use Upsoftware\Svarium\Panel\PanelRegistry;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 
 $middleware = ['web'];
@@ -14,57 +16,103 @@ $middleware[] = LocaleMiddleware::class;
 $middleware[] = ResolveDomainContext::class;
 $middleware[] = HandleInertiaRequests::class;
 
-Route::prefix(config('upsoftware.panel.prefix'))->as('panel.')->middleware('auth.panel')->group(function() use ($middleware) {
-    Route::prefix('auth')->as('auth.')->middleware($middleware)->group(function() {
-        Route::match(['get', 'post'], 'login', function (Request $request) {
-            return app(SvariumHttpKernel::class)($request);
-        })->name('login');
+$registerAuthRoutes = static function (?string $panelPrefix, string $authRoutePrefix) use ($middleware): void {
+    $normalizedPanelPrefix = trim((string) $panelPrefix, '/');
+    $normalizedAuthPrefix = trim($authRoutePrefix, '.');
 
+    if ($normalizedAuthPrefix === '') {
+        return;
+    }
 
-        Route::prefix('{type}')->group(function() {
-            Route::match(['get', 'post'], 'method/{userAuth}', function (Request $request) {
-                return app(SvariumHttpKernel::class)($request);
-            })->name('method');
+    Route::prefix($normalizedPanelPrefix)
+        ->middleware('auth.panel')
+        ->group(function () use ($middleware, $normalizedAuthPrefix): void {
+            Route::prefix('auth')->as($normalizedAuthPrefix.'.')->middleware($middleware)->group(function (): void {
+                Route::match(['get', 'post'], 'login', function (Request $request) {
+                    return app(SvariumHttpKernel::class)($request);
+                })->name('login');
 
-            Route::prefix('verification')->group(function() {
-                Route::prefix('{userAuth}')->group(function() {
-                    Route::get('/', function (Request $request) {
+                Route::prefix('{type}')->group(function (): void {
+                    Route::match(['get', 'post'], 'method/{userAuth}', function (Request $request) {
                         return app(SvariumHttpKernel::class)($request);
-                    })->name('verification');
+                    })->name('method');
 
-                    Route::post('/', function (Request $request) {
-                        return app(SvariumHttpKernel::class)($request);
-                    })->name('verification.set');
+                    Route::prefix('verification')->group(function (): void {
+                        Route::prefix('{userAuth}')->group(function (): void {
+                            Route::get('/', function (Request $request) {
+                                return app(SvariumHttpKernel::class)($request);
+                            })->name('verification');
 
-                    Route::get('/resend', function (Request $request) {
-                        return app(SvariumHttpKernel::class)($request);
-                    })->name('verification.resend');
+                            Route::post('/', function (Request $request) {
+                                return app(SvariumHttpKernel::class)($request);
+                            })->name('verification.set');
+
+                            Route::get('/resend', function (Request $request) {
+                                return app(SvariumHttpKernel::class)($request);
+                            })->name('verification.resend');
+                        });
+                    });
                 });
+
+                Route::prefix('reset')->group(function (): void {
+                    Route::get('/', 'ResetController@init')->name('reset');
+                    Route::post('/', 'ResetController@reset')->name('reset.set');
+
+                    Route::prefix('password/{userAuth}')->group(function (): void {
+                        Route::get('/', 'ResetPasswordController@init')->name('reset.password');
+                        Route::post('/', 'ResetPasswordController@reset')->name('reset.password.set');
+                    });
+                });
+
+                Route::prefix('{provider}')->group(function (): void {
+                    Route::get('/redirect', 'SocialiteController@redirect')->name('redirect');
+                    Route::post('/callback', 'SocialiteController@callback')->name('callback');
+                })->where(['social' => ['google|facebook|apple|microsoft|facebook|linkedin|zoom']]);
+
+                Route::prefix('register')->group(function (): void {
+                    Route::get('/', 'RegisterController@init')->name('register');
+                    Route::post('/', 'RegisterController@register')->name('register.set');
+                });
+
+                Route::get('logout', LogoutController::class)->middleware('auth')->name('logout');
             });
         });
+};
 
-        Route::prefix('reset')->group(function() {
-            Route::get('/', 'ResetController@init')->name('reset');
-            Route::post('/', 'ResetController@reset')->name('reset.set');
+$panels = array_values(array_filter(
+    app(PanelRegistry::class)->all(),
+    fn ($candidate) => $candidate instanceof Panel
+));
 
-            Route::prefix('password/{userAuth}')->group(function() {
-                Route::get('/', 'ResetPasswordController@init')->name('reset.password');
-                Route::post('/', 'ResetPasswordController@reset')->name('reset.password.set');
-            });
-        });
+if ((bool) config('upsoftware.panel.auth.per_panel', true) && $panels !== []) {
+    $defaultPanelName = svarium_default_panel_name();
 
-        Route::prefix('{provider}')->group(function() {
-            Route::get('/redirect', 'SocialiteController@redirect')->name('redirect');
-            Route::post('/callback', 'SocialiteController@callback')->name('callback');
-        })->where(['social' => ['google|facebook|apple|microsoft|facebook|linkedin|zoom']]);
+    foreach ($panels as $panel) {
+        $routePrefixes = ['panel.'.$panel->name.'.auth'];
 
-        Route::prefix('register')->group(function() {
-            Route::get('/', 'RegisterController@init')->name('register');
-            Route::post('/', 'RegisterController@register')->name('register.set');
-        });
+        if ((string) $panel->name === (string) $defaultPanelName) {
+            foreach (svarium_auth_compat_route_prefixes() as $prefix) {
+                $routePrefixes[] = $prefix;
+            }
+        }
 
-        Route::get('logout', LogoutController::class)->middleware('auth')->name('logout');
-    });
-});
+        foreach (array_values(array_unique($routePrefixes)) as $routePrefix) {
+            $registerAuthRoutes($panel->prefix, $routePrefix);
+        }
+    }
+} else {
+    $legacyPrefix = trim((string) config('upsoftware.panel.route_prefix', 'panel.auth'), '.');
+    if ($legacyPrefix === '') {
+        $legacyPrefix = 'panel.auth';
+    }
+
+    $panelPrefix = trim((string) config('upsoftware.panel.prefix', ''), '/');
+
+    $routePrefixes = [$legacyPrefix, ...svarium_auth_compat_route_prefixes()];
+
+    foreach (array_values(array_unique($routePrefixes)) as $routePrefix) {
+        $registerAuthRoutes($panelPrefix, $routePrefix);
+    }
+}
 
 Route::get('locale/{locale}', LocaleController::class)->name('locale');

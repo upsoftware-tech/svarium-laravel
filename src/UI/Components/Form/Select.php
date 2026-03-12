@@ -2,10 +2,18 @@
 
 namespace Upsoftware\Svarium\UI\Components\Form;
 
+use Upsoftware\Svarium\UI\Concerns\Props\HasVariant;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
 
 class Select extends FieldComponent
 {
+    use HasVariant;
+
+    public function multiple(bool $enabled = true): static
+    {
+        return $this->prop('multiple', $enabled);
+    }
+
     public function options(array $options): static
     {
         return $this->prop('options', $options);
@@ -20,5 +28,9 @@ class Select extends FieldComponent
     {
         return $this->prop('clear', $enabled);
     }
-}
 
+    public function languageSelector(bool $enabled = true): static
+    {
+        return $this->prop('languageSelector', $enabled);
+    }
+}

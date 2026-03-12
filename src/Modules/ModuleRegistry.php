@@ -8,33 +8,53 @@ use Illuminate\Translation\Translator;
 use Upsoftware\Svarium\Events\EventBus;
 use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
+use Upsoftware\Svarium\Roles\RoleParameterRegistry;
 use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 class ModuleRegistry
 {
     protected array $modules = [];
 
+    public function loadFromPackage(): void
+    {
+        $this->loadFromPath(
+            __DIR__.DIRECTORY_SEPARATOR.'Builtin',
+            'Upsoftware\\Svarium\\Modules\\Builtin',
+            true
+        );
+    }
+
     public function loadFromApp(): void
     {
-        $base = svarium_modules();
+        $this->loadFromPath(
+            svarium_modules(),
+            'App\\Svarium\\Modules',
+            false
+        );
+    }
 
+    protected function loadFromPath(string $base, string $namespace, bool $packageModules = false): void
+    {
         if (! is_dir($base)) {
             return;
         }
 
         foreach (File::allFiles($base) as $file) {
-
             if (! str_ends_with($file->getFilename(), 'Module.php')) {
                 continue;
             }
 
-            $class = $this->classFromFile($file->getPathname());
+            $class = $this->classFromFile($file->getPathname(), $base, $namespace);
 
-            if (! $class || ! is_subclass_of($class, Module::class)) {
+            if (! $class || ! class_exists($class) || ! is_subclass_of($class, Module::class)) {
                 continue;
             }
 
             $instance = app($class);
+
+            if ($packageModules && ! $this->packageModuleEnabled($instance, $class)) {
+                continue;
+            }
 
             $instance->setPath(dirname($file->getPathname()));
 
@@ -42,12 +62,38 @@ class ModuleRegistry
         }
     }
 
-    protected function classFromFile(string $path): ?string
+    protected function packageModuleEnabled(Module $module, string $class): bool
     {
-        $relative = str_replace(app_path().DIRECTORY_SEPARATOR, '', $path);
-        $relative = str_replace(['/', '.php'], ['\\', ''], $relative);
+        $name = strtolower(trim($module->name()));
 
-        return 'App\\'.$relative;
+        if ($name === '') {
+            $name = strtolower(trim((string) preg_replace('/Module$/', '', class_basename($class))));
+        }
+
+        if ($name === '') {
+            return true;
+        }
+
+        return (bool) config("upsoftware.modules.builtin.{$name}", true);
+    }
+
+    protected function classFromFile(string $path, string $basePath, string $namespace): ?string
+    {
+        $normalizedBase = rtrim(str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $basePath), DIRECTORY_SEPARATOR);
+        $normalizedPath = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+
+        if (! str_starts_with($normalizedPath, $normalizedBase.DIRECTORY_SEPARATOR)) {
+            return null;
+        }
+
+        $relative = substr($normalizedPath, strlen($normalizedBase) + 1);
+        if ($relative === false || $relative === '') {
+            return null;
+        }
+
+        $relative = str_replace([DIRECTORY_SEPARATOR, '.php'], ['\\', ''], $relative);
+
+        return trim($namespace, '\\').'\\'.$relative;
     }
 
     public function register(Module $module): void
@@ -133,7 +179,9 @@ class ModuleRegistry
     public function registerPhase(): void
     {
         $fieldAttributesRegistry = app(FieldAttributesRegistry::class);
+        $roleParameterRegistry = app(RoleParameterRegistry::class);
         $fieldAttributesRegistry->clearAll();
+        $roleParameterRegistry->clear();
         $fieldAttributesRegistry->addLockedDefinitions($this->resolveGlobalFieldAttributes());
 
         foreach ($this->modules as $module) {
@@ -141,6 +189,13 @@ class ModuleRegistry
             if (is_array($fieldAttributes) && $fieldAttributes !== []) {
                 $fieldAttributesRegistry->addDefinitions($fieldAttributes);
             }
+
+            $roleParameters = $module->roleParameters();
+            if (is_array($roleParameters) && $roleParameters !== []) {
+                $roleParameterRegistry->registerMany($roleParameters, get_class($module));
+            }
+
+            $module->register();
 
             $menu = $module->menu();
             if (is_array($menu) && $menu !== []) {
@@ -155,8 +210,6 @@ class ModuleRegistry
                     'source' => get_class($module),
                 ]);
             }
-
-            $module->register();
         }
     }
 

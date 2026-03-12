@@ -61,8 +61,10 @@ Sekcja:
         'nextButtonLabel' => __('Next'),
         'lastButtonLabel' => __('Last'),
     ],
-    'condesed' => false,
+    'condensed' => false,
     'searchbar' => false,
+    'exported' => true,
+    'imported' => true,
 ],
 ```
 
@@ -70,8 +72,10 @@ Znaczenie:
 
 - `action_display`: domyślny tryb akcji (`inline` lub `dropdown`).
 - `pagination`: pełna konfiguracja paginacji i etykiet.
-- `condesed`: domyślna kondensacja tabel (`false` = standardowe odstępy).
+- `condensed`: domyślna kondensacja tabel (`false` = standardowe odstępy).
 - `searchbar`: automatyczne dodanie `InputSearch::make('q')` do każdej tabeli.
+- `exported`: domyślna widoczność przycisku eksportu.
+- `imported`: domyślna widoczność przycisku importu.
 
 ## Wyszukiwarka `q` (globalnie + per tabela)
 
@@ -147,15 +151,63 @@ Czyli oba URL działają:
   Możesz też podać tablicę.
 - `->numbering(bool|string $mode = true, ?string $label = null)`  
   Tryby: `continuous`, `per_page` (oraz aliasy `reset|page|per-page`).
-- `->condesed(bool $state = true)`
-- `->condensed(bool $state = true)` (alias)
+- `->condensed(bool $state = true)`
 
 ### Eksport
 
 - `->exported(true)` - eksport włączony (domyślnie).
 - `->exported(false)` - eksport wyłączony.
 - `->exported('sql', 'csv')` - dozwolone formaty eksportu.
-- `->exported(['sql', 'txt'])` - dozwolone formaty eksportu (wariant tablicowy).
+- `->exported(['sql', 'xml'])` - dozwolone formaty eksportu (wariant tablicowy).
+
+Dostępne formaty: `csv`, `tsv`, `xlsx`, `xls`, `ods`, `json`, `xml`, `sql`, `pdf`.
+Wartość globalna może być ustawiona w `config/upsoftware.php` pod `table.exported`.
+
+### Import
+
+- `->imported(true)` - import włączony (domyślnie).
+- `->imported(false)` - import wyłączony.
+
+Wartość globalna może być ustawiona w `config/upsoftware.php` pod `table.imported`.
+
+Przycisk `ButtonImport` wysyła `POST` na bieżący URL tabeli i przekazuje:
+
+- `_table_action=import`
+- `_import_field=import_file` (lub własna nazwa pola)
+- plik/pliki w polu `import_file`
+
+Po stronie zasobu możesz obsłużyć import przez opcjonalny hook:
+
+```php
+use Upsoftware\Svarium\Panel\PanelContext;
+use Upsoftware\Svarium\Panel\Table\TableBuilder;
+use Upsoftware\Svarium\Http\RedirectResult;
+use Illuminate\Http\UploadedFile;
+
+public function import(PanelContext $context, array $files, TableBuilder $builder): RedirectResult|array|string|int|bool|null
+{
+    /** @var UploadedFile $file */
+    $file = $files[0];
+
+    // ... własna logika importu
+
+    return ['success' => __('Import completed.')];
+}
+```
+
+Uwaga bezpieczeństwa:
+
+- przed wywołaniem `import()` Svarium sprawdza, czy plik nie jest zabezpieczony hasłem do otwarcia;
+- jeśli plik jest zaszyfrowany, import zostanie przerwany z komunikatem ostrzegawczym.
+
+Obsługiwane zwroty z `import()`:
+
+- `RedirectResult` - zwracany bez zmian.
+- `array` - klucze: `success|info|warning|error|message|count|redirect`.
+- `string` - komunikat sukcesu.
+- `int|float` - liczba zaimportowanych rekordów.
+- `false` - komunikat błędu.
+- `null|true` - domyślny komunikat sukcesu.
 
 ### Akcje
 
@@ -196,6 +248,9 @@ Czyli oba URL działają:
 - `->tabs(array $tabs)`
 - `->tabsFromViews(bool $enabled = true)`  
   Dodaje zakładki z zapisanych widoków.
+
+Po kliknięciu zakładki widoku tabela ustawia parametr `?view=<key>` w URL.
+Po stronie backendu klucz widoku nakłada zdefiniowane filtry i domyślne sortowanie zapisane w widoku.
 
 ## API kolumny (`Column`)
 
@@ -342,7 +397,7 @@ public function table(): TableBuilder
             Action::delete(),
         ])
         ->sticky('header', 'search', 'footer')
-        ->condesed(false)
+        ->condensed(false)
         ->headerAppearance(Appearance::make()->bgColor('slate-100'))
         ->filtersAppearance('both')
         ->filtersSize('sm')

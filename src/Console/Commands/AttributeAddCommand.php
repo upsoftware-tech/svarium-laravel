@@ -354,12 +354,14 @@ PHP;
             }
         }
 
+        $valuesByLocale = $this->resolveTranslationValues($key, $locales, $localeOptions);
+
         foreach ($locales as $locale) {
             $target = $targetsByLocale[$locale];
             $this->ensureTranslationFile($target['file']);
 
             $translations = $this->loadTranslationFile($target['file']);
-            $translations[$key] = $key;
+            $translations[$key] = $valuesByLocale[$locale] ?? $key;
             $this->saveTranslationFile($target['file'], $translations);
         }
 
@@ -386,6 +388,42 @@ PHP;
         }
 
         return confirm('Czy dodać tłumaczenia dla etykiety?', false, 'Tak', 'Nie');
+    }
+
+    /**
+     * @param array<int, string> $locales
+     * @param array<string, string> $localeOptions
+     * @return array<string, string>
+     */
+    protected function resolveTranslationValues(string $key, array $locales, array $localeOptions): array
+    {
+        if (! $this->input->isInteractive()) {
+            $values = [];
+            foreach ($locales as $locale) {
+                $values[$locale] = $key;
+            }
+
+            return $values;
+        }
+
+        $values = [];
+
+        foreach ($locales as $locale) {
+            $localeLabel = strtoupper($locale);
+            if (isset($localeOptions[$locale]) && trim((string) $localeOptions[$locale]) !== '') {
+                $localeLabel = strtoupper($locale);
+            }
+
+            $value = (string) text(
+                "Wprowadź tłumaczenie ({$key}) dla {$localeLabel}",
+                'puste = klucz',
+                ''
+            );
+
+            $values[$locale] = trim($value) === '' ? $key : $value;
+        }
+
+        return $values;
     }
 
     protected function locateRootReturnArray(string $content): array

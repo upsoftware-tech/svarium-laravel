@@ -49,7 +49,18 @@ trait HasValidation
 
     public function rule(string $rule): static
     {
-        $this->rules[] = $rule;
+        $parts = explode('|', $rule);
+
+        foreach ($parts as $part) {
+            $normalized = trim((string) $part);
+
+            if ($normalized === '') {
+                continue;
+            }
+
+            $this->rules[] = $normalized;
+        }
+
         return $this;
     }
 

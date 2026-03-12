@@ -213,11 +213,140 @@ function pluck(string $modelClass, string $value, ?string $key = null): array
 function get_model(string $model): string {
     $models = config('upsoftware.models', []);
 
-    if (!isset($models[$model])) {
-        throw new \Exception("Model {$model} is not defined in configuration.");
+    if (isset($models[$model]) && is_string($models[$model]) && trim($models[$model]) !== '') {
+        return $models[$model];
     }
 
-    return $models[$model];
+    $fallbacks = [
+        'activity' => \Upsoftware\Svarium\Models\Activity::class,
+        'device' => \Upsoftware\Svarium\Models\Device::class,
+        'device_user' => \Upsoftware\Svarium\Models\DeviceUser::class,
+        'domain' => \Upsoftware\Svarium\Models\Domain::class,
+        'model_has_domain' => \Upsoftware\Svarium\Models\ModelHasDomain::class,
+        'model_has_domains' => \Upsoftware\Svarium\Models\ModelHasDomain::class,
+        'model_has_domain_tenants' => \Upsoftware\Svarium\Models\ModelHasDomainTenant::class,
+        'model_has_role' => \Upsoftware\Svarium\Models\ModelHasRole::class,
+        'model_has_tenant' => \Upsoftware\Svarium\Models\ModelHasTenant::class,
+        'model_has_tenants' => \Upsoftware\Svarium\Models\ModelHasTenant::class,
+        'navigation' => \Upsoftware\Svarium\Models\Navigation::class,
+        'role' => \Upsoftware\Svarium\Models\Role::class,
+        'setting' => \Upsoftware\Svarium\Models\Setting::class,
+        'subscription_module' => \Upsoftware\Svarium\Models\SubscriptionModule::class,
+        'subscription_limit_tier' => \Upsoftware\Svarium\Models\SubscriptionLimitTier::class,
+        'system_mailbox' => \Upsoftware\Svarium\Models\SystemMailbox::class,
+        'tenant' => \Upsoftware\Svarium\Models\Tenant::class,
+        'tenant_domain' => \Upsoftware\Svarium\Models\TenantDomain::class,
+        'tenant_profile' => \Upsoftware\Svarium\Models\TenantProfile::class,
+        'tenant_subscription' => \Upsoftware\Svarium\Models\TenantSubscription::class,
+        'tenant_subscription_item' => \Upsoftware\Svarium\Models\TenantSubscriptionItem::class,
+        'user' => \Upsoftware\Svarium\Models\User::class,
+        'user_auth' => \Upsoftware\Svarium\Models\UserAuth::class,
+        'user_auth_code' => \Upsoftware\Svarium\Models\UserAuthCode::class,
+    ];
+
+    if (isset($fallbacks[$model]) && class_exists($fallbacks[$model])) {
+        config()->set("upsoftware.models.{$model}", $fallbacks[$model]);
+
+        return $fallbacks[$model];
+    }
+
+    throw new \Exception("Model {$model} is not defined in configuration.");
+}
+
+if (! function_exists('svarium_labels')) {
+    function svarium_labels(): array
+    {
+        static $labels = null;
+
+        if (is_array($labels)) {
+            return $labels;
+        }
+
+        $file = svarium_path('labels.php');
+        if (! is_file($file)) {
+            $labels = [];
+
+            return $labels;
+        }
+
+        $resolved = require $file;
+
+        if ($resolved instanceof \Closure) {
+            $resolved = $resolved();
+        }
+
+        $labels = is_array($resolved) ? $resolved : [];
+
+        return $labels;
+    }
+}
+
+if (! function_exists('svarium_label')) {
+    function svarium_label(string $key, mixed $default = null): string
+    {
+        $value = data_get(svarium_labels(), $key, $default);
+
+        if (is_array($value)) {
+            $locale = (string) app()->getLocale();
+            $fallback = (string) config('app.fallback_locale', 'en');
+
+            $value = $value[$locale]
+                ?? $value[$fallback]
+                ?? reset($value)
+                ?? $default;
+        }
+
+        if ($value === null) {
+            return '';
+        }
+
+        return (string) $value;
+    }
+}
+
+if (! function_exists('svarium_user_model')) {
+    function svarium_user_model(): string
+    {
+        $candidates = [
+            config('upsoftware.models.user'),
+            config('upsoftware.tracking.user_model'),
+            config('upsoftware.user_model'),
+            \Upsoftware\Svarium\Models\User::class,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate) && $candidate !== '' && class_exists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return \Upsoftware\Svarium\Models\User::class;
+    }
+}
+
+if (! function_exists('svarium_model_type')) {
+    function svarium_model_type(object|string $model): string
+    {
+        if (is_object($model)) {
+            if (method_exists($model, 'getMorphClass')) {
+                return ltrim((string) $model->getMorphClass(), '\\');
+            }
+
+            return ltrim($model::class, '\\');
+        }
+
+        $class = ltrim($model, '\\');
+
+        if ($class !== '' && class_exists($class)) {
+            $instance = new $class;
+
+            if (method_exists($instance, 'getMorphClass')) {
+                return ltrim((string) $instance->getMorphClass(), '\\');
+            }
+        }
+
+        return $class;
+    }
 }
 
 
@@ -366,6 +495,387 @@ if (! function_exists('module_helper')) {
     }
 }
 
+if (! function_exists('module_operation_route_name')) {
+    /**
+     * Resolve operation route name in "module:{module}.{operation}[.{action}]" format.
+     *
+     * Examples:
+     * - module_operation_route_name('ksef.documents') => "module:ksef.documents"
+     * - module_operation_route_name('module:ksef.documents') => "module:ksef.documents"
+     */
+    function module_operation_route_name(string $name): string
+    {
+        $value = trim($name);
+        if ($value === '') {
+            throw new InvalidArgumentException('Operation route name cannot be empty.');
+        }
+
+        if (str_starts_with($value, 'module:')) {
+            return $value;
+        }
+
+        return 'module:'.trim($value, '.');
+    }
+}
+
+if (! function_exists('module_operation_route')) {
+    /**
+     * Build URL for operation route aliases.
+     *
+     * Examples:
+     * - module_operation_route('ksef.documents')
+     * - module_operation_route('ksef.documents.get')
+     */
+    function module_operation_route(
+        string $name,
+        array $parameters = [],
+        ?string $panel = null,
+        bool $absolute = false
+    ): string {
+        $resolvedName = module_operation_route_name($name);
+
+        if (\Illuminate\Support\Facades\Route::has($resolvedName)) {
+            return route($resolvedName, $parameters, $absolute);
+        }
+
+        $raw = trim((string) preg_replace('/^module:/', '', $resolvedName));
+        $segments = array_values(array_filter(explode('.', $raw), static fn (string $segment): bool => trim($segment) !== ''));
+
+        if ($segments !== []) {
+            $last = strtolower((string) end($segments));
+            if (in_array($last, ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'index', 'store', 'update'], true)) {
+                array_pop($segments);
+            }
+        }
+
+        return panel_href(implode('/', $segments), $panel);
+    }
+}
+
+if (! function_exists('svarium_all_panels')) {
+    /**
+     * @return list<\Upsoftware\Svarium\Panel\Panel>
+     */
+    function svarium_all_panels(): array
+    {
+        $registry = app(\Upsoftware\Svarium\Panel\PanelRegistry::class);
+
+        return array_values(array_filter(
+            $registry->all(),
+            fn ($candidate) => $candidate instanceof \Upsoftware\Svarium\Panel\Panel
+        ));
+    }
+}
+
+if (! function_exists('svarium_default_panel_name')) {
+    function svarium_default_panel_name(): ?string
+    {
+        $registry = app(\Upsoftware\Svarium\Panel\PanelRegistry::class);
+        $panels = svarium_all_panels();
+
+        $configuredDefault = trim((string) config('upsoftware.panel.auth.default_panel', ''));
+        if ($configuredDefault !== '' && $registry->get($configuredDefault) instanceof \Upsoftware\Svarium\Panel\Panel) {
+            return $configuredDefault;
+        }
+
+        $configuredPanelName = trim((string) config('upsoftware.panel.name', ''));
+        if ($configuredPanelName !== '' && $registry->get($configuredPanelName) instanceof \Upsoftware\Svarium\Panel\Panel) {
+            return $configuredPanelName;
+        }
+
+        foreach ($panels as $panel) {
+            if ($panel->prefix === null || trim((string) $panel->prefix, '/') === '') {
+                return $panel->name;
+            }
+        }
+
+        return $panels[0]->name ?? null;
+    }
+}
+
+if (! function_exists('svarium_resolve_panel')) {
+    function svarium_resolve_panel(
+        ?string $panel = null,
+        ?\Illuminate\Http\Request $request = null
+    ): ?\Upsoftware\Svarium\Panel\Panel {
+        $registry = app(\Upsoftware\Svarium\Panel\PanelRegistry::class);
+        $panels = svarium_all_panels();
+
+        if (is_string($panel)) {
+            $panelValue = trim($panel);
+
+            if ($panelValue !== '') {
+                $namedPanel = $registry->get($panelValue);
+                if ($namedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+                    return $namedPanel;
+                }
+
+                $trimmedPrefix = trim($panelValue, '/');
+                foreach ($panels as $candidate) {
+                    if (trim((string) $candidate->prefix, '/') === $trimmedPrefix) {
+                        return $candidate;
+                    }
+                }
+            }
+        }
+
+        $request ??= request();
+
+        if ($request instanceof \Illuminate\Http\Request) {
+            $routeName = trim((string) optional($request->route())->getName());
+
+            if ($routeName !== '' && preg_match('/^panel\.([^.]+)\.auth\./', $routeName, $matches) === 1) {
+                $routePanel = $registry->get((string) ($matches[1] ?? ''));
+                if ($routePanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+                    return $routePanel;
+                }
+            }
+
+            $path = trim((string) $request->path(), '/');
+            $firstSegment = explode('/', $path)[0] ?? '';
+
+            foreach ($panels as $candidate) {
+                $prefix = trim((string) $candidate->prefix, '/');
+
+                if ($prefix === '') {
+                    continue;
+                }
+
+                if ($prefix === (string) $firstSegment) {
+                    return $candidate;
+                }
+            }
+
+            $method = strtoupper((string) $request->method());
+            if ($method === 'HEAD') {
+                $method = 'GET';
+            }
+
+            $path = trim((string) $request->path(), '/');
+
+            try {
+                $operationRegistry = app(\Upsoftware\Svarium\Panel\OperationRegistry::class);
+                foreach ($panels as $candidate) {
+                    if ($candidate->prefix !== null) {
+                        continue;
+                    }
+
+                    if ($operationRegistry->resolve($candidate->name, $method, $path) !== null) {
+                        return $candidate;
+                    }
+                }
+            } catch (\Throwable) {
+                // Ignore registry resolution errors in helper context.
+            }
+        }
+
+        $defaultPanelName = svarium_default_panel_name();
+
+        if (is_string($defaultPanelName) && $defaultPanelName !== '') {
+            $defaultPanel = $registry->get($defaultPanelName);
+            if ($defaultPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+                return $defaultPanel;
+            }
+        }
+
+        return $panels[0] ?? null;
+    }
+}
+
+if (! function_exists('svarium_auth_per_panel_enabled')) {
+    function svarium_auth_per_panel_enabled(): bool
+    {
+        return (bool) config('upsoftware.panel.auth.per_panel', true);
+    }
+}
+
+if (! function_exists('svarium_auth_compat_route_prefixes')) {
+    /**
+     * @return list<string>
+     */
+    function svarium_auth_compat_route_prefixes(): array
+    {
+        $prefixes = [];
+
+        $legacy = trim((string) config('upsoftware.panel.route_prefix', 'panel.auth'), '.');
+        if ($legacy !== '') {
+            $prefixes[] = $legacy;
+        }
+
+        $prefixes[] = 'panel.auth';
+
+        return array_values(array_unique(array_filter($prefixes, static fn ($value) => is_string($value) && $value !== '')));
+    }
+}
+
+if (! function_exists('svarium_auth_route_prefix')) {
+    function svarium_auth_route_prefix(
+        ?string $panel = null,
+        ?\Illuminate\Http\Request $request = null
+    ): string {
+        $legacy = trim((string) config('upsoftware.panel.route_prefix', 'panel.auth'), '.');
+        if ($legacy === '') {
+            $legacy = 'panel.auth';
+        }
+
+        if (! svarium_auth_per_panel_enabled()) {
+            return $legacy;
+        }
+
+        $resolvedPanel = svarium_resolve_panel($panel, $request);
+
+        if ($resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            return 'panel.'.trim((string) $resolvedPanel->name).'.auth';
+        }
+
+        return $legacy;
+    }
+}
+
+if (! function_exists('svarium_public_auth_route_patterns')) {
+    /**
+     * @return list<string>
+     */
+    function svarium_public_auth_route_patterns(
+        ?string $panel = null,
+        ?\Illuminate\Http\Request $request = null
+    ): array {
+        $suffixes = [
+            'login',
+            'login.*',
+            'reset',
+            'reset.*',
+            'register',
+            'register.*',
+            'method',
+            'method.*',
+            'verification',
+            'verification.*',
+            'redirect',
+            'callback',
+        ];
+
+        $prefixes = [];
+
+        if (svarium_auth_per_panel_enabled()) {
+            if (is_string($panel) && trim($panel) !== '') {
+                $prefixes[] = svarium_auth_route_prefix($panel, $request);
+            } else {
+                foreach (svarium_all_panels() as $candidate) {
+                    $prefixes[] = 'panel.'.trim((string) $candidate->name).'.auth';
+                }
+
+                foreach (svarium_auth_compat_route_prefixes() as $compatPrefix) {
+                    $prefixes[] = $compatPrefix;
+                }
+            }
+        } else {
+            $prefixes[] = svarium_auth_route_prefix($panel, $request);
+        }
+
+        $patterns = [];
+
+        foreach (array_values(array_unique(array_filter($prefixes))) as $prefix) {
+            foreach ($suffixes as $suffix) {
+                $patterns[] = trim($prefix, '.').'.'.$suffix;
+            }
+        }
+
+        $configured = config('upsoftware.panel.public_auth_route_patterns', []);
+        if (is_array($configured)) {
+            foreach ($configured as $pattern) {
+                if (is_string($pattern) && trim($pattern) !== '') {
+                    $patterns[] = trim($pattern);
+                }
+            }
+        }
+
+        return array_values(array_unique($patterns));
+    }
+}
+
+if (! function_exists('svarium_public_auth_path_patterns')) {
+    /**
+     * @return list<string>
+     */
+    function svarium_public_auth_path_patterns(
+        ?string $panel = null,
+        ?\Illuminate\Http\Request $request = null
+    ): array {
+        $basePatterns = [
+            'auth/login',
+            'auth/login/*',
+            'auth/reset',
+            'auth/reset/*',
+            'auth/register',
+            'auth/register/*',
+            'auth/*/method/*',
+            'auth/*/verification/*',
+            'auth/*/verification/*/resend',
+            'auth/*/redirect',
+            'auth/*/callback',
+        ];
+
+        $panelPrefixes = [];
+
+        if (is_string($panel) && trim($panel) !== '') {
+            $resolved = svarium_resolve_panel($panel, $request);
+            if ($resolved instanceof \Upsoftware\Svarium\Panel\Panel) {
+                $panelPrefixes[] = trim((string) $resolved->prefix, '/');
+            }
+        } else {
+            foreach (svarium_all_panels() as $candidate) {
+                $panelPrefixes[] = trim((string) $candidate->prefix, '/');
+            }
+        }
+
+        $panelPrefixes[] = trim((string) config('upsoftware.panel.prefix', ''), '/');
+        $panelPrefixes[] = '';
+
+        $patterns = [];
+
+        foreach (array_values(array_unique($panelPrefixes)) as $prefix) {
+            $base = $prefix !== '' ? $prefix.'/' : '';
+
+            foreach ($basePatterns as $pattern) {
+                $patterns[] = $base.$pattern;
+            }
+        }
+
+        $configured = config('upsoftware.panel.public_auth_path_patterns', []);
+        if (is_array($configured)) {
+            foreach ($configured as $pattern) {
+                if (is_string($pattern) && trim($pattern) !== '') {
+                    $patterns[] = trim($pattern);
+                }
+            }
+        }
+
+        return array_values(array_unique($patterns));
+    }
+}
+
+if (! function_exists('svarium_is_public_auth_request')) {
+    function svarium_is_public_auth_request(
+        \Illuminate\Http\Request $request,
+        ?string $panel = null
+    ): bool {
+        foreach (svarium_public_auth_route_patterns($panel, $request) as $pattern) {
+            if ($request->routeIs($pattern)) {
+                return true;
+            }
+        }
+
+        foreach (svarium_public_auth_path_patterns($panel, $request) as $pattern) {
+            if ($request->is($pattern)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
 if (! function_exists('panel_route_name')) {
     /**
      * Resolve panel route name with configured prefixes.
@@ -375,24 +885,90 @@ if (! function_exists('panel_route_name')) {
      * - panel_route_name('auth.login') => "panel.auth.login"
      * - panel_route_name('panel.auth.login') => "panel.auth.login"
      */
-    function panel_route_name(string $name): string
+    function panel_route_name(string $name, ?string $panel = null): string
     {
         $value = trim($name);
-        $authPrefix = trim((string) config('upsoftware.panel.route_prefix', 'panel.auth'), '.');
+        $resolvedPanel = svarium_resolve_panel($panel);
+        $authPrefix = svarium_auth_route_prefix($resolvedPanel?->name);
+        $normalizeAuthFallback = static function (string $candidate) use ($resolvedPanel): string {
+            $normalizedCandidate = trim($candidate);
+            if (
+                $normalizedCandidate === ''
+                || ! svarium_auth_per_panel_enabled()
+                || ! ($resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel)
+            ) {
+                return $normalizedCandidate;
+            }
+
+            if (\Illuminate\Support\Facades\Route::has($normalizedCandidate)) {
+                return $normalizedCandidate;
+            }
+
+            if (
+                preg_match('/^panel\.([^.]+)\.auth(\..+)?$/', $normalizedCandidate, $matches) !== 1
+                || (string) ($matches[1] ?? '') !== (string) svarium_default_panel_name()
+            ) {
+                return $normalizedCandidate;
+            }
+
+            $suffix = isset($matches[2]) ? ltrim((string) $matches[2], '.') : '';
+
+            foreach (svarium_auth_compat_route_prefixes() as $legacyPrefix) {
+                $legacyPrefix = trim((string) $legacyPrefix, '.');
+                if ($legacyPrefix === '') {
+                    continue;
+                }
+
+                $fallback = $suffix === '' ? $legacyPrefix : $legacyPrefix.'.'.$suffix;
+                if (\Illuminate\Support\Facades\Route::has($fallback)) {
+                    return $fallback;
+                }
+            }
+
+            return $normalizedCandidate;
+        };
 
         if ($value === '') {
-            return $authPrefix;
+            return $normalizeAuthFallback($authPrefix);
         }
 
-        if (str_starts_with($value, 'panel.')) {
-            return $value;
+        if (preg_match('/^panel\.[^.]+\.auth\./', $value) === 1) {
+            return $normalizeAuthFallback($value);
+        }
+
+        $legacyPrefixes = svarium_auth_compat_route_prefixes();
+        $legacyPrefixMatch = null;
+
+        foreach ($legacyPrefixes as $legacyPrefix) {
+            $legacyPrefix = trim((string) $legacyPrefix, '.');
+            if ($legacyPrefix === '') {
+                continue;
+            }
+
+            if ($value === $legacyPrefix || str_starts_with($value, $legacyPrefix.'.')) {
+                $legacyPrefixMatch = $legacyPrefix;
+                break;
+            }
+        }
+
+        if ($legacyPrefixMatch !== null && svarium_auth_per_panel_enabled() && $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            $targetPrefix = 'panel.'.trim((string) $resolvedPanel->name).'.auth';
+            $suffix = ltrim(substr($value, strlen($legacyPrefixMatch)), '.');
+
+            return $normalizeAuthFallback($suffix === ''
+                ? $targetPrefix
+                : $targetPrefix.'.'.$suffix);
+        }
+
+        if (str_starts_with($value, 'panel.') || preg_match('/^[a-z0-9_-]+\.auth\./i', $value) === 1) {
+            return $normalizeAuthFallback($value);
         }
 
         if (str_starts_with($value, 'auth.')) {
-            return $authPrefix.'.'.substr($value, 5);
+            return $normalizeAuthFallback($authPrefix.'.'.substr($value, 5));
         }
 
-        return $authPrefix.'.'.ltrim($value, '.');
+        return $normalizeAuthFallback($authPrefix.'.'.ltrim($value, '.'));
     }
 }
 
@@ -407,9 +983,10 @@ if (! function_exists('route_panel')) {
     function route_panel(
         string $name,
         array $parameters = [],
-        bool $absolute = true
+        bool $absolute = true,
+        ?string $panel = null
     ): string {
-        return route(panel_route_name($name), $parameters, $absolute);
+        return route(panel_route_name($name, $panel), $parameters, $absolute);
     }
 }
 
@@ -422,33 +999,7 @@ if (! function_exists('svarium_auth_login_path')) {
      */
     function svarium_auth_login_path(?string $panel = null): string
     {
-        $registry = app(\Upsoftware\Svarium\Panel\PanelRegistry::class);
-        $panels = array_values(array_filter(
-            $registry->all(),
-            fn ($candidate) => $candidate instanceof \Upsoftware\Svarium\Panel\Panel
-        ));
-
-        $resolvedPanel = null;
-
-        if (is_string($panel)) {
-            $panelName = trim($panel);
-            if ($panelName !== '') {
-                $resolvedPanel = $registry->get($panelName);
-            }
-        }
-
-        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
-            foreach ($panels as $candidate) {
-                if ($candidate->prefix === null || trim((string) $candidate->prefix, '/') === '') {
-                    $resolvedPanel = $candidate;
-                    break;
-                }
-            }
-        }
-
-        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel && $panels !== []) {
-            $resolvedPanel = $panels[0];
-        }
+        $resolvedPanel = svarium_resolve_panel($panel);
 
         $prefix = trim((string) ($resolvedPanel?->prefix ?? ''), '/');
         $path = trim(implode('/', array_filter([$prefix, 'auth/login'])), '/');
@@ -464,18 +1015,29 @@ if (! function_exists('svarium_login_url')) {
      * 2) panel auth named route,
      * 3) resolved panel auth path.
      */
-    function svarium_login_url(bool $preferFrontend = true): string
+    function svarium_login_url(bool $preferFrontend = true, ?string $panel = null): string
     {
-        if ($preferFrontend && \Illuminate\Support\Facades\Route::has('login')) {
+        if ($preferFrontend && $panel === null && \Illuminate\Support\Facades\Route::has('login')) {
             return route('login');
         }
 
-        $panelLoginRoute = panel_route_name('login');
-        if (\Illuminate\Support\Facades\Route::has($panelLoginRoute)) {
-            return route($panelLoginRoute);
+        $candidates = [
+            panel_route_name('login', $panel),
+            panel_route_name('login', svarium_default_panel_name()),
+            panel_route_name('login'),
+        ];
+
+        foreach (svarium_auth_compat_route_prefixes() as $prefix) {
+            $candidates[] = trim($prefix, '.').'.login';
         }
 
-        return svarium_auth_login_path();
+        foreach (array_values(array_unique(array_filter($candidates, static fn ($value) => is_string($value) && $value !== ''))) as $routeName) {
+            if (\Illuminate\Support\Facades\Route::has($routeName)) {
+                return route($routeName);
+            }
+        }
+
+        return svarium_auth_login_path($panel);
     }
 }
 

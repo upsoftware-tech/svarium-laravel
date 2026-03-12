@@ -21,7 +21,7 @@ abstract class Component
     protected ?string $type = null;
 
     protected ?string $name = null;
-    protected ?string $value = null;
+    protected mixed $value = null;
     protected bool $phpIf = true;
 
     public static function make(?string $name = null): static
@@ -81,7 +81,7 @@ abstract class Component
         return $this->exceptOn;
     }
 
-    public function getValue(): ?string
+    public function getValue(): mixed
     {
         return $this->value;
     }

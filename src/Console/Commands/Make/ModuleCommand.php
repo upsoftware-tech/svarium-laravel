@@ -427,10 +427,9 @@ class ModuleCommand extends CoreCommand
             'Nie'
         );
 
-        $randomIcon = $this->randomLucideIcon();
-        $iconInput = trim((string) text('Ikonka (lucide:...)', 'np. lucide:users', $randomIcon));
-        $icon = $iconInput !== '' ? $iconInput : $randomIcon;
-        if (! str_starts_with($icon, 'lucide:')) {
+        $iconInput = trim((string) text('Ikonka (lucide:..., puste = bez ikonki)', 'np. lucide:users', ''));
+        $icon = $iconInput;
+        if ($icon !== '' && ! str_starts_with($icon, 'lucide:')) {
             $icon = 'lucide:'.$icon;
         }
 
@@ -446,7 +445,7 @@ class ModuleCommand extends CoreCommand
         return [
             'enabled' => true,
             'with_submenu' => $withSubmenu,
-            'icon' => $icon,
+            'icon' => $icon !== '' ? $icon : null,
             'order' => $order,
             'parent_menu' => $parentMenu,
         ];
@@ -908,7 +907,7 @@ PHP;
         $plural = Str::plural($name);
         $moduleRouteKey = Str::of($name)->snake()->toString();
         $order = (int) ($config['order'] ?? 1);
-        $icon = trim((string) ($config['icon'] ?? 'lucide:users'));
+        $icon = trim((string) ($config['icon'] ?? ''));
         $withSubmenu = (bool) ($config['with_submenu'] ?? true);
         $parentMenu = trim((string) ($config['parent_menu'] ?? ''));
         $isCalendarEntry = $this->entryView === 'calendar';
@@ -918,6 +917,9 @@ PHP;
 
         $pluralEscaped = str_replace("'", "\\'", $plural);
         $iconEscaped = str_replace("'", "\\'", $icon);
+        $iconMethod = $iconEscaped !== ''
+            ? "\n                ->icon('{$iconEscaped}')"
+            : '';
         $moduleRouteKeyEscaped = str_replace("'", "\\'", $moduleRouteKey);
         $entryLabelEscaped = str_replace("'", "\\'", $entryLabel);
         $entryPathSuffixEscaped = str_replace("'", "\\'", $entryPathSuffix);
@@ -929,7 +931,7 @@ PHP;
     {
         return [
             MenuItem::make('{$pluralEscaped}')
-                ->icon('{$iconEscaped}')
+                {$iconMethod}
                 ->url('/'.ltrim(module_route('{$moduleRouteKeyEscaped}'), '/').'{$entryPathSuffixEscaped}')
                 ->path(['{$parentMenuEscaped}'])
                 ->order({$order}),
@@ -944,7 +946,7 @@ PHP;
     {
         return [
             MenuItem::make('{$pluralEscaped}')
-                ->icon('{$iconEscaped}')
+                {$iconMethod}
                 ->path(['{$parentMenuEscaped}'])
                 ->order({$order}),
 
@@ -963,7 +965,7 @@ PHP;
     {
         return [
             MenuItem::make('{$pluralEscaped}')
-                ->icon('{$iconEscaped}')
+                {$iconMethod}
                 ->url('/'.ltrim(module_route('{$moduleRouteKeyEscaped}'), '/').'{$entryPathSuffixEscaped}')
                 ->order({$order}),
         ];
@@ -979,7 +981,7 @@ PHP;
     {
         return [
             MenuItem::make('{$pluralEscaped}')
-                ->icon('{$iconEscaped}')
+                {$iconMethod}
                 ->order({$order}),
 
             MenuItem::make('{$entryLabelEscaped}')
@@ -1002,7 +1004,7 @@ PHP;
     {
         return [
             MenuItem::make('{$pluralEscaped}')
-                ->icon('{$iconEscaped}')
+                {$iconMethod}
                 ->order({$order}),
 
             MenuItem::make('{$entryLabelEscaped}')
@@ -1019,7 +1021,7 @@ PHP;
     {
         return [
             MenuItem::make('{$pluralEscaped}')
-                ->icon('{$iconEscaped}')
+                {$iconMethod}
                 ->order({$order}),
 
             MenuItem::make('{$entryLabelEscaped}')

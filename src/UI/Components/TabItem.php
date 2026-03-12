@@ -3,9 +3,12 @@
 namespace Upsoftware\Svarium\UI\Components;
 
 use Upsoftware\Svarium\UI\Component;
+use Upsoftware\Svarium\UI\Concerns\Props\HasChildren;
 
 class TabItem extends Component
 {
+    use HasChildren;
+
     public static function make(array|string|null $name = null): static
     {
         $instance = new static($name);

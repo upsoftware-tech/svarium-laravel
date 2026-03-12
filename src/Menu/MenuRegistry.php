@@ -63,19 +63,67 @@ class MenuRegistry
     }
 
     /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function all(): array
+    {
+        return array_values($this->items);
+    }
+
+    /**
+     * @return array<int, string|int|null>
+     */
+    public function navigationIds(): array
+    {
+        $ids = [null];
+
+        foreach ($this->items as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $ids[] = $this->normalizeNavigationId($item['navigation_id'] ?? null);
+        }
+
+        $unique = [];
+        foreach ($ids as $id) {
+            if ($id === null) {
+                $key = 'null';
+            } elseif (is_int($id)) {
+                $key = 'int:'.$id;
+            } else {
+                $key = 'str:'.$id;
+            }
+
+            if (array_key_exists($key, $unique)) {
+                continue;
+            }
+
+            $unique[$key] = $id;
+        }
+
+        return array_values($unique);
+    }
+
+    /**
      * @param array<int, mixed> $items
      * @param array<string, mixed> $defaults
      * @param array<int, string> $pathPrefix
      * @return array<int, array<string, mixed>>
      */
-    protected function normalizeMany(array $items, array $defaults, array $pathPrefix = []): array
+    protected function normalizeMany(
+        array $items,
+        array $defaults,
+        array $pathPrefix = [],
+        array $pathIdPrefix = []
+    ): array
     {
         $normalized = [];
 
         foreach ($items as $item) {
             $normalized = [
                 ...$normalized,
-                ...$this->normalizeItem($item, $defaults, $pathPrefix),
+                ...$this->normalizeItem($item, $defaults, $pathPrefix, $pathIdPrefix),
             ];
         }
 
@@ -88,7 +136,12 @@ class MenuRegistry
      * @param array<int, string> $pathPrefix
      * @return array<int, array<string, mixed>>
      */
-    protected function normalizeItem(mixed $rawItem, array $defaults, array $pathPrefix): array
+    protected function normalizeItem(
+        mixed $rawItem,
+        array $defaults,
+        array $pathPrefix,
+        array $pathIdPrefix
+    ): array
     {
         if ($rawItem instanceof MenuItem) {
             $rawItem = $rawItem->toArray();
@@ -108,6 +161,7 @@ class MenuRegistry
         $routeName = isset($rawItem['route_name']) ? trim((string) $rawItem['route_name']) : null;
         $url = isset($rawItem['url']) ? trim((string) $rawItem['url']) : null;
         $icon = isset($rawItem['icon']) ? trim((string) $rawItem['icon']) : null;
+        $permission = isset($rawItem['permission']) ? trim((string) $rawItem['permission']) : null;
         $order = isset($rawItem['order']) ? (int) $rawItem['order'] : (int) ($defaults['order'] ?? 0);
         $source = isset($rawItem['source'])
             ? trim((string) $rawItem['source'])
@@ -121,6 +175,16 @@ class MenuRegistry
             ...$pathPrefix,
             ...$this->normalizePath($rawItem['path'] ?? $rawItem['position'] ?? $rawItem['under'] ?? []),
         ];
+        $pathIds = [
+            ...$pathIdPrefix,
+            ...$this->normalizePathIds($rawItem['path_ids'] ?? $rawItem['path_keys'] ?? null, count($path)),
+        ];
+        $pathId = $this->normalizePathId($rawItem['path_id'] ?? $rawItem['path_key'] ?? null);
+        $parentId = $this->normalizePathId($rawItem['parent'] ?? $rawItem['parent_id'] ?? null);
+
+        if ($parentId !== '' && (($pathIds[0] ?? null) !== $parentId)) {
+            array_unshift($pathIds, $parentId);
+        }
 
         [$label, $path] = $this->normalizeLeafLabelAndPath(
             $type,
@@ -129,6 +193,13 @@ class MenuRegistry
             $routeName,
             $url
         );
+
+        $hasTarget = ($routeName !== null && $routeName !== '')
+            || ($url !== null && $url !== '');
+
+        if ($pathId === '' && $path === [] && $pathIds !== [] && ! $hasTarget) {
+            $pathId = (string) ($pathIds[array_key_last($pathIds)] ?? '');
+        }
 
         $children = isset($rawItem['children']) && is_array($rawItem['children'])
             ? $rawItem['children']
@@ -146,10 +217,14 @@ class MenuRegistry
                 : sha1(json_encode([
                     'navigation' => $this->normalizeNavigationId($navigationId),
                     'path' => $path,
+                    'path_ids' => $pathIds,
+                    'path_id' => $pathId,
+                    'parent_id' => $parentId,
                     'type' => $type,
                     'label' => $label,
                     'route_name' => $routeName,
                     'url' => $url,
+                    'permission' => $permission,
                     'source' => $source,
                 ], JSON_UNESCAPED_UNICODE) ?: uniqid('menu_', true));
 
@@ -161,8 +236,12 @@ class MenuRegistry
                 'icon' => $icon,
                 'route_name' => $routeName !== '' ? $routeName : null,
                 'url' => $url !== '' ? $url : null,
+                'permission' => $permission !== '' ? $permission : null,
                 'order' => $order,
                 'path' => $path,
+                'path_ids' => $pathIds,
+                'path_id' => $pathId !== '' ? $pathId : null,
+                'parent_id' => $parentId !== '' ? $parentId : null,
                 'source' => $source,
             ];
         }
@@ -172,10 +251,15 @@ class MenuRegistry
             $nestedPath[] = $label;
         }
 
+        $nestedPathIds = $pathIds;
+        if ($children !== [] && $pathId !== '') {
+            $nestedPathIds[] = $pathId;
+        }
+
         if ($children !== []) {
             $results = [
                 ...$results,
-                ...$this->normalizeMany($children, $defaults, $nestedPath),
+                ...$this->normalizeMany($children, $defaults, $nestedPath, $nestedPathIds),
             ];
         }
 
@@ -251,6 +335,61 @@ class MenuRegistry
         }
 
         return $normalized;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function normalizePathIds(mixed $pathIds, int $maxSegments): array
+    {
+        if (is_string($pathIds)) {
+            $pathIds = preg_split('/\s*\/\s*/', trim($pathIds)) ?: [];
+        }
+
+        if (! is_array($pathIds) || $pathIds === []) {
+            return [];
+        }
+
+        $limit = $maxSegments > 0 ? $maxSegments : PHP_INT_MAX;
+
+        $normalized = [];
+
+        foreach ($pathIds as $segment) {
+            if (! is_scalar($segment)) {
+                continue;
+            }
+
+            $value = trim((string) $segment);
+            if ($value === '') {
+                continue;
+            }
+
+            $normalized[] = (string) \Illuminate\Support\Str::of($value)
+                ->replace([' ', '\\', '/'], '-')
+                ->slug('-');
+
+            if (count($normalized) >= $limit) {
+                break;
+            }
+        }
+
+        return $normalized;
+    }
+
+    protected function normalizePathId(mixed $pathId): string
+    {
+        if (! is_scalar($pathId)) {
+            return '';
+        }
+
+        $value = trim((string) $pathId);
+        if ($value === '') {
+            return '';
+        }
+
+        return (string) \Illuminate\Support\Str::of($value)
+            ->replace([' ', '\\', '/'], '-')
+            ->slug('-');
     }
 
     protected function normalizeTranslatedLabel(string $label): string

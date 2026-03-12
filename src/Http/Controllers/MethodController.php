@@ -69,8 +69,27 @@ class MethodController extends Controller
     {
         $data = [];
         $userAuth = get_model('user_auth')::byHash($userAuth);
+        $availableMethods = $this->getAvailableMethods($userAuth->user);
+        $activeMethods = array_values(array_filter(
+            $availableMethods,
+            static fn (array $item): bool => ($item['disabled'] ?? true) === false
+        ));
+
+        if (! $this->authLoginService->showAllOtpMethods() && count($activeMethods) === 1) {
+            $method = strtolower(trim((string) ($activeMethods[0]['id'] ?? '')));
+
+            if ($method !== '') {
+                $methodName = 'send' . ucfirst($method);
+                if (method_exists($userAuth, $methodName)) {
+                    $userAuth->{$methodName}($type);
+                }
+
+                return redirect()->to(route_panel('verification', ['type' => $type, 'userAuth' => $userAuth->hash]));
+            }
+        }
+
         $data['session'] = $userAuth->hash;
-        $data['verificationMethods'] = $this->getAvailableMethods($userAuth->user);
+        $data['verificationMethods'] = $availableMethods;
 
         return inertia('Auth/Method', $data);
     }
@@ -101,6 +120,6 @@ class MethodController extends Controller
             }
         }
 
-        return redirect()->route('panel.auth.verification', ['type' => $type, 'userAuth' => $userAuth->hash]);
+        return redirect()->to(route_panel('verification', ['type' => $type, 'userAuth' => $userAuth->hash]));
     }
 }
