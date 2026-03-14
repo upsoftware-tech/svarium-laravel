@@ -30,6 +30,7 @@ use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\Panel\OperationRegistry;
 use Upsoftware\Svarium\Panel\Panel;
 use Upsoftware\Svarium\Panel\PanelRegistry;
+use Upsoftware\Svarium\Panel\ResourceRegistry;
 use Upsoftware\Svarium\Roles\RoleParameterRegistry;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
 use Upsoftware\Svarium\Services\DeviceTracking\DeviceTracking;
@@ -81,6 +82,7 @@ class SvariumServiceProvider extends ServiceProvider
             return $registry;
         });
 
+        $this->app->singleton(ResourceRegistry::class);
         $this->app->singleton(OperationRegistry::class);
 
         $this->app->singleton(PanelRegistry::class, function () {

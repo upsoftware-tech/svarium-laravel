@@ -3,6 +3,9 @@
 namespace Upsoftware\Svarium\Modules\Builtin\Translation;
 
 use Upsoftware\Svarium\Modules\Builtin\Support\ResolvesBuiltinMenuPlacement;
+use Upsoftware\Svarium\Modules\Builtin\Translation\Panel\TranslationKeyResource;
+use Upsoftware\Svarium\Modules\Builtin\Translation\Panel\TranslationKeysetResource;
+use Upsoftware\Svarium\Modules\Builtin\Translation\Panel\TranslationOrderResource;
 use Upsoftware\Svarium\Modules\Module;
 
 class TranslationModule extends Module
@@ -29,5 +32,12 @@ class TranslationModule extends Module
                 'group_icon' => 'lucide:sliders',
             ]
         );
+    }
+
+    public function register(): void
+    {
+        $this->registerResource(TranslationKeysetResource::class);
+        $this->registerResource(TranslationKeyResource::class);
+        $this->registerResource(TranslationOrderResource::class);
     }
 }

@@ -12,6 +12,14 @@ class AreaResolver
     {
         $path = trim($request->path(), '/');
         $segments = explode('/', $path);
+        $apiPrefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
+
+        if (
+            $apiPrefix !== ''
+            && ($path === $apiPrefix || str_starts_with($path, $apiPrefix.'/'))
+        ) {
+            return new Area('api');
+        }
 
         if (($segments[0] ?? null) === 'api') {
             return new Area('api');

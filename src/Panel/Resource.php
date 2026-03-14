@@ -189,6 +189,11 @@ abstract class Resource
         return true;
     }
 
+    public function canExport(PanelContext $context): bool
+    {
+        return $this->canList($context);
+    }
+
     public function import(PanelContext $context, array $files, TableBuilder $builder): mixed
     {
         /** @var ResourceImportService $importer */
@@ -232,6 +237,11 @@ abstract class Resource
     public function importTitle(PanelContext $context): string
     {
         return "Import {$this->resourceTitleLabel()}";
+    }
+
+    public function exportTitle(PanelContext $context): string
+    {
+        return "Export {$this->resourceTitleLabel()}";
     }
 
     public function previewForm(Model $record): array

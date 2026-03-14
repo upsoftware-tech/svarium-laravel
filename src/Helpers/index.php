@@ -495,6 +495,25 @@ if (! function_exists('module_helper')) {
     }
 }
 
+if (! function_exists('route_module')) {
+    /**
+     * Alias for module_route().
+     *
+     * Examples:
+     * - route_module('patient') => "admin/patients"
+     * - route_module('patient', 'create') => "admin/patients/create"
+     * - route_module('patient', 'edit', 10) => "admin/patients/10/edit"
+     */
+    function route_module(
+        string $module,
+        ?string $action = null,
+        string|int|null $id = null,
+        ?string $panel = null
+    ): string {
+        return module_route($module, $action, $id, $panel);
+    }
+}
+
 if (! function_exists('module_operation_route_name')) {
     /**
      * Resolve operation route name in "module:{module}.{operation}[.{action}]" format.

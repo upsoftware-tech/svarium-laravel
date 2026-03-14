@@ -795,7 +795,9 @@ class Appearance
         string $styleProperty
     ): static {
         if (is_int($value) || is_float($value)) {
-            return $this->appendClass($classPrefix.'-['.$value.'px]');
+            return $this->style([
+                $styleProperty => $value.'px',
+            ]);
         }
 
         $raw = trim((string) $value);

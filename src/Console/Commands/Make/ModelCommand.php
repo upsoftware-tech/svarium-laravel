@@ -35,7 +35,7 @@ class ModelCommand extends CoreCommand
         $createMigration = $this->resolveCreateMigration();
 
         $modelTarget = $moduleName !== null
-            ? "Svarium/Modules/{$moduleName}/Models/{$modelName}"
+            ? "App/Svarium/Modules/{$moduleName}/Models/{$modelName}"
             : $modelName;
 
         $modelParams = [
@@ -61,8 +61,10 @@ class ModelCommand extends CoreCommand
         $targetInfo = $moduleName !== null
             ? "app/Svarium/Modules/{$moduleName}/Models/{$modelName}.php"
             : "app/Models/{$modelName}.php";
+        $targetAbsolute = base_path($targetInfo);
 
         $this->info("Model utworzony: {$targetInfo}");
+        $this->line("<href=file://{$targetAbsolute}>{$targetAbsolute}</>");
 
         return self::SUCCESS;
     }
@@ -191,4 +193,3 @@ class ModelCommand extends CoreCommand
         return $modules;
     }
 }
-

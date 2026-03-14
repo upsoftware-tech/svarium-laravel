@@ -64,6 +64,16 @@ class Tab extends Component
         return $this->prop('variant', $normalized);
     }
 
+    public function showContent(bool $show = true): static
+    {
+        return $this->prop('showContent', $show);
+    }
+
+    public function hideContent(): static
+    {
+        return $this->showContent(false);
+    }
+
     public function top(): static
     {
         return $this->position('top');

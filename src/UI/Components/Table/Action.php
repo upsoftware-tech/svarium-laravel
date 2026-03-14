@@ -4,6 +4,7 @@ namespace Upsoftware\Svarium\UI\Components\Table;
 
 use Upsoftware\Svarium\Security\RecordIdentifier;
 use Upsoftware\Svarium\UI\Component;
+use Upsoftware\Svarium\Panel\ResourceRegistry;
 
 class Action
 {
@@ -26,6 +27,7 @@ class Action
     protected ?string $size = null;
 
     protected $visibleCallback = null;
+    protected static ?array $resourceModelBySlug = null;
 
     /*
     |--------------------------------------------------------------------------
@@ -160,6 +162,27 @@ class Action
         return $this;
     }
 
+    public function route_module(
+        string $module,
+        ?string $action = null,
+        string|int|null $id = 'id',
+        ?string $panel = null
+    ): static {
+        return $this->routeModule($module, $action, $id, $panel);
+    }
+
+    public function routeModule(
+        string $module,
+        ?string $action = null,
+        string|int|null $id = 'id',
+        ?string $panel = null
+    ): static {
+        $resolvedId = $this->resolveRouteModuleIdentifier($id);
+        $uri = module_route($module, $action, $resolvedId, $panel);
+
+        return $this->url('/'.ltrim($uri, '/'));
+    }
+
     public function icon(?string $icon): static
     {
         $this->icon = $icon;
@@ -286,24 +309,154 @@ class Action
     protected function resolveUri(array $row): string
     {
         $uriPattern = $this->uri ?? $this->defaultUri();
+        $uriModel = $this->resolveUriModel($uriPattern);
 
-        if ($this->baseUri) {
+        if ($this->baseUri && ! $this->isAbsoluteUri($uriPattern)) {
             $uriPattern = '/'.trim($this->baseUri, '/')
                 .'/'.ltrim($uriPattern, '/');
         }
 
-        return preg_replace_callback('/\{([^}]+)\}/', function ($matches) use ($row) {
+        return preg_replace_callback('/\{([^}]+)\}/', function ($matches) use ($row, $uriModel) {
 
             $key = $matches[1];
-            $value = $row[$key] ?? null;
+            $value = data_get($row, $key);
 
-            if ($key === 'id' && $value !== null) {
-                $value = RecordIdentifier::encode($row['_model'] ?? '', $value);
+            if ($value !== null && $this->shouldEncodePlaceholder($key)) {
+                $hashModel = $this->resolveHashModel($key, $row, $uriModel);
+                if (is_string($hashModel) && trim($hashModel) !== '') {
+                    $value = RecordIdentifier::encode($hashModel, $value);
+                }
             }
 
             return $value;
 
         }, $uriPattern);
+    }
+
+    protected function shouldEncodePlaceholder(string $key): bool
+    {
+        $normalized = strtolower(trim($key));
+
+        if ($normalized === 'id') {
+            return true;
+        }
+
+        return str_ends_with($normalized, '_id') || str_ends_with($normalized, '.id');
+    }
+
+    protected function resolveHashModel(string $key, array $row, ?string $uriModel): ?string
+    {
+        if ($uriModel !== null) {
+            return $uriModel;
+        }
+
+        if (strtolower(trim($key)) === 'id') {
+            $rowModel = (string) ($row['_model'] ?? '');
+            if ($rowModel !== '') {
+                return $rowModel;
+            }
+        }
+
+        return null;
+    }
+
+    protected function resolveUriModel(string $uriPattern): ?string
+    {
+        $segments = array_values(array_filter(
+            explode('/', trim($uriPattern, '/')),
+            static fn (string $segment): bool => $segment !== ''
+        ));
+
+        if ($segments === []) {
+            return null;
+        }
+
+        foreach ($segments as $index => $segment) {
+            if (preg_match('/^\{[^}]+\}$/', $segment) !== 1) {
+                continue;
+            }
+
+            $slug = $segments[$index - 1] ?? null;
+            if (! is_string($slug) || trim($slug) === '') {
+                continue;
+            }
+
+            $model = $this->modelByResourceSlug($slug);
+            if (is_string($model) && trim($model) !== '') {
+                return $model;
+            }
+        }
+
+        return null;
+    }
+
+    protected function modelByResourceSlug(string $slug): ?string
+    {
+        if (self::$resourceModelBySlug === null) {
+            self::$resourceModelBySlug = [];
+
+            foreach (app(ResourceRegistry::class)->all() as $resourceClass) {
+                if (! is_string($resourceClass) || ! class_exists($resourceClass)) {
+                    continue;
+                }
+
+                if (! method_exists($resourceClass, 'slug') || ! method_exists($resourceClass, 'model')) {
+                    continue;
+                }
+
+                $resourceSlug = trim((string) $resourceClass::slug(), '/');
+                $resourceModel = trim((string) $resourceClass::model(), '\\');
+
+                if ($resourceSlug === '' || $resourceModel === '') {
+                    continue;
+                }
+
+                self::$resourceModelBySlug[strtolower($resourceSlug)] = $resourceModel;
+            }
+        }
+
+        return self::$resourceModelBySlug[strtolower(trim($slug))] ?? null;
+    }
+
+    protected function isAbsoluteUri(string $uri): bool
+    {
+        $trimmed = trim($uri);
+
+        if ($trimmed === '') {
+            return false;
+        }
+
+        if (str_starts_with($trimmed, '/')) {
+            return true;
+        }
+
+        return preg_match('/^[a-z][a-z0-9+\-.]*:\/\//i', $trimmed) === 1;
+    }
+
+    protected function resolveRouteModuleIdentifier(string|int|null $id): string|int|null
+    {
+        if (! is_string($id)) {
+            return $id;
+        }
+
+        $value = trim($id);
+        if ($value === '') {
+            return null;
+        }
+
+        if (str_contains($value, '{') && str_contains($value, '}')) {
+            return $value;
+        }
+
+        if ($value === 'id') {
+            return '{id}';
+        }
+
+        if (str_ends_with($value, '_id') || str_ends_with($value, '.id')) {
+            return '{'.$value.'}';
+        }
+
+        return '{'.$value.'_id}';
     }
 
     public function resolve(array $row): ?Component

@@ -4,8 +4,10 @@ namespace Upsoftware\Svarium\Panel\Table;
 
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Schema;
 use Upsoftware\Svarium\Enums\TableActionDisplay;
 use Upsoftware\Svarium\UI\Component;
 use Upsoftware\Svarium\UI\Components\Button;
@@ -67,6 +69,14 @@ class TableBuilder
     protected array $columns = [];
 
     protected array $searchable = [];
+    protected bool $searchableConfigured = false;
+    protected bool $searchableAllColumns = false;
+    protected array $sortableColumns = [];
+    protected bool $sortableConfigured = false;
+    protected bool $sortableAllColumns = false;
+    protected array $multiSortableColumns = [];
+    protected bool $multiSortableConfigured = false;
+    protected bool $multiSortableAllColumns = false;
 
     protected array $actions = [];
 
@@ -116,6 +126,7 @@ class TableBuilder
     protected array $tabs = [];
 
     protected $searchbar;
+    protected bool $searchbarConfigured = false;
     protected ?bool $showInputSearchInSidebar = null;
 
     protected bool $tabsFromViews = false;
@@ -130,8 +141,11 @@ class TableBuilder
     protected array $stickySections = [];
 
     protected bool $selected = true;
+    protected ?bool $selectable = null;
+    protected ?bool $customColumns = null;
 
     protected ?bool $condensed = null;
+    protected ?bool $bordered = null;
 
     protected string $filterInputSize = 'default';
 
@@ -141,8 +155,12 @@ class TableBuilder
 
     protected bool $imported = true;
 
+    protected ?string $exportUrl = null;
+    protected array $schemaColumnsCache = [];
+
     public function searchbar($searchbar): static
     {
+        $this->searchbarConfigured = true;
         $this->searchbar = $searchbar;
 
         return $this;
@@ -237,6 +255,38 @@ class TableBuilder
                     $this->imported($parsed);
                 }
             }
+        }
+
+        if (is_array($tableConfig) && array_key_exists('custom_columns', $tableConfig)) {
+            $this->customColumns($this->toBoolean($tableConfig['custom_columns'], true));
+        }
+
+        if (is_array($tableConfig) && array_key_exists('sortable', $tableConfig)) {
+            $configuredSortable = $tableConfig['sortable'];
+
+            if (is_bool($configuredSortable)) {
+                $this->sortable($configuredSortable);
+            } elseif (is_string($configuredSortable) || is_array($configuredSortable)) {
+                $this->sortable($configuredSortable);
+            }
+        }
+
+        if (is_array($tableConfig) && array_key_exists('multi_sortable', $tableConfig)) {
+            $configuredMultiSortable = $tableConfig['multi_sortable'];
+
+            if (is_bool($configuredMultiSortable)) {
+                $this->multiSortable($configuredMultiSortable);
+            } elseif (is_string($configuredMultiSortable) || is_array($configuredMultiSortable)) {
+                $this->multiSortable($configuredMultiSortable);
+            }
+        }
+
+        if (is_array($tableConfig) && array_key_exists('bordered', $tableConfig)) {
+            $this->bordered($this->toBoolean($tableConfig['bordered'], false));
+        }
+
+        if (is_array($tableConfig) && array_key_exists('selectable', $tableConfig)) {
+            $this->selectable($this->toBoolean($tableConfig['selectable'], true));
         }
     }
 
@@ -405,11 +455,29 @@ class TableBuilder
 
         $this->columnObjects = $filtered;
 
-        if (! empty($this->searchable)) {
+        if ($this->searchableConfigured && ! $this->searchableAllColumns && ! empty($this->searchable)) {
             $allowedLookup = array_flip($allowedKeys);
 
             $this->searchable = array_values(array_filter(
                 $this->searchable,
+                static fn ($column) => isset($allowedLookup[$column]) || str_contains($column, '.')
+            ));
+        }
+
+        if ($this->sortableConfigured && ! $this->sortableAllColumns && ! empty($this->sortableColumns)) {
+            $allowedLookup = array_flip($allowedKeys);
+
+            $this->sortableColumns = array_values(array_filter(
+                $this->sortableColumns,
+                static fn ($column) => isset($allowedLookup[$column])
+            ));
+        }
+
+        if ($this->multiSortableConfigured && ! $this->multiSortableAllColumns && ! empty($this->multiSortableColumns)) {
+            $allowedLookup = array_flip($allowedKeys);
+
+            $this->multiSortableColumns = array_values(array_filter(
+                $this->multiSortableColumns,
                 static fn ($column) => isset($allowedLookup[$column])
             ));
         }
@@ -417,9 +485,107 @@ class TableBuilder
         return $this;
     }
 
-    public function searchable(array $columns): static
+    public function searchable(array|string ...$columns): static
     {
-        $this->searchable = $columns;
+        $this->searchableConfigured = true;
+
+        $normalized = $this->normalizeSearchableColumns($columns);
+
+        if ($normalized === []) {
+            $this->searchableAllColumns = true;
+            $this->searchable = [];
+
+            return $this;
+        }
+
+        $this->searchableAllColumns = false;
+        $this->searchable = $normalized;
+
+        return $this;
+    }
+
+    public function sortable(array|string|bool ...$columns): static
+    {
+        $this->sortableConfigured = true;
+
+        if ($columns === []) {
+            $this->sortableAllColumns = true;
+            $this->sortableColumns = [];
+
+            return $this;
+        }
+
+        if (count($columns) === 1 && is_bool($columns[0])) {
+            $this->sortableAllColumns = $columns[0];
+            $this->sortableColumns = [];
+
+            return $this;
+        }
+
+        if (count($columns) === 1 && is_string($columns[0])) {
+            $normalized = strtolower(trim($columns[0]));
+
+            if (in_array($normalized, ['true', '1', 'yes', 'on'], true)) {
+                $this->sortableAllColumns = true;
+                $this->sortableColumns = [];
+
+                return $this;
+            }
+
+            if (in_array($normalized, ['false', '0', 'no', 'off'], true)) {
+                $this->sortableAllColumns = false;
+                $this->sortableColumns = [];
+
+                return $this;
+            }
+        }
+
+        $normalized = $this->normalizeSortableColumns($columns);
+
+        $this->sortableAllColumns = false;
+        $this->sortableColumns = $normalized;
+
+        return $this;
+    }
+
+    public function multiSortable(array|string|bool ...$columns): static
+    {
+        $this->multiSortableConfigured = true;
+
+        if ($columns === []) {
+            $this->multiSortableAllColumns = true;
+            $this->multiSortableColumns = [];
+
+            return $this;
+        }
+
+        if (count($columns) === 1 && is_bool($columns[0])) {
+            $this->multiSortableAllColumns = $columns[0];
+            $this->multiSortableColumns = [];
+
+            return $this;
+        }
+
+        if (count($columns) === 1 && is_string($columns[0])) {
+            $normalized = strtolower(trim($columns[0]));
+
+            if (in_array($normalized, ['true', '1', 'yes', 'on'], true)) {
+                $this->multiSortableAllColumns = true;
+                $this->multiSortableColumns = [];
+
+                return $this;
+            }
+
+            if (in_array($normalized, ['false', '0', 'no', 'off'], true)) {
+                $this->multiSortableAllColumns = false;
+                $this->multiSortableColumns = [];
+
+                return $this;
+            }
+        }
+
+        $this->multiSortableAllColumns = false;
+        $this->multiSortableColumns = $this->normalizeSortableColumns($columns);
 
         return $this;
     }
@@ -629,9 +795,30 @@ class TableBuilder
         return $this;
     }
 
+    public function selectable(bool $state = true): static
+    {
+        $this->selectable = $state;
+
+        return $this;
+    }
+
+    public function customColumns(bool $state = true): static
+    {
+        $this->customColumns = $state;
+
+        return $this;
+    }
+
     public function condensed(bool $state = true): static
     {
         $this->condensed = $state;
+
+        return $this;
+    }
+
+    public function bordered(bool $state = true): static
+    {
+        $this->bordered = $state;
 
         return $this;
     }
@@ -682,6 +869,38 @@ class TableBuilder
         $this->imported = $state;
 
         return $this;
+    }
+
+    public function exportUrl(?string $url): static
+    {
+        $normalized = trim((string) $url);
+
+        if ($normalized === '') {
+            $this->exportUrl = null;
+
+            return $this;
+        }
+
+        $this->exportUrl = str_starts_with($normalized, '/') ? $normalized : '/'.$normalized;
+
+        return $this;
+    }
+
+    public function isExportEnabled(): bool
+    {
+        if (is_bool($this->exported)) {
+            return $this->exported;
+        }
+
+        if (! is_array($this->exported)) {
+            return false;
+        }
+
+        try {
+            return count($this->normalizeExportFormats($this->exported)) > 0;
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     public function pagination(array $config): static
@@ -1247,31 +1466,224 @@ class TableBuilder
         return $this->query;
     }
 
+    public function applyAutoWithFromColumns(mixed $query): void
+    {
+        if (! $query instanceof EloquentBuilder) {
+            return;
+        }
+
+        $relations = $this->resolveAutoWithRelations($query);
+
+        if ($relations === []) {
+            return;
+        }
+
+        $query->with($relations);
+    }
+
     public function applySearch($query, string $search): void
     {
         $searchableColumns = $this->resolveSearchableColumns();
 
-        if (! $searchableColumns) {
+        if ($searchableColumns === []) {
             return;
         }
 
-        $query->where(function ($q) use ($search, $searchableColumns) {
-            foreach ($searchableColumns as $column) {
-                $q->orWhere($column, 'like', "%{$search}%");
+        $trimmedSearch = trim($search);
+        if ($trimmedSearch === '') {
+            return;
+        }
+
+        $terms = $this->tokenizeSearchTerms($trimmedSearch);
+        if ($terms === []) {
+            return;
+        }
+
+        $query->where(function ($q) use ($terms, $searchableColumns, $query) {
+            $rootGroupQuery = $q;
+
+            if ($q instanceof \Illuminate\Database\Query\Builder && $query instanceof EloquentBuilder) {
+                $rootGroupQuery = $query->getModel()
+                    ->newEloquentBuilder($q)
+                    ->setModel($query->getModel());
+            }
+
+            foreach ($terms as $term) {
+                $rootGroupQuery->where(function ($termQuery) use ($term, $searchableColumns, $query) {
+                    $orGroupQuery = $termQuery;
+
+                    if ($termQuery instanceof \Illuminate\Database\Query\Builder && $query instanceof EloquentBuilder) {
+                        $orGroupQuery = $query->getModel()
+                            ->newEloquentBuilder($termQuery)
+                            ->setModel($query->getModel());
+                    }
+
+                    $hasCondition = false;
+
+                    foreach ($searchableColumns as $column) {
+                        $applied = $this->applySearchColumnCondition($orGroupQuery, (string) $column, $term, $query);
+
+                        if ($applied) {
+                            $hasCondition = true;
+                        }
+                    }
+
+                    if (! $hasCondition && method_exists($orGroupQuery, 'whereRaw')) {
+                        $orGroupQuery->whereRaw('1 = 0');
+                    }
+                });
             }
         });
     }
 
-    public function applySort($query, string $sort): void
+    protected function tokenizeSearchTerms(string $search): array
     {
-        $direction = 'asc';
-
-        if (str_starts_with($sort, '-')) {
-            $direction = 'desc';
-            $sort = substr($sort, 1);
+        $normalized = trim(preg_replace('/\s+/u', ' ', $search) ?? $search);
+        if ($normalized === '') {
+            return [];
         }
 
-        $query->orderBy($sort, $direction);
+        $tokens = array_values(array_filter(
+            preg_split('/\s+/u', $normalized) ?: [],
+            static fn (string $token): bool => trim($token) !== ''
+        ));
+
+        if ($tokens === []) {
+            return [$normalized];
+        }
+
+        return array_values(array_unique(array_map(
+            static fn (string $token): string => trim($token),
+            $tokens
+        )));
+    }
+
+    protected function applySearchColumnCondition(
+        mixed $query,
+        string $column,
+        string $search,
+        mixed $rootQuery
+    ): bool {
+        $column = trim($column);
+
+        if ($column === '') {
+            return false;
+        }
+
+        $searchTerm = '%'.$search.'%';
+
+        if (! str_contains($column, '.')) {
+            if (method_exists($query, 'orWhere')) {
+                $query->orWhere($column, 'like', $searchTerm);
+            }
+
+            return true;
+        }
+
+        $segments = array_values(array_filter(
+            explode('.', $column),
+            static fn (string $segment): bool => trim($segment) !== ''
+        ));
+
+        if (count($segments) < 2) {
+            return false;
+        }
+
+        $field = (string) array_pop($segments);
+        $relationPath = implode('.', $segments);
+
+        if ($relationPath === '') {
+            return false;
+        }
+
+        if ($field === '*') {
+            if (! $query instanceof EloquentBuilder) {
+                return false;
+            }
+
+            $relatedColumns = $this->resolveRelatedSearchableColumns($rootQuery, $relationPath);
+
+            if ($relatedColumns === []) {
+                return false;
+            }
+
+            $query->orWhereHas($relationPath, function (EloquentBuilder $relatedQuery) use ($relatedColumns, $searchTerm) {
+                $relatedQuery->where(function ($nested) use ($relatedColumns, $searchTerm) {
+                    foreach ($relatedColumns as $relatedColumn) {
+                        $nested->orWhere($relatedColumn, 'like', $searchTerm);
+                    }
+                });
+            });
+
+            return true;
+        }
+
+        if (! $query instanceof EloquentBuilder) {
+            return false;
+        }
+
+        $query->orWhereHas($relationPath, function (EloquentBuilder $relatedQuery) use ($field, $searchTerm) {
+            $relatedQuery->where($field, 'like', $searchTerm);
+        });
+
+        return true;
+    }
+
+    public function applySort($query, string $sort): void
+    {
+        $sort = trim($sort);
+
+        if ($sort === '') {
+            return;
+        }
+
+        $sortableMap = $this->resolveSortableColumnsMap();
+        $multiSortableMap = $this->resolveMultiSortableColumnsMap($sortableMap);
+        $directives = $this->parseSortDirectives($sort);
+
+        if ($directives === []) {
+            return;
+        }
+
+        $appliedSortCount = 0;
+
+        foreach ($directives as $directive) {
+            $field = (string) ($directive['field'] ?? '');
+            $direction = (string) ($directive['direction'] ?? 'asc');
+
+            if ($field === '') {
+                continue;
+            }
+
+            $definition = $sortableMap[$field] ?? null;
+            if (! is_array($definition) || ! ($definition['enabled'] ?? false)) {
+                continue;
+            }
+
+            if ($appliedSortCount > 0) {
+                $multiDefinition = $multiSortableMap[$field] ?? null;
+                if (! is_array($multiDefinition) || ! ($multiDefinition['enabled'] ?? false)) {
+                    continue;
+                }
+            }
+
+            $columns = is_array($definition['columns'] ?? null) ? $definition['columns'] : [];
+
+            foreach ($columns as $column) {
+                if (! is_string($column)) {
+                    continue;
+                }
+
+                $normalized = trim($column);
+                if ($normalized === '' || str_contains($normalized, '.')) {
+                    continue;
+                }
+
+                $query->orderBy($normalized, $direction);
+            }
+
+            $appliedSortCount++;
+        }
     }
 
     protected function resolveActions(): array
@@ -1453,7 +1865,7 @@ class TableBuilder
             $sortField = trim((string) ($view->sort['field'] ?? ''));
             if ($sortField !== '') {
                 $direction = strtolower(trim((string) ($view->sort['direction'] ?? 'asc')));
-                $query->orderBy($sortField, $direction === 'desc' ? 'desc' : 'asc');
+                $this->applySort($query, ($direction === 'desc' ? '-' : '').$sortField);
             }
         }
 
@@ -1552,6 +1964,7 @@ class TableBuilder
 
         return Tab::make('table_tabs')
             ->prop('defaultValue', $default)
+            ->hideContent()
             ->items($items);
     }
 
@@ -1565,6 +1978,10 @@ class TableBuilder
             $components[] = $this->searchbar;
         } elseif (is_array($this->searchbar)) {
             $components = $this->searchbar;
+        }
+
+        if ($this->shouldAutoAddSearchbarInput() && ! $this->hasSearchbarInputNamed($components, 'q')) {
+            array_unshift($components, InputSearch::make('q')->placeholder(__('Search...')));
         }
 
         if ($this->shouldShowSidebarInputSearch() && ! $this->hasSearchbarInputNamed($components, 'q')) {
@@ -1586,6 +2003,19 @@ class TableBuilder
         }
 
         return $components;
+    }
+
+    protected function shouldAutoAddSearchbarInput(): bool
+    {
+        if (! $this->searchableConfigured) {
+            return false;
+        }
+
+        if ($this->searchbarConfigured && $this->searchbar === false) {
+            return false;
+        }
+
+        return $this->resolveSearchableColumns() !== [];
     }
 
     protected function shouldShowSidebarInputSearch(): bool
@@ -1737,24 +2167,653 @@ class TableBuilder
 
     protected function resolveSearchableColumns(): array
     {
-        if (! empty($this->searchable)) {
-            return $this->searchable;
+        if ($this->searchableConfigured) {
+            if ($this->searchableAllColumns) {
+                return $this->collectSearchableColumnsFromDefinitions();
+            }
+
+            return $this->normalizeSearchableColumns($this->searchable);
         }
 
-        $columns = [];
+        return $this->collectSearchableColumnsFromDefinitions(true);
+    }
+
+    protected function resolveSortableColumnsMap(): array
+    {
+        $map = [];
+        $defaults = $this->resolveSortableDefaults();
+        $defaultLookup = array_flip($defaults['columns']);
 
         foreach ($this->columnObjects as $column) {
-            if (! $column instanceof Column || ! $column->isSearchable()) {
+            if (! $column instanceof Column) {
+                if (! is_array($column)) {
+                    continue;
+                }
+
+                $key = '';
+                if (isset($column['key']) && is_string($column['key'])) {
+                    $key = trim($column['key']);
+                } elseif (isset($column['field']) && is_string($column['field'])) {
+                    $key = trim($column['field']);
+                }
+
+                if ($key === '') {
+                    continue;
+                }
+
+                $sortableDefinition = $column['sortable'] ?? null;
+                $sortColumns = $this->resolveSortableColumnsFromArrayDefinition($sortableDefinition, $key);
+
+                $enabled = false;
+                if (is_bool($sortableDefinition)) {
+                    $enabled = $sortableDefinition;
+                } elseif (is_string($sortableDefinition)) {
+                    $parsed = filter_var($sortableDefinition, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                    if ($parsed !== null) {
+                        $enabled = $parsed;
+                    }
+                } elseif (is_array($sortableDefinition)) {
+                    $enabled = $sortColumns !== [];
+                } elseif ($defaults['all']) {
+                    $enabled = true;
+                } elseif (isset($defaultLookup[$key])) {
+                    $enabled = true;
+                }
+
+                if (! $enabled) {
+                    $map[$key] = [
+                        'enabled' => false,
+                        'columns' => [],
+                    ];
+                    continue;
+                }
+
+                if ($sortColumns === []) {
+                    $sortColumns = [$key];
+                }
+
+                $map[$key] = [
+                    'enabled' => true,
+                    'columns' => $sortColumns,
+                ];
+
                 continue;
             }
 
-            $columns[] = $column->getKey();
+            $key = $column->getKey();
+            if ($key === '') {
+                continue;
+            }
+
+            $enabled = false;
+            if ($column->isSortableConfigured()) {
+                $enabled = $column->isSortable();
+            } elseif ($defaults['all']) {
+                $enabled = true;
+            } elseif (isset($defaultLookup[$key])) {
+                $enabled = true;
+            }
+
+            if (! $enabled) {
+                $map[$key] = [
+                    'enabled' => false,
+                    'columns' => [],
+                ];
+                continue;
+            }
+
+            $sortColumns = $column->isSortableConfigured()
+                ? $column->getSortColumns()
+                : ($column->getConcatKeys() !== [] ? $column->getConcatKeys() : [$key]);
+
+            $sortColumns = $this->normalizeSortColumns($sortColumns);
+
+            if ($sortColumns === []) {
+                $sortColumns = [$key];
+            }
+
+            $map[$key] = [
+                'enabled' => true,
+                'columns' => $sortColumns,
+            ];
+        }
+
+        return $map;
+    }
+
+    protected function resolveMultiSortableColumnsMap(array $sortableMap): array
+    {
+        $map = [];
+        $defaults = $this->resolveMultiSortableDefaults();
+        $defaultLookup = array_flip($defaults['columns']);
+
+        foreach ($sortableMap as $key => $sortableDefinition) {
+            $sortableEnabled = is_array($sortableDefinition) && (bool) ($sortableDefinition['enabled'] ?? false);
+
+            if (! $sortableEnabled) {
+                $map[$key] = ['enabled' => false];
+                continue;
+            }
+
+            $columnDefinition = $this->findColumnDefinitionByKey($key);
+            $enabled = false;
+
+            if ($columnDefinition instanceof Column) {
+                if ($columnDefinition->isMultiSortableConfigured()) {
+                    $enabled = $columnDefinition->isMultiSortable();
+                } elseif ($defaults['all']) {
+                    $enabled = true;
+                } elseif (isset($defaultLookup[$key])) {
+                    $enabled = true;
+                }
+            } elseif (is_array($columnDefinition)) {
+                $raw = $columnDefinition['multiSortable'] ?? $columnDefinition['multi_sortable'] ?? null;
+
+                if (is_bool($raw)) {
+                    $enabled = $raw;
+                } elseif (is_string($raw)) {
+                    $parsed = filter_var($raw, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                    if ($parsed !== null) {
+                        $enabled = $parsed;
+                    }
+                } elseif ($defaults['all']) {
+                    $enabled = true;
+                } elseif (isset($defaultLookup[$key])) {
+                    $enabled = true;
+                }
+            } else {
+                if ($defaults['all']) {
+                    $enabled = true;
+                } elseif (isset($defaultLookup[$key])) {
+                    $enabled = true;
+                }
+            }
+
+            $map[$key] = ['enabled' => $enabled];
+        }
+
+        return $map;
+    }
+
+    protected function resolveMultiSortableDefaults(): array
+    {
+        if ($this->multiSortableConfigured) {
+            if ($this->multiSortableAllColumns) {
+                return [
+                    'all' => true,
+                    'columns' => [],
+                ];
+            }
+
+            return [
+                'all' => false,
+                'columns' => $this->normalizeSortableColumns($this->multiSortableColumns),
+            ];
+        }
+
+        $configured = config('upsoftware.table.multi_sortable', false);
+
+        if (is_bool($configured)) {
+            return [
+                'all' => $configured,
+                'columns' => [],
+            ];
+        }
+
+        if (is_string($configured)) {
+            $parsed = filter_var($configured, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+            if ($parsed !== null) {
+                return [
+                    'all' => $parsed,
+                    'columns' => [],
+                ];
+            }
+        }
+
+        if (is_array($configured)) {
+            return [
+                'all' => false,
+                'columns' => $this->normalizeSortableColumns($configured),
+            ];
+        }
+
+        return [
+            'all' => false,
+            'columns' => [],
+        ];
+    }
+
+    protected function findColumnDefinitionByKey(string $key): mixed
+    {
+        foreach ($this->columnObjects as $column) {
+            if ($column instanceof Column) {
+                if ($column->getKey() === $key) {
+                    return $column;
+                }
+
+                continue;
+            }
+
+            if (! is_array($column)) {
+                continue;
+            }
+
+            $columnKey = '';
+            if (isset($column['key']) && is_string($column['key'])) {
+                $columnKey = trim($column['key']);
+            } elseif (isset($column['field']) && is_string($column['field'])) {
+                $columnKey = trim($column['field']);
+            }
+
+            if ($columnKey === $key) {
+                return $column;
+            }
+        }
+
+        return null;
+    }
+
+    protected function parseSortDirectives(string $sort): array
+    {
+        $tokens = array_values(array_filter(
+            array_map(static fn (string $token): string => trim($token), explode(',', $sort)),
+            static fn (string $token): bool => $token !== ''
+        ));
+
+        if ($tokens === []) {
+            return [];
+        }
+
+        $directives = [];
+        $seen = [];
+
+        foreach ($tokens as $token) {
+            $direction = 'asc';
+            $field = $token;
+
+            if (str_starts_with($field, '-')) {
+                $direction = 'desc';
+                $field = substr($field, 1);
+            }
+
+            $field = trim($field);
+            if ($field === '' || isset($seen[$field])) {
+                continue;
+            }
+
+            $seen[$field] = true;
+            $directives[] = [
+                'field' => $field,
+                'direction' => $direction,
+            ];
+        }
+
+        return $directives;
+    }
+
+    protected function resolveSortableDefaults(): array
+    {
+        if ($this->sortableConfigured) {
+            if ($this->sortableAllColumns) {
+                return [
+                    'all' => true,
+                    'columns' => [],
+                ];
+            }
+
+            return [
+                'all' => false,
+                'columns' => $this->normalizeSortableColumns($this->sortableColumns),
+            ];
+        }
+
+        $configured = config('upsoftware.table.sortable', false);
+
+        if (is_bool($configured)) {
+            return [
+                'all' => $configured,
+                'columns' => [],
+            ];
+        }
+
+        if (is_string($configured)) {
+            $parsed = filter_var($configured, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+            if ($parsed !== null) {
+                return [
+                    'all' => $parsed,
+                    'columns' => [],
+                ];
+            }
+        }
+
+        if (is_array($configured)) {
+            return [
+                'all' => false,
+                'columns' => $this->normalizeSortableColumns($configured),
+            ];
+        }
+
+        return [
+            'all' => false,
+            'columns' => [],
+        ];
+    }
+
+    protected function normalizeSortableColumns(array $definitions): array
+    {
+        $columns = [];
+
+        foreach ($definitions as $definition) {
+            if (is_array($definition)) {
+                foreach ($definition as $nested) {
+                    if (! is_string($nested)) {
+                        continue;
+                    }
+
+                    $parts = array_map('trim', explode(',', $nested));
+                    foreach ($parts as $part) {
+                        if ($part !== '') {
+                            $columns[] = $part;
+                        }
+                    }
+                }
+
+                continue;
+            }
+
+            if (! is_string($definition)) {
+                continue;
+            }
+
+            $parts = array_map('trim', explode(',', $definition));
+            foreach ($parts as $part) {
+                if ($part !== '') {
+                    $columns[] = $part;
+                }
+            }
         }
 
         return array_values(array_filter(
             array_unique($columns),
-            static fn ($column) => is_string($column) && trim($column) !== ''
+            static fn (string $column): bool => $column !== ''
         ));
+    }
+
+    protected function normalizeSortColumns(array $columns): array
+    {
+        return array_values(array_filter(
+            array_map(static fn ($column): string => is_string($column) ? trim($column) : '', $columns),
+            static fn (string $column): bool => $column !== ''
+        ));
+    }
+
+    protected function resolveSortableColumnsFromArrayDefinition(mixed $definition, string $key): array
+    {
+        if (! is_array($definition)) {
+            return [];
+        }
+
+        $normalized = $this->normalizeSortableColumns($definition);
+
+        if ($normalized !== []) {
+            return $normalized;
+        }
+
+        return [$key];
+    }
+
+    protected function normalizeSearchableColumns(array $definitions): array
+    {
+        $columns = [];
+
+        foreach ($definitions as $definition) {
+            if (is_array($definition)) {
+                foreach ($definition as $nested) {
+                    if (! is_string($nested)) {
+                        continue;
+                    }
+
+                    $value = trim($nested);
+                    if ($value !== '') {
+                        $columns[] = $value;
+                    }
+                }
+
+                continue;
+            }
+
+            if (! is_string($definition)) {
+                continue;
+            }
+
+            $value = trim($definition);
+            if ($value !== '') {
+                $columns[] = $value;
+            }
+        }
+
+        return array_values(array_filter(
+            array_unique($columns),
+            static fn (string $column): bool => $column !== ''
+        ));
+    }
+
+    protected function collectSearchableColumnsFromDefinitions(bool $requireSearchableFlag = false): array
+    {
+        $columns = [];
+
+        foreach ($this->columnObjects as $column) {
+            if ($column instanceof Column) {
+                if ($requireSearchableFlag && ! $column->isSearchable()) {
+                    continue;
+                }
+
+                if (! $column->isVisible() || ! $column->isSelected()) {
+                    continue;
+                }
+
+                $paths = $column->getConcatKeys();
+                if ($paths === []) {
+                    $paths = [$column->getKey()];
+                }
+
+                foreach ($paths as $path) {
+                    $normalized = trim((string) $path);
+                    if ($normalized !== '') {
+                        $columns[] = $normalized;
+                    }
+                }
+
+                continue;
+            }
+
+            if (! is_array($column)) {
+                continue;
+            }
+
+            if ($requireSearchableFlag && ! $this->toBoolean($column['searchable'] ?? false, false)) {
+                continue;
+            }
+
+            if (! $this->toBoolean($column['visible'] ?? true, true) || ! $this->toBoolean($column['selected'] ?? true, true)) {
+                continue;
+            }
+
+            $key = '';
+            if (isset($column['key']) && is_string($column['key'])) {
+                $key = trim($column['key']);
+            } elseif (isset($column['field']) && is_string($column['field'])) {
+                $key = trim($column['field']);
+            }
+
+            if ($key !== '') {
+                $columns[] = $key;
+            }
+        }
+
+        return array_values(array_filter(
+            array_unique($columns),
+            static fn (string $column): bool => $column !== ''
+        ));
+    }
+
+    protected function resolveRelatedSearchableColumns(mixed $rootQuery, string $relationPath): array
+    {
+        if (! $rootQuery instanceof EloquentBuilder) {
+            return [];
+        }
+
+        $rootModel = $rootQuery->getModel();
+        if (! $rootModel instanceof Model) {
+            return [];
+        }
+
+        $relatedModel = $this->resolveRelatedModelFromRelationPath($rootModel, $relationPath);
+        if (! $relatedModel instanceof Model) {
+            return [];
+        }
+
+        return $this->resolveModelSearchableColumns($relatedModel);
+    }
+
+    protected function resolveRelatedModelFromRelationPath(Model $rootModel, string $relationPath): ?Model
+    {
+        $segments = array_values(array_filter(
+            explode('.', $relationPath),
+            static fn (string $segment): bool => trim($segment) !== ''
+        ));
+
+        if ($segments === []) {
+            return null;
+        }
+
+        $currentModel = $rootModel;
+
+        foreach ($segments as $segment) {
+            if (! method_exists($currentModel, $segment)) {
+                return null;
+            }
+
+            try {
+                $relation = $currentModel->{$segment}();
+            } catch (\Throwable) {
+                return null;
+            }
+
+            if (! $relation instanceof Relation) {
+                return null;
+            }
+
+            $currentModel = $relation->getRelated();
+        }
+
+        return $currentModel;
+    }
+
+    protected function resolveModelSearchableColumns(Model $model): array
+    {
+        $connection = (string) $model->getConnectionName();
+        $table = (string) $model->getTable();
+        $cacheKey = strtolower($connection.'|'.$table);
+
+        if (array_key_exists($cacheKey, $this->schemaColumnsCache)) {
+            return $this->schemaColumnsCache[$cacheKey];
+        }
+
+        try {
+            $columns = Schema::connection($connection !== '' ? $connection : null)->getColumnListing($table);
+        } catch (\Throwable) {
+            $columns = [];
+        }
+
+        $normalized = array_values(array_filter(
+            array_map(static fn ($column): string => trim((string) $column), $columns),
+            static fn (string $column): bool => $column !== ''
+        ));
+
+        return $this->schemaColumnsCache[$cacheKey] = $normalized;
+    }
+
+    protected function resolveAutoWithRelations(EloquentBuilder $query): array
+    {
+        $model = $query->getModel();
+
+        if (! $model instanceof Model) {
+            return [];
+        }
+
+        $relations = [];
+
+        foreach ($this->columnObjects as $column) {
+            if (! $column instanceof Column) {
+                continue;
+            }
+
+            $paths = array_values(array_unique(array_filter([
+                trim((string) $column->getKey()),
+                ...array_map(
+                    static fn (mixed $path): string => trim((string) $path),
+                    $column->getConcatKeys()
+                ),
+            ], static fn (string $path): bool => $path !== '')));
+
+            foreach ($paths as $path) {
+                if (! str_contains($path, '.')) {
+                    continue;
+                }
+
+                $resolved = $this->resolveRelationPathFromColumnKey($model, $path);
+
+                if ($resolved === null) {
+                    continue;
+                }
+
+                $relations[] = $resolved;
+            }
+        }
+
+        return array_values(array_unique($relations));
+    }
+
+    protected function resolveRelationPathFromColumnKey(Model $rootModel, string $key): ?string
+    {
+        $segments = array_values(array_filter(explode('.', $key), static fn ($segment) => trim((string) $segment) !== ''));
+
+        if (count($segments) < 2) {
+            return null;
+        }
+
+        // Last segment is treated as field name. All previous segments must be valid Eloquent relations.
+        $relationSegments = array_slice($segments, 0, -1);
+        $currentModel = $rootModel;
+        $resolvedPath = [];
+
+        foreach ($relationSegments as $segment) {
+            if (! method_exists($currentModel, $segment)) {
+                return null;
+            }
+
+            try {
+                $relation = $currentModel->{$segment}();
+            } catch (\Throwable) {
+                return null;
+            }
+
+            if (! $relation instanceof Relation) {
+                return null;
+            }
+
+            $resolvedPath[] = $segment;
+            $currentModel = $relation->getRelated();
+        }
+
+        if ($resolvedPath === []) {
+            return null;
+        }
+
+        return implode('.', $resolvedPath);
     }
 
     protected function resolveFilters(): array
@@ -1956,14 +3015,52 @@ class TableBuilder
 
     protected function serializeColumns(): array
     {
-        return array_map(function ($column) {
+        $sortableMap = $this->resolveSortableColumnsMap();
+        $multiSortableMap = $this->resolveMultiSortableColumnsMap($sortableMap);
+
+        return array_map(function ($column) use ($sortableMap, $multiSortableMap) {
 
             if ($column instanceof Column) {
-                return $column->toArray();
+                $serialized = $column->toArray();
+                $key = trim((string) ($serialized['key'] ?? ''));
+                $sortable = $key !== '' ? ($sortableMap[$key] ?? null) : null;
+
+                if (is_array($sortable)) {
+                    $serialized['sortable'] = (bool) ($sortable['enabled'] ?? false);
+                    $serialized['sortColumns'] = is_array($sortable['columns'] ?? null) ? $sortable['columns'] : [];
+                }
+
+                $multiSortable = $key !== '' ? ($multiSortableMap[$key] ?? null) : null;
+                if (is_array($multiSortable)) {
+                    $serialized['multiSortable'] = (bool) ($multiSortable['enabled'] ?? false);
+                }
+
+                return $serialized;
             }
 
             if (is_array($column)) {
-                return $column;
+                $serialized = $column;
+                $key = '';
+
+                if (isset($serialized['key']) && is_string($serialized['key'])) {
+                    $key = trim($serialized['key']);
+                } elseif (isset($serialized['field']) && is_string($serialized['field'])) {
+                    $key = trim($serialized['field']);
+                }
+
+                $sortable = $key !== '' ? ($sortableMap[$key] ?? null) : null;
+
+                if (is_array($sortable)) {
+                    $serialized['sortable'] = (bool) ($sortable['enabled'] ?? false);
+                    $serialized['sortColumns'] = is_array($sortable['columns'] ?? null) ? $sortable['columns'] : [];
+                }
+
+                $multiSortable = $key !== '' ? ($multiSortableMap[$key] ?? null) : null;
+                if (is_array($multiSortable)) {
+                    $serialized['multiSortable'] = (bool) ($multiSortable['enabled'] ?? false);
+                }
+
+                return $serialized;
             }
 
             throw new \InvalidArgumentException('Invalid column definition.');
@@ -1972,6 +3069,10 @@ class TableBuilder
 
     protected function resolveBulkMode(): ?string
     {
+        if (! $this->resolveSelectable()) {
+            return null;
+        }
+
         if (! $this->bulkEnabled) {
             return null;
         }
@@ -2067,7 +3168,7 @@ class TableBuilder
 
     protected function shouldRenderRowMultiSelectColumn(?string $bulkMode): bool
     {
-        return $this->selected && $bulkMode === 'multiple';
+        return $this->resolveSelectable() && $this->selected && $bulkMode === 'multiple';
     }
 
     protected function buildNumberingHeaderCell(): TableHead
@@ -2152,6 +3253,8 @@ class TableBuilder
     protected function buildHeader(bool $hasActions, ?string $bulkMode, ?string $numberingMode): TableHeader
     {
         $heads = [];
+        $sortableMap = $this->resolveSortableColumnsMap();
+        $multiSortableMap = $this->resolveMultiSortableColumnsMap($sortableMap);
         $globalHeaderAppearance = $this->headerAppearanceProps['appearance'] ?? [];
         $globalHeaderAppearance = is_array($globalHeaderAppearance) ? $globalHeaderAppearance : [];
 
@@ -2168,7 +3271,39 @@ class TableBuilder
         }
 
         foreach ($this->columnObjects as $column) {
-            $headProps = $column->toHeaderProps();
+            if ($column instanceof Column) {
+                $headProps = $column->toHeaderProps();
+            } elseif (is_array($column)) {
+                $key = '';
+                if (isset($column['key']) && is_string($column['key'])) {
+                    $key = trim($column['key']);
+                } elseif (isset($column['field']) && is_string($column['field'])) {
+                    $key = trim($column['field']);
+                }
+
+                $headProps = $column;
+                $headProps['key'] = $key;
+                $headProps['label'] = $column['label'] ?? ($key !== '' ? ucfirst($key) : '');
+            } else {
+                continue;
+            }
+
+            $columnKey = trim((string) ($headProps['key'] ?? ''));
+            if ($columnKey !== '') {
+                $headProps['sortKey'] = $columnKey;
+            }
+
+            $sortable = $columnKey !== '' ? ($sortableMap[$columnKey] ?? null) : null;
+
+            if (is_array($sortable)) {
+                $headProps['sortable'] = (bool) ($sortable['enabled'] ?? false);
+                $headProps['sortColumns'] = is_array($sortable['columns'] ?? null) ? $sortable['columns'] : [];
+            }
+
+            $multiSortable = $columnKey !== '' ? ($multiSortableMap[$columnKey] ?? null) : null;
+            if (is_array($multiSortable)) {
+                $headProps['multiSortable'] = (bool) ($multiSortable['enabled'] ?? false);
+            }
 
             if (! empty($globalHeaderAppearance)) {
                 $columnHeaderAppearance = $headProps['appearance'] ?? [];
@@ -2184,17 +3319,23 @@ class TableBuilder
         }
 
         if ($hasActions) {
-            $heads[] = TableHead::make()->children([
-                Dialog::make()
-                    ->title('Custom columns')
-                    ->cancel('Cancel')
-                    ->ok('Save')
-                    ->slot('trigger', Button::make()
-                        ->variant('ghost')
-                        ->size('icon-sm')
-                        ->icon(Icon::make('lucide:plus')
-                    )),
-            ]);
+            $actionsHead = TableHead::make();
+
+            if ($this->resolveCustomColumnsEnabled()) {
+                $actionsHead->children([
+                    Dialog::make()
+                        ->title('Custom columns')
+                        ->cancel('Cancel')
+                        ->ok('Save')
+                        ->slot('trigger', Button::make()
+                            ->variant('ghost')
+                            ->size('icon-sm')
+                            ->icon(Icon::make('lucide:plus')
+                        )),
+                ]);
+            }
+
+            $heads[] = $actionsHead;
         }
 
         $rows = [
@@ -3161,6 +4302,7 @@ class TableBuilder
         $this->applyConfiguredColumnAttributes();
 
         $actionDisplay = $this->actionDisplay ?? config('svarium.table.action_display', 'inline');
+        $selectable = $this->resolveSelectable();
         $bulkMode = $this->resolveBulkMode();
         $numberingMode = $this->resolveNumberingMode();
         $resolvedActions = $this->resolveActions();
@@ -3209,14 +4351,16 @@ class TableBuilder
             ->prop('description', $this->description)
             ->prop('headerActions', $this->headerActions)
             ->prop('filters', $resolvedFilters)
-            ->prop('bulk', $this->bulkEnabled)
+            ->prop('bulk', $selectable ? $this->bulkEnabled : false)
             ->prop('bulkMode', $bulkMode)
             ->prop('numbering', $this->numberingEnabled)
             ->prop('numberingMode', $numberingMode)
             ->prop('sticky', $this->stickySections)
-            ->prop('columnSelection', $this->selected)
+            ->prop('columnSelection', $selectable ? $this->selected : false)
             ->prop('condensed', $this->resolveCondensed())
+            ->prop('bordered', $this->resolveBordered())
             ->prop('exported', $this->exported)
+            ->prop('exportUrl', $this->exportUrl)
             ->prop('imported', $this->imported)
             ->prop('rowSelectionColumn', $this->shouldRenderRowMultiSelectColumn($bulkMode))
             ->prop('hasActions', $hasActions)
@@ -3423,6 +4567,33 @@ class TableBuilder
         return $this->toBoolean($configured, false);
     }
 
+    protected function resolveBordered(): bool
+    {
+        if ($this->bordered !== null) {
+            return $this->bordered;
+        }
+
+        return $this->toBoolean(config('upsoftware.table.bordered'), false);
+    }
+
+    protected function resolveSelectable(): bool
+    {
+        if ($this->selectable !== null) {
+            return $this->selectable;
+        }
+
+        return $this->toBoolean(config('upsoftware.table.selectable'), true);
+    }
+
+    protected function resolveCustomColumnsEnabled(): bool
+    {
+        if ($this->customColumns !== null) {
+            return $this->customColumns;
+        }
+
+        return $this->toBoolean(config('upsoftware.table.custom_columns'), true);
+    }
+
     protected function applyConfiguredColumnAttributes(): void
     {
         if ($this->columnAttributes === []) {
@@ -3485,7 +4656,23 @@ class TableBuilder
                     break;
 
                 case 'sortable':
-                    $column->sortable((bool) $value);
+                    if (is_bool($value)) {
+                        $column->sortable($value);
+                    } elseif (is_string($value) || is_array($value)) {
+                        $column->sortable($value);
+                    }
+                    break;
+
+                case 'multi_sortable':
+                case 'multiSortable':
+                    if (is_bool($value)) {
+                        $column->multiSortable($value);
+                    } elseif (is_string($value)) {
+                        $parsed = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                        if ($parsed !== null) {
+                            $column->multiSortable($parsed);
+                        }
+                    }
                     break;
 
                 case 'searchable':

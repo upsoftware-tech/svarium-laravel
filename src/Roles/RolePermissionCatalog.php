@@ -19,6 +19,7 @@ class RolePermissionCatalog
         'duplicate' => 'Duplicate',
         'delete' => 'Delete',
         'import' => 'Import',
+        'export' => 'Export',
     ];
 
     public function ensurePermissionsForGuard(string $guardName): void
@@ -143,6 +144,15 @@ class RolePermissionCatalog
             $resource = app($resourceClass);
             $groupLabel = $this->resourceLabel($resourceClass, $resource);
             $groupKey = $this->resourceKey($resourceClass);
+            $wildcardName = 'resource.'.$groupKey.'.*';
+
+            $definitions[] = [
+                'name' => $wildcardName,
+                'label' => __('Full access'),
+                'description' => $groupLabel,
+                'group_key' => $groupKey,
+                'group_label' => $groupLabel,
+            ];
 
             foreach (self::RESOURCE_ACTIONS as $action => $label) {
                 $definitions[] = [

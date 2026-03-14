@@ -17,6 +17,27 @@ return [
             'middleware' => ['auth:sanctum'],
             'custom_handler' => null,
         ],
+        'docs' => [
+            // Enable Redoc/OpenAPI endpoints.
+            'enabled' => env('SVARIUM_API_DOCS_ENABLED', true),
+            // URL path for ReDoc page.
+            'path' => env('SVARIUM_API_DOCS_PATH', 'api/docs'),
+            // URL path for OpenAPI JSON spec.
+            'spec_path' => env('SVARIUM_API_DOCS_SPEC_PATH', 'api/openapi.json'),
+            // If true, docs/spec are visible without login.
+            'public' => true,
+            // Extra middleware for docs/spec routes.
+            'middleware' => [],
+            // Auto regenerate spec on docs/spec request.
+            'auto_generate' => true,
+            // Where generated spec is saved (absolute or base_path-relative).
+            'storage_path' => 'storage/app/svarium/openapi.json',
+            // Optional custom title/version shown in ReDoc.
+            'title' => null,
+            'version' => null,
+            // Optional explicit server URL in OpenAPI.
+            'server_url' => null,
+        ],
     ],
     'table' => [
         'action_display' => 'inline',
@@ -37,7 +58,12 @@ return [
             'lastButtonLabel' => null,
         ],
         'condensed' => false,
+        'bordered' => false,
         'searchbar' => false,
+        'selectable' => true,
+        'sortable' => false,
+        'multi_sortable' => false,
+        'custom_columns' => true,
         'exported' => true,
         'imported' => true,
     ],
@@ -370,6 +396,12 @@ return [
         'permission' => \Spatie\Permission\Models\Permission::class,
         'role' => \Upsoftware\Svarium\Models\Role::class,
         'setting' => \Upsoftware\Svarium\Models\Setting::class,
+        'translation_keyset' => \Upsoftware\Svarium\Models\TranslationKeyset::class,
+        'translation_key' => \Upsoftware\Svarium\Models\TranslationKey::class,
+        'translation_value' => \Upsoftware\Svarium\Models\TranslationValue::class,
+        'translation_revision' => \Upsoftware\Svarium\Models\TranslationRevision::class,
+        'translation_order' => \Upsoftware\Svarium\Models\TranslationOrder::class,
+        'translation_order_item' => \Upsoftware\Svarium\Models\TranslationOrderItem::class,
         'subscription_module' => \Upsoftware\Svarium\Models\SubscriptionModule::class,
         'subscription_limit_tier' => \Upsoftware\Svarium\Models\SubscriptionLimitTier::class,
         'system_mailbox' => \Upsoftware\Svarium\Models\SystemMailbox::class,

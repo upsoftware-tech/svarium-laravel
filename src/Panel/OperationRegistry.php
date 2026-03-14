@@ -17,6 +17,8 @@ use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 class OperationRegistry
 {
+    protected const API_PANEL = '__api';
+
     protected array $routes = [];
 
     public function register(string $panel, array $methods, string $uri, string $operation, array $meta = []): void
@@ -155,6 +157,8 @@ class OperationRegistry
 
                 $this->registerOperationRouteAliases($class, $panel, $uri, $methods);
             }
+
+            $this->registerApiOperation($class, $uri, $methods);
 
             $menu = method_exists($class, 'menu')
                 ? (array) $class::menu()
@@ -379,6 +383,12 @@ class OperationRegistry
 
     protected function panelPrefixedUri(string $panelName, string $uri): string
     {
+        if ($panelName === self::API_PANEL) {
+            $trimmedUri = trim($uri, '/');
+
+            return $trimmedUri === '' ? '/' : $trimmedUri;
+        }
+
         $panel = app(PanelRegistry::class)->get($panelName);
         $prefix = trim((string) ($panel?->prefix ?? ''), '/');
         $trimmedUri = trim($uri, '/');
@@ -400,6 +410,117 @@ class OperationRegistry
             ResolveDomainContext::class,
             HandleInertiaRequests::class,
         ];
+    }
+
+    protected function registerApiOperation(string $operationClass, string $uri, array $methods): void
+    {
+        if (! (bool) config('upsoftware.api.enabled', true)) {
+            return;
+        }
+
+        $api = method_exists($operationClass, 'api')
+            ? $operationClass::api()
+            : false;
+
+        if ($api === false || $api === null) {
+            return;
+        }
+
+        $apiConfig = is_array($api) ? $api : [];
+        if (array_key_exists('enabled', $apiConfig) && ! (bool) $apiConfig['enabled']) {
+            return;
+        }
+
+        $apiPrefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
+        $uriSource = trim((string) ($apiConfig['uri'] ?? $uri), '/');
+        $prependPrefix = array_key_exists('prefix', $apiConfig) ? (bool) $apiConfig['prefix'] : true;
+
+        if ($prependPrefix && $apiPrefix !== '') {
+            if ($uriSource === '') {
+                $apiUri = $apiPrefix;
+            } elseif ($uriSource === $apiPrefix || str_starts_with($uriSource, $apiPrefix.'/')) {
+                $apiUri = $uriSource;
+            } else {
+                $apiUri = trim($apiPrefix.'/'.$uriSource, '/');
+            }
+        } else {
+            $apiUri = $uriSource;
+        }
+
+        $apiMethods = array_key_exists('methods', $apiConfig) && is_array($apiConfig['methods'])
+            ? $apiConfig['methods']
+            : $methods;
+        $apiMethods = $this->normalizeHttpMethods($apiMethods);
+
+        $apiMiddleware = array_values(array_filter(array_map(
+            static fn (mixed $item): string => trim((string) $item),
+            (array) ($apiConfig['middleware'] ?? config('upsoftware.api.auth.middleware', []))
+        ), static fn (string $value): bool => $value !== ''));
+
+        $this->register(
+            self::API_PANEL,
+            $apiMethods,
+            $apiUri,
+            $operationClass,
+            [
+                'api' => true,
+                'uri' => $apiUri,
+                'middleware' => $apiMiddleware,
+            ]
+        );
+
+        $this->registerApiRouteAliases($operationClass, $apiUri, $apiMethods, $apiMiddleware);
+    }
+
+    /**
+     * @param array<int, string> $methods
+     * @param array<int, string> $middleware
+     */
+    protected function registerApiRouteAliases(
+        string $operationClass,
+        string $uri,
+        array $methods,
+        array $middleware
+    ): void {
+        $module = $this->resolveModuleKeyFromOperationClass($operationClass);
+        if ($module === null) {
+            return;
+        }
+
+        $suffix = $this->resolveOperationRouteSuffix($operationClass, $uri, $module);
+        if ($suffix === null) {
+            return;
+        }
+
+        $baseName = "module:api.{$module}";
+        if ($suffix !== 'index') {
+            $baseName .= ".{$suffix}";
+        }
+
+        $routeNames = [$baseName];
+        foreach ($methods as $method) {
+            $routeNames[] = $baseName.'.'.strtolower($method);
+
+            $actionAlias = $this->httpMethodActionAlias($method);
+            if ($actionAlias !== null) {
+                $routeNames[] = $baseName.'.'.$actionAlias;
+            }
+        }
+
+        $routeUri = $this->panelPrefixedUri(self::API_PANEL, $uri);
+        $routeMiddleware = $middleware !== []
+            ? $middleware
+            : (array) config('upsoftware.middleware.api', []);
+
+        foreach (array_values(array_unique($routeNames)) as $routeName) {
+            if (Route::has($routeName)) {
+                continue;
+            }
+
+            Route::middleware($routeMiddleware)
+                ->match($methods, $routeUri, SvariumHttpKernel::class)
+                ->name($routeName);
+        }
     }
 
     protected function resolvePanelsForOperation(string $class): array

@@ -74,6 +74,40 @@ abstract class Operation
     }
 
     /**
+     * Enable automatic API registration for this operation.
+     *
+     * Supported values:
+     * - false (default): no API route.
+     * - true: API route = "{api.prefix}/{uri()}", methods = methods().
+     * - array:
+     *   [
+     *     'enabled' => true,
+     *     'uri' => 'pages',
+     *     'methods' => ['GET'],
+     *     'prefix' => true, // prepend upsoftware.api.prefix
+     *     'middleware' => ['auth:sanctum'], // optional route middleware override
+     *   ]
+     */
+    public static function api(): bool|array
+    {
+        return false;
+    }
+
+    /**
+     * Optional dedicated API handler.
+     *
+     * Return one of:
+     * - OperationResult (recommended: JsonResult)
+     * - array (auto-converted to JSON 200)
+     * - Symfony Response
+     * - null (fallback to default handle())
+     */
+    public function apiRun(PanelContext $context, ...$args): mixed
+    {
+        return null;
+    }
+
+    /**
      * Optional operation route suffix used for named route aliases.
      *
      * Example:
@@ -292,6 +326,7 @@ abstract class Operation
         $this->applyTableAccess($builder, $context);
 
         $query = $builder->getQuery();
+        $builder->applyAutoWithFromColumns($query);
 
         /*
         |--------------------------------------------------------------------------

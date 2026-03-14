@@ -11,6 +11,7 @@ use Upsoftware\Svarium\Panel\Resource\Operations\ResourceCreateOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDeleteOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDuplicateOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceEditOperation;
+use Upsoftware\Svarium\Panel\Resource\Operations\ResourceExportOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceImportOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourceListOperation;
 use Upsoftware\Svarium\Panel\Resource\Operations\ResourcePreviewOperation;
@@ -44,6 +45,10 @@ class ResourceRegistry
         ]);
 
         $registry->register($panel, ['GET', 'POST'], "{$slug}/import", ResourceImportOperation::class, [
+            'resource' => $resourceClass,
+        ]);
+
+        $registry->register($panel, ['GET', 'POST'], "{$slug}/export", ResourceExportOperation::class, [
             'resource' => $resourceClass,
         ]);
 
@@ -136,6 +141,7 @@ class ResourceRegistry
             "module:{$module}.create" => "{$base}/create",
             "module:{$module}.create.tab" => "{$base}/create/{tab}",
             "module:{$module}.import" => "{$base}/import",
+            "module:{$module}.export" => "{$base}/export",
             "module:{$module}.edit" => "{$base}/{id}/edit",
             "module:{$module}.edit.tab" => "{$base}/{id}/edit/{tab}",
             "module:{$module}.preview" => "{$base}/{id}/preview",

@@ -58,11 +58,60 @@ return [
 - `auth.middleware` – lista middleware dla API.
 - `auth.custom_handler` – opcjonalny własny handler.
 
+### `api.docs` (ReDoc + OpenAPI)
+
+- `api.docs.enabled` – włącza endpointy dokumentacji.
+- `api.docs.path` – URL strony ReDoc (domyślnie `api/docs`).
+- `api.docs.spec_path` – URL JSON specyfikacji (domyślnie `api/openapi.json`).
+- `api.docs.public` – czy endpointy docs/spec są publiczne.
+- `api.docs.middleware` – dodatkowe middleware dla docs/spec.
+- `api.docs.auto_generate` – automatyczna regeneracja spec przy wejściu na docs/spec.
+- `api.docs.storage_path` – ścieżka pliku spec (abs lub rel do `base_path`).
+- `api.docs.title` – opcjonalny tytuł dokumentacji.
+- `api.docs.version` – opcjonalna wersja API w OpenAPI.
+- `api.docs.server_url` – opcjonalny `servers[0].url` w spec.
+
+Przykład:
+
+```php
+'api' => [
+    'enabled' => true,
+    'prefix' => 'api/v1',
+    'auth' => [
+        'driver' => 'sanctum',
+        'guard' => 'sanctum',
+        'middleware' => ['auth:sanctum'],
+        'custom_handler' => null,
+    ],
+    'docs' => [
+        'enabled' => true,
+        'path' => 'api/docs',
+        'spec_path' => 'api/openapi.json',
+        'public' => true,
+        'middleware' => [],
+        'auto_generate' => true,
+        'storage_path' => 'storage/app/svarium/openapi.json',
+        'title' => null,
+        'version' => null,
+        'server_url' => null,
+    ],
+],
+```
+
 ## `table`
 
 - `action_display` – domyślny tryb akcji (`inline` / `dropdown`).
 - `condensed` – domyślna kondensacja tabel (`true`/`false`).
 - `searchbar` – automatyczne dodawanie `InputSearch::make('q')`.
+- `sortable` – domyślne sortowanie kolumn:
+  - `false` – domyślnie brak sortowania,
+  - `true` – wszystkie kolumny domyślnie sortowalne,
+  - `['name', 'created_at']` – sortowalne tylko wskazane kolumny.
+- `multi_sortable` – domyślne multi-sortowanie:
+  - `false` – brak multi-sortowania,
+  - `true` – każda sortowalna kolumna może być dodana jako kolejna (`CTRL/CMD + klik`),
+  - `['name', 'created_at']` – multi-sort tylko dla wskazanych kolumn.
+- `custom_columns` – globalna widoczność przycisku/dialogu „Custom columns”.
 - `exported` – domyślna dostępność eksportu:
   - `true` - eksport włączony (wszystkie formaty),
   - `false` - eksport wyłączony,
@@ -91,6 +140,9 @@ Przykład:
     'action_display' => 'inline',
     'condensed' => false,
     'searchbar' => true,
+    'sortable' => false,
+    'multi_sortable' => false,
+    'custom_columns' => true,
     'exported' => true,
     'pagination' => [
         'enabled' => true,

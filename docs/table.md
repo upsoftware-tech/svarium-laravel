@@ -63,6 +63,9 @@ Sekcja:
     ],
     'condensed' => false,
     'searchbar' => false,
+    'sortable' => false,
+    'multi_sortable' => false,
+    'custom_columns' => true,
     'exported' => true,
     'imported' => true,
 ],
@@ -74,6 +77,15 @@ Znaczenie:
 - `pagination`: pełna konfiguracja paginacji i etykiet.
 - `condensed`: domyślna kondensacja tabel (`false` = standardowe odstępy).
 - `searchbar`: automatyczne dodanie `InputSearch::make('q')` do każdej tabeli.
+- `sortable`: domyślne sortowanie:
+  - `false` - brak automatycznego sortowania kolumn,
+  - `true` - wszystkie kolumny są domyślnie sortowalne,
+  - `['name', 'created_at']` - tylko wskazane kolumny są domyślnie sortowalne.
+- `multi_sortable`: domyślne multi-sortowanie:
+  - `false` - dodatkowe kolumny sortowania są wyłączone,
+  - `true` - każda sortowalna kolumna może być dodana jako kolejna (`CTRL/CMD + klik`),
+  - `['name', 'created_at']` - tylko wskazane kolumny mogą być dodawane jako kolejne.
+- `custom_columns`: pokazuje/ukrywa globalnie przycisk i dialog „Custom columns”.
 - `exported`: domyślna widoczność przycisku eksportu.
 - `imported`: domyślna widoczność przycisku importu.
 
@@ -118,6 +130,18 @@ Czyli oba URL działają:
 - `->columnAttributes(array $attributes)` / `->columnsAttributes(...)` / `->attrs(...)`
 - `->filterColumns(callable $callback)`
 - `->searchable(array $columns)`
+- `->sortable()`  
+  Włącza sortowanie dla wszystkich kolumn tabeli.
+- `->sortable(false)`  
+  Wyłącza sortowanie globalnie dla tej tabeli.
+- `->sortable('name')` / `->sortable(['name', 'created_at'])`  
+  Włącza sortowanie tylko dla wskazanych kolumn.
+- `->multiSortable()`  
+  Włącza multi-sort dla wszystkich sortowalnych kolumn tabeli.
+- `->multiSortable(false)`  
+  Wyłącza multi-sort globalnie dla tej tabeli.
+- `->multiSortable('name')` / `->multiSortable(['name', 'created_at'])`  
+  Włącza multi-sort tylko dla wskazanych kolumn.
 - `->searchbar(Component|array|bool $searchbar)`
 - `->showInputSearchInSidebar(bool $state = true)`
 - `->pokazCzyMaBycInputSearchWSidebarze(bool $state = true)` (alias)
@@ -147,6 +171,8 @@ Czyli oba URL działają:
 
 - `->selected(bool $state = true)`  
   Włącza/wyłącza funkcje zaznaczania kolumn/obszarów.
+- `->customColumns(bool $state = true)`  
+  Pokazuje/ukrywa przycisk i dialog „Custom columns” per tabela.
 - `->sticky('header', 'search', 'footer')`  
   Możesz też podać tablicę.
 - `->numbering(bool|string $mode = true, ?string $label = null)`  
@@ -258,7 +284,14 @@ Najczęściej używane:
 
 - `Column::make('field')`
 - `->label('...')`
-- `->sortable()`
+- `->sortable()`  
+  Włącza sortowanie tej kolumny.
+- `->sortable(false)`  
+  Wyłącza sortowanie tej kolumny (także gdy tabela/config ma globalne `sortable = true`).
+- `->sortable('first_name', 'last_name')`  
+  Dla kolumn typu `concat` pozwala ustawić kolejność sortowania po wielu polach.
+- `->multiSortable(true|false)`  
+  Steruje, czy kolumna może być dodana jako kolejna w multi-sortowaniu (`CTRL/CMD + klik`).
 - `->searchable()`
 - `->selected(false)` - blokuje zaznaczanie tej kolumny z poziomu nagłówka.
 - `->exported(bool $state = true)` - steruje, czy kolumna ma być uwzględniana w eksporcie (`true` domyślnie).
@@ -282,6 +315,32 @@ Column::make('internal_note')
     ->label('Internal note')
     ->exported(false);
 ```
+
+Przykład sortowania `concat`:
+
+```php
+Column::make(['first_name', 'last_name'])
+    ->label(__('Patient'))
+    ->sortable('first_name', 'last_name');
+```
+
+Priorytet ustawień sortowania:
+
+1. `Column::sortable(...)` (najwyższy priorytet),
+2. `TableBuilder::sortable(...)`,
+3. `config('upsoftware.table.sortable')` (fallback globalny).
+
+Priorytet ustawień multi-sortowania:
+
+1. `Column::multiSortable(...)` (najwyższy priorytet),
+2. `TableBuilder::multiSortable(...)`,
+3. `config('upsoftware.table.multi_sortable')` (fallback globalny).
+
+Zachowanie w UI:
+
+- klik przycisku sortowania bez modyfikatora: ustawia sortowanie jednej kolumny i resetuje pozostałe,
+- `CTRL` (Windows/Linux) lub `CMD` (macOS) + klik: dodaje/aktualizuje kolumnę jako kolejną w `?sort=...`,
+- cykl każdej kolumny: `brak` -> `ASC` -> `DESC` -> `brak`.
 
 Dla wyglądu:
 

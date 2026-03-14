@@ -94,6 +94,12 @@ class ResourceListOperation extends Operation
             $builder->imported(false);
         }
 
+        if (method_exists($resource, 'canExport') && ! $resource->canExport($context)) {
+            $builder->exported(false);
+        }
+
+        $builder->exportUrl($this->exportUrl($context));
+
         return $builder;
     }
 
@@ -462,6 +468,15 @@ class ResourceListOperation extends Operation
         $slug = trim((string) $this->resource()::slug(), '/');
         $prefix = trim($context->panel()->prefixName(), '/');
         $path = "{$slug}/import";
+
+        return $prefix !== '' ? "{$prefix}/{$path}" : $path;
+    }
+
+    protected function exportUrl(PanelContext $context): string
+    {
+        $slug = trim((string) $this->resource()::slug(), '/');
+        $prefix = trim($context->panel()->prefixName(), '/');
+        $path = "{$slug}/export";
 
         return $prefix !== '' ? "{$prefix}/{$path}" : $path;
     }

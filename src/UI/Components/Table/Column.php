@@ -19,7 +19,13 @@ class Column extends Component
 
     protected ?Action $action = null;
 
-    protected bool $sortable = false;
+    protected bool|array $sortable = false;
+
+    protected bool $sortableConfigured = false;
+
+    protected bool $multiSortable = false;
+
+    protected bool $multiSortableConfigured = false;
 
     protected bool $searchable = false;
 
@@ -53,12 +59,34 @@ class Column extends Component
 
     protected ?string $footerDefinition = null;
 
-    public static function make(array|string|null $name = null): static
+    public static function make(array|string|null $name = null, string ...$concatKeys): static
     {
         $instance = new static;
 
-        if (is_array($name)) {
-            return $instance->concat($name);
+        if (is_array($name) || $concatKeys !== []) {
+            $keys = [];
+
+            if (is_array($name)) {
+                $keys = [...$name];
+            } elseif (is_string($name) && trim($name) !== '') {
+                $keys[] = trim($name);
+            }
+
+            if ($concatKeys !== []) {
+                foreach ($concatKeys as $key) {
+                    if (trim($key) === '') {
+                        continue;
+                    }
+
+                    $keys[] = trim($key);
+                }
+            }
+
+            if ($keys !== []) {
+                return $instance->concat($keys);
+            }
+
+            return $instance;
         }
 
         if ($name !== null && trim($name) !== '') {
@@ -115,6 +143,26 @@ class Column extends Component
         return $this;
     }
 
+    public function route_module(
+        string $module,
+        ?string $action = 'edit',
+        string|int|null $id = 'id',
+        ?string $panel = null
+    ): static {
+        return $this->routeModule($module, $action, $id, $panel);
+    }
+
+    public function routeModule(
+        string $module,
+        ?string $action = 'edit',
+        string|int|null $id = 'id',
+        ?string $panel = null
+    ): static {
+        return $this->action(
+            Action::edit()->route_module($module, $action, $id, $panel)
+        );
+    }
+
     public function toHeaderProps(): array
     {
         $key = $this->resolveKey();
@@ -135,7 +183,9 @@ class Column extends Component
         return [
             'key' => $key,
             'label' => $this->props['label'] ?? ucfirst($key),
-            'sortable' => $this->sortable,
+            'sortable' => $this->isSortable(),
+            'sortColumns' => $this->getSortColumns(),
+            'multiSortable' => $this->isMultiSortable(),
             'searchable' => $this->searchable,
             'selected' => $this->selected,
             'visible' => $this->visible,
@@ -158,9 +208,52 @@ class Column extends Component
         return $this->resolveKey();
     }
 
-    public function sortable(bool $state = true): static
+    public function getConcatKeys(): array
     {
-        $this->sortable = $state;
+        return $this->concatKeys;
+    }
+
+    public function sortable(bool|string|array ...$config): static
+    {
+        $this->sortableConfigured = true;
+
+        if ($config === []) {
+            $this->sortable = true;
+
+            return $this;
+        }
+
+        if (count($config) === 1 && is_bool($config[0])) {
+            $this->sortable = $config[0];
+
+            return $this;
+        }
+
+        if (count($config) === 1 && is_string($config[0])) {
+            $normalized = strtolower(trim($config[0]));
+
+            if (in_array($normalized, ['true', '1', 'yes', 'on'], true)) {
+                $this->sortable = true;
+
+                return $this;
+            }
+
+            if (in_array($normalized, ['false', '0', 'no', 'off'], true)) {
+                $this->sortable = false;
+
+                return $this;
+            }
+        }
+
+        $columns = $this->normalizeSortableColumns($config);
+
+        if ($columns === []) {
+            $this->sortable = true;
+
+            return $this;
+        }
+
+        $this->sortable = $columns;
 
         return $this;
     }
@@ -168,6 +261,14 @@ class Column extends Component
     public function searchable(bool $state = true): static
     {
         $this->searchable = $state;
+
+        return $this;
+    }
+
+    public function multiSortable(bool $state = true): static
+    {
+        $this->multiSortableConfigured = true;
+        $this->multiSortable = $state;
 
         return $this;
     }
@@ -196,6 +297,64 @@ class Column extends Component
     public function isSearchable(): bool
     {
         return $this->searchable;
+    }
+
+    public function isSortableConfigured(): bool
+    {
+        return $this->sortableConfigured;
+    }
+
+    public function isMultiSortableConfigured(): bool
+    {
+        return $this->multiSortableConfigured;
+    }
+
+    public function getSortableDefinition(): bool|array
+    {
+        return $this->sortable;
+    }
+
+    public function isSortable(): bool
+    {
+        if (is_array($this->sortable)) {
+            return $this->sortable !== [];
+        }
+
+        return $this->sortable;
+    }
+
+    public function getSortColumns(): array
+    {
+        if (is_array($this->sortable)) {
+            return $this->sortable;
+        }
+
+        if ($this->sortable === false) {
+            return [];
+        }
+
+        if ($this->concatKeys !== []) {
+            return $this->concatKeys;
+        }
+
+        $key = $this->resolveKey();
+
+        return $key !== '' ? [$key] : [];
+    }
+
+    public function isMultiSortable(): bool
+    {
+        return $this->multiSortable;
+    }
+
+    public function isSelected(): bool
+    {
+        return $this->selected;
+    }
+
+    public function isVisible(): bool
+    {
+        return $this->visible;
     }
 
     public function hide(): static
@@ -807,7 +966,9 @@ class Column extends Component
         return [
             'key' => $key,
             'label' => $this->props['label'] ?? ucfirst($key),
-            'sortable' => $this->sortable,
+            'sortable' => $this->isSortable(),
+            'sortColumns' => $this->getSortColumns(),
+            'multiSortable' => $this->isMultiSortable(),
             'searchable' => $this->searchable,
             'selected' => $this->selected,
             'visible' => $this->visible,
@@ -826,6 +987,48 @@ class Column extends Component
         foreach ($attributes as $attribute => $value) {
             $this->applyRegisteredAttribute((string) $attribute, $value);
         }
+    }
+
+    protected function normalizeSortableColumns(array $config): array
+    {
+        $columns = [];
+
+        foreach ($config as $item) {
+            if (is_string($item)) {
+                $parts = array_map('trim', explode(',', $item));
+
+                foreach ($parts as $part) {
+                    if ($part !== '') {
+                        $columns[] = $part;
+                    }
+                }
+
+                continue;
+            }
+
+            if (! is_array($item)) {
+                continue;
+            }
+
+            foreach ($item as $nested) {
+                if (! is_string($nested)) {
+                    continue;
+                }
+
+                $parts = array_map('trim', explode(',', $nested));
+
+                foreach ($parts as $part) {
+                    if ($part !== '') {
+                        $columns[] = $part;
+                    }
+                }
+            }
+        }
+
+        return array_values(array_filter(
+            array_unique($columns),
+            static fn (string $column): bool => $column !== ''
+        ));
     }
 
     protected function applyRegisteredAttribute(string $attribute, mixed $value): void

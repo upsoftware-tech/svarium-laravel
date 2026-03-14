@@ -15,6 +15,7 @@ Ten dokument opisuje wszystkie komendy Artisan rejestrowane przez paczkę `svari
 | `svarium:menu.add` | Dodaje pozycję menu. |
 | `svarium:menu.map` | Pokazuje mapę runtime menu (drzewo + ID/path_id). |
 | `svarium:route:list` | Pokazuje trasy operation i aliasy nazwanych tras Svarium (z filtrami). |
+| `svarium:api.docs` | Generuje spec OpenAPI JSON na podstawie tras API i udostępnia ją pod ReDoc. |
 | `svarium:attribute.add` | Dodaje atrybut pola globalnie lub do wskazanego modułu. |
 | `svarium:attribute.move` | Przenosi atrybut pola między plikiem globalnym i modułami. |
 | `svarium:attribute.remove` | Usuwa atrybut pola z globalnego pliku lub modułu. |
@@ -256,6 +257,30 @@ php artisan svarium:route:list --panel=admin
 php artisan svarium:route:list --module=ksef
 php artisan svarium:route:list --name=module:ksef
 php artisan svarium:route:list --json
+```
+
+### `svarium:api.docs`
+
+Generuje specyfikację OpenAPI na podstawie aktualnie zarejestrowanych tras API i zapisuje ją do pliku konfigurowanego w `upsoftware.api.docs.storage_path`.
+
+Po wygenerowaniu komenda pokazuje:
+
+- ścieżkę do pliku JSON,
+- URL strony ReDoc,
+- URL endpointu ze specyfikacją.
+
+Składnia:
+
+```bash
+php artisan svarium:api.docs {--path=} {--no-pretty}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:api.docs
+php artisan svarium:api.docs --path=storage/app/svarium/openapi.custom.json
+php artisan svarium:api.docs --no-pretty
 ```
 
 ### `svarium:attribute.add`
