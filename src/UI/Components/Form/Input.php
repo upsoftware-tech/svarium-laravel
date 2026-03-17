@@ -29,6 +29,11 @@ class Input extends FieldComponent
         return $this->prop('format', $format);
     }
 
+    public function calendarPosition(string $position): static
+    {
+        return $this->prop('calendarPosition', $position);
+    }
+
     public function toArray(): array
     {
         $array = parent::toArray();

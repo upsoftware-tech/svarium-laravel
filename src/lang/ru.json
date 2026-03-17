@@ -1,5 +1,6 @@
 {
     "A new verification code has been sent.": "Новый код подтверждения отправлен.",
+    "Acceptance date": "Acceptance date",
     "Age Range": "Age Range",
     "All": "Все",
     "All cells": "Все ячейки",
@@ -140,6 +141,7 @@
     "Remember browser": "Запомнить браузер",
     "Remember me": "Запомнить меня",
     "Require password to open": "Требовать пароль для открытия",
+    "Resignation date": "Resignation date",
     "Rooms": "Rooms",
     "Rose": "Розовый",
     "Rows per page": "Строк на странице",
