@@ -66,6 +66,21 @@ class ResourceCreateOperation extends Operation
         try {
             $context->validated = validator($context->request()->all(), $rules, $messages, $attributes)->validate();
         } catch (ValidationException $e) {
+            $errorFields = array_keys($e->errors());
+            $tabs = $this->resolveCreateFormTabs($context);
+            $errorTabKey = $this->resolveTabKeyForValidationErrors(
+                $context,
+                $tabs,
+                $errorFields
+            );
+            $context->params['__form_tab_error_fields'] = $errorFields;
+
+            if (is_string($errorTabKey) && trim($errorTabKey) !== '') {
+                $context->request()->merge(['tab' => $errorTabKey]);
+                $context->params['tab'] = $errorTabKey;
+            }
+
+            $this->clearResolvedSchema();
             $result = $this->render($context, ...$args);
             $result->prop('errors', $e->errors());
 
@@ -99,7 +114,7 @@ class ResourceCreateOperation extends Operation
 
             if ($tabs !== []) {
                 $activeTab = $this->resolveActiveFormTab($tabs, $context);
-                $activeSchema = $activeTab instanceof ResourceFormTab && $activeTab->isRouted()
+                $activeSchema = $activeTab instanceof ResourceFormTab && $activeTab->shouldNavigateWithRoute()
                     ? $this->resolveRoutedTabSchema($activeTab, $context)
                     : [];
 
@@ -139,7 +154,7 @@ class ResourceCreateOperation extends Operation
         $tabs = $this->resolveCreateFormTabs($context);
         $activeTab = $tabs !== [] ? $this->resolveActiveFormTab($tabs, $context) : null;
 
-        if ($activeTab instanceof ResourceFormTab && $activeTab->isRouted()) {
+        if ($activeTab instanceof ResourceFormTab && $activeTab->shouldNavigateWithRoute()) {
             $tabOperation = $activeTab->resolveOperation();
 
             if ($tabOperation instanceof Operation) {
@@ -212,7 +227,7 @@ class ResourceCreateOperation extends Operation
         $tabs = $this->resolveCreateFormTabs($context);
         $activeTab = $tabs !== [] ? $this->resolveActiveFormTab($tabs, $context) : null;
 
-        if ($activeTab instanceof ResourceFormTab && $activeTab->isRouted()) {
+        if ($activeTab instanceof ResourceFormTab && $activeTab->shouldNavigateWithRoute()) {
             $tabOperation = $activeTab->resolveOperation();
 
             if ($tabOperation instanceof Operation) {
@@ -227,7 +242,7 @@ class ResourceCreateOperation extends Operation
 
     protected function appendTabSegment(string $base, ?ResourceFormTab $tab): string
     {
-        if (! $tab instanceof ResourceFormTab || ! $tab->isRouted()) {
+        if (! $tab instanceof ResourceFormTab || ! $tab->shouldNavigateWithRoute()) {
             return $base;
         }
 

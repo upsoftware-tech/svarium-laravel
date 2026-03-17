@@ -35,6 +35,17 @@ class TabItem extends Component
         return $this->prop('badge', $value);
     }
 
+    public function color(string $color): static
+    {
+        $value = trim($color);
+
+        if ($value === '') {
+            return $this;
+        }
+
+        return $this->prop('color', $value);
+    }
+
     public function url(string $url): static
     {
         $value = trim($url);

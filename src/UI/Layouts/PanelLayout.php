@@ -9,6 +9,9 @@ class PanelLayout extends Component
     public function __construct()
     {
         $this->prop('layout', 'panel');
+        $this->prop('containerEnabled', (bool) config('upsoftware.panel.container.enabled', true));
+        $this->prop('containerFluid', (bool) config('upsoftware.panel.container.fluid', false));
+        $this->prop('containerPosition', (string) config('upsoftware.panel.container.position', 'center'));
         $this->define();
     }
 
@@ -55,5 +58,26 @@ class PanelLayout extends Component
     public function aside(Component|array|string|\Closure|null $c): static
     {
         return $this->slot('aside', $c);
+    }
+
+    public function container(bool $enabled = true): static
+    {
+        return $this->prop('containerEnabled', $enabled);
+    }
+
+    public function containerFluid(bool $enabled = true): static
+    {
+        return $this->prop('containerFluid', $enabled);
+    }
+
+    public function containerPosition(string $position = 'center'): static
+    {
+        $position = strtolower(trim($position));
+
+        if (! in_array($position, ['left', 'center', 'right'], true)) {
+            $position = 'center';
+        }
+
+        return $this->prop('containerPosition', $position);
     }
 }

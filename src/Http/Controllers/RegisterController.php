@@ -18,6 +18,7 @@ use Upsoftware\Svarium\UI\Components\Block;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
 use Upsoftware\Svarium\UI\Components\Flex;
 use Upsoftware\Svarium\UI\Components\Form\Input as FormInput;
+use Upsoftware\Svarium\Support\ShowWhenEvaluator;
 
 class RegisterController extends Controller
 {
@@ -451,6 +452,13 @@ class RegisterController extends Controller
 
         foreach ($fields as $name => $field) {
             $fieldRules = $field->getValidationRules();
+            $showWhen = $field->getProp('showWhen');
+
+            if ($showWhen !== null) {
+                array_unshift($fieldRules, Rule::excludeIf(
+                    fn () => ! ShowWhenEvaluator::matches($showWhen, request()->all())
+                ));
+            }
 
             if ($name === 'email') {
                 $rules['email'] = $this->mergeRules(

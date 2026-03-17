@@ -5,6 +5,7 @@ namespace Upsoftware\Svarium\Layouts;
 use Upsoftware\Svarium\Layouts\Panel\HeaderLayout;
 use Upsoftware\Svarium\UI\Components\Block;
 use Upsoftware\Svarium\UI\Components\Body;
+use Upsoftware\Svarium\UI\Components\Container;
 use Upsoftware\Svarium\UI\Components\Flex;
 use Upsoftware\Svarium\UI\Components\PanelNavigation;
 use Upsoftware\Svarium\UI\Components\ScrollArea;
@@ -57,7 +58,7 @@ class PanelLayout extends BasePanelLayout
                                             ScrollArea::make()
                                                 ->height('calc(100vh-70px)')
                                                 ->children([
-                                                    Block::make()
+                                                    Container::make()
                                                         ->padding(6)
                                                         ->children([
                                                             Body::make(),

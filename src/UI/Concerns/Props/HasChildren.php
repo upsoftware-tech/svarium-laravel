@@ -8,9 +8,26 @@ trait HasChildren
 {
     protected array $children = [];
 
-    public function child(Component $component): static
+    public function child(Component|array $component): static
     {
-        $this->children[] = $component;
+        if ($component instanceof Component) {
+            $this->children[] = $component;
+            return $this;
+        }
+
+        if (isset($component['type']) && is_string($component['type'])) {
+            $this->children[] = $component;
+            return $this;
+        }
+
+        if (array_is_list($component)) {
+            foreach ($component as $child) {
+                if ($child instanceof Component || is_array($child)) {
+                    $this->child($child);
+                }
+            }
+        }
+
         return $this;
     }
 
@@ -22,7 +39,9 @@ trait HasChildren
         }
 
         foreach ($components as $component) {
-            $this->child($component);
+            if ($component instanceof Component || is_array($component)) {
+                $this->child($component);
+            }
         }
 
         return $this;
@@ -30,9 +49,19 @@ trait HasChildren
 
     protected function serializeChildren(): array
     {
-        return array_map(
-            fn ($child) => $child->toArray(),
-            $this->children
-        );
+        $serialized = [];
+
+        foreach ($this->children as $child) {
+            if ($child instanceof Component) {
+                $serialized[] = $child->toArray();
+                continue;
+            }
+
+            if (is_array($child) && isset($child['type']) && is_string($child['type'])) {
+                $serialized[] = $child;
+            }
+        }
+
+        return $serialized;
     }
 }

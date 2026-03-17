@@ -209,6 +209,30 @@ function pluck(string $modelClass, string $value, ?string $key = null): array
     return $modelClass::pluck($value, $key)->toArray();
 }
 
+if (! function_exists('optionsModel')) {
+    function optionsModel(
+        string $modelClass,
+        string $value = 'id',
+        string $label = 'name'
+    ): \Upsoftware\Svarium\Support\ModelOptionsBuilder {
+        return new \Upsoftware\Svarium\Support\ModelOptionsBuilder($modelClass, $value, $label);
+    }
+}
+
+if (! function_exists('options')) {
+    function options(
+        ?string $modelClass = null,
+        string $value = 'id',
+        string $label = 'name'
+    ): array|\Upsoftware\Svarium\Support\ModelOptionsBuilder {
+        if (! is_string($modelClass) || trim($modelClass) === '') {
+            return [];
+        }
+
+        return optionsModel($modelClass, $value, $label);
+    }
+}
+
 
 function get_model(string $model): string {
     $models = config('upsoftware.models', []);

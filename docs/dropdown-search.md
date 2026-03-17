@@ -9,6 +9,8 @@ Komponent wspiera:
 - ograniczanie opcji do aktywnych/zdefiniowanych,
 - wyszukiwarkę wewnątrz dropdowna,
 - podsumowanie zaznaczeń w buttonie,
+- utrzymanie zaznaczenia na podstawie URL po odświeżeniu i po przejściu między widokami,
+- liczniki opcji liczone bez zawężania dropdowna przez jego własny filtr,
 - globalne kolory (`color`, `iconColor`) z nadpisaniem per opcja,
 - pozycjonowanie ikony i licznika (`left`, `right`, `end`).
 
@@ -33,6 +35,14 @@ DropdownSearch::make(?string $name = '')
     ->counterPosition(string $position = 'right') // left|right|end
     ->counterPosution(string $position = 'right'); // alias (literówka, kompatybilność)
 ```
+
+Jeśli podasz `make('is_enabled')`, ten klucz zostanie użyty jako parametr request, np.:
+
+```text
+?is_enabled[]=1
+```
+
+Po wejściu ponownie na stronę komponent odczyta zaznaczenia z URL i odtworzy stan checkboxów.
 
 ## Kolory
 
@@ -150,4 +160,3 @@ DropdownSearch::make(__('Status'))
         ],
     ]);
 ```
-

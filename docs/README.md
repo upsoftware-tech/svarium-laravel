@@ -24,6 +24,7 @@ php artisan svarium:app:install
 ```
 
 - [Roadmap ogólny Svarium](./roadmap.md)
+- [Changelog 2026-03-17 (tabs/forms/cards)](./changelog-2026-03-17.md)
 - [Konfiguracja `config/upsoftware.php`](./config-upsoftware.md)
 - Operacje aplikacji: preferowana ścieżka `app/Svarium/Operations` (legacy: `app/Svarium/Panel/Operations`)
 - [Layouty panelu](./panel-layouts.md)
@@ -34,9 +35,13 @@ php artisan svarium:app:install
 - [Komponent Logo (PHP + Vue, light/dark/default/small)](./logo-component.md)
 - [Komponent Pin (PHP + Vue, OTP / verification code)](./pin-component.md)
 - [Komponent InputFile (PHP + Vue, upload/autostart/progress/preview)](./input-file-component.md)
+- [Komponent SelectIcon (PHP + Vue, kolekcje ikon, lazy loading)](./select-icon-component.md)
 - [DropdownSearch (pełne API + kolory + pozycje ikon/liczników)](./dropdown-search.md)
 - [Tabela (`TableBuilder`) - pełna dokumentacja](./table.md)
+- [Warunkowa widoczność pól formularza (`showWhen`, `visibleWhen`)](./form-conditional-visibility.md)
+- Konfiguracja formularzy pól wymaganych: zobacz [Konfiguracja `config/upsoftware.php`](./config-upsoftware.md)
 - [Taby formularza w `Resource` (`create/edit/{tab}`)](./resource-tabs.md)
+  - sekcja `cards()` (siatka kart, `grid/gap`, `colSpan`, `cols`, `padding`, `icon`, `action`, `subtitle`)
 - [Komendy CLI Svarium (pełna lista + przykłady)](./commands.md)
 - [AuthLoginService (logowanie + OTP)](./auth-login-service.md)
 - [Layouty i konfiguracja rejestracji](./register-panel-config.md)

@@ -3,10 +3,12 @@
 namespace Upsoftware\Svarium\Panel\Resource\Operations\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 use Upsoftware\Svarium\Layouts\Panel\FormTabLayout;
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
 use Upsoftware\Svarium\Panel\Resource\ResourceFormTab;
+use Upsoftware\Svarium\Panel\Resource\ResourceFormTabDefinition;
 use Upsoftware\Svarium\UI\Component;
 use Upsoftware\Svarium\UI\Components\Block;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
@@ -46,10 +48,66 @@ trait InteractsWithResourceFormTabs
      */
     protected function filterVisibleFormTabs(array $tabs, PanelContext $context, ...$args): array
     {
-        return array_values(array_filter(
-            $tabs,
-            static fn ($tab): bool => $tab instanceof ResourceFormTab && $tab->shouldRender($context, ...$args)
-        ));
+        $record = null;
+        foreach ($args as $arg) {
+            if ($arg instanceof Model) {
+                $record = $arg;
+                break;
+            }
+        }
+
+        $resolved = [];
+
+        foreach ($tabs as $tab) {
+            $tabObject = $this->resolveFormTabObject($tab, $context, $record);
+
+            if (! $tabObject instanceof ResourceFormTab) {
+                continue;
+            }
+
+            if (! $tabObject->shouldRender($context, ...$args)) {
+                continue;
+            }
+
+            $resolved[] = $tabObject;
+        }
+
+        return array_values($resolved);
+    }
+
+    protected function resolveFormTabObject(
+        mixed $tab,
+        PanelContext $context,
+        ?Model $record = null
+    ): ?ResourceFormTab {
+        if ($tab instanceof ResourceFormTab) {
+            return $tab;
+        }
+
+        if ($tab instanceof ResourceFormTabDefinition) {
+            return $tab::make($context, $record);
+        }
+
+        if (is_string($tab)) {
+            $normalizedClass = trim($tab);
+
+            if ($normalizedClass === '') {
+                return null;
+            }
+
+            if (! class_exists($normalizedClass)) {
+                return null;
+            }
+
+            if (! is_subclass_of($normalizedClass, ResourceFormTabDefinition::class)) {
+                return null;
+            }
+
+            /** @var class-string<ResourceFormTabDefinition> $normalizedClass */
+            return $normalizedClass::make($context, $record);
+        }
+
+        return null;
     }
 
     protected function resolveActiveFormTab(array $tabs, PanelContext $context): ?ResourceFormTab
@@ -62,7 +120,7 @@ trait InteractsWithResourceFormTabs
 
         if ($requested !== '') {
             foreach ($tabs as $tab) {
-                if ($tab->key() === $requested) {
+                if ($this->matchesRequestedTabKey($tab->key(), $requested)) {
                     return $tab;
                 }
             }
@@ -77,6 +135,38 @@ trait InteractsWithResourceFormTabs
         }
 
         return $tabs[0];
+    }
+
+    protected function matchesRequestedTabKey(string $tabKey, string $requested): bool
+    {
+        $tabKey = trim($tabKey);
+        $requested = trim($requested);
+
+        if ($tabKey === '' || $requested === '') {
+            return false;
+        }
+
+        if ($tabKey === $requested) {
+            return true;
+        }
+
+        $normalizedTab = (string) Str::of($tabKey)->replace('_', '-')->lower();
+        $normalizedRequested = (string) Str::of($requested)->replace('_', '-')->lower();
+
+        if ($normalizedTab === $normalizedRequested) {
+            return true;
+        }
+
+        // Backward compatibility for previous auto-key style:
+        // "basic-tab" should still match requested "basic".
+        if (Str::endsWith($normalizedTab, '-tab')) {
+            $legacyTab = (string) Str::beforeLast($normalizedTab, '-tab');
+            if ($legacyTab !== '' && $legacyTab === $normalizedRequested) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function resolveRoutedTabSchema(
@@ -109,6 +199,23 @@ trait InteractsWithResourceFormTabs
         $tabConfig = (array) ($config['tab'] ?? []);
         $position = $this->normalizeFormTabPosition((string) ($tabConfig['position'] ?? 'top'));
         $variant = $this->normalizeFormTabVariant((string) ($tabConfig['variant'] ?? 'default'));
+        $validationErrorIconConfig = (array) (
+            $tabConfig['validation_error_icon']
+            ?? $tabConfig['validationErrorIcon']
+            ?? []
+        );
+        $showValidationErrorIcon = $this->normalizeBool(
+            $validationErrorIconConfig['enabled'] ?? false,
+            false
+        );
+        $validationErrorIcon = trim((string) ($validationErrorIconConfig['icon'] ?? 'lucide:circle-alert'));
+        $errorFields = is_array($context->params['__form_tab_error_fields'] ?? null)
+            ? (array) $context->params['__form_tab_error_fields']
+            : [];
+        $errorTabKeys = $showValidationErrorIcon
+            ? $this->resolveTabKeysForValidationErrors($context, $tabs, $errorFields, $record)
+            : [];
+        $errorTabsLookup = array_fill_keys($errorTabKeys, true);
 
         $tabComponent = Tab::make()
             ->position($position)
@@ -126,32 +233,45 @@ trait InteractsWithResourceFormTabs
 
         foreach ($tabs as $tab) {
             $isActive = $activeTab instanceof ResourceFormTab && $activeTab->key() === $tab->key();
+            $hasValidationError = isset($errorTabsLookup[$tab->key()]);
 
-            if ($tab->isRouted()) {
-                $tabComponent->child(
-                    $tab->toTabItem($this->resourceTabUrl($context, $tab, $record), [], $isActive)
-                );
+            if ($tab->shouldNavigateWithRoute()) {
+                $item = $tab->toTabItem($this->resourceTabUrl($context, $tab, $record), [], $isActive);
+                if ($hasValidationError) {
+                    $item->prop('validationError', true);
+
+                    if ($validationErrorIcon !== '') {
+                        $item->prop('validationErrorIcon', $validationErrorIcon);
+                    }
+                }
+                $tabComponent->child($item);
 
                 continue;
             }
 
-            $tabComponent->child(
-                $tab->toTabItem(
-                    null,
-                    $this->wrapFormTabContent(
-                        $tab,
-                        $context,
-                        $record instanceof Model
-                            ? $tab->resolveSchema($context, $record)
-                            : $tab->resolveSchema($context),
-                        $record
-                    ),
-                    $isActive
-                )
+            $item = $tab->toTabItem(
+                null,
+                $this->wrapFormTabContent(
+                    $tab,
+                    $context,
+                    $record instanceof Model
+                        ? $tab->resolveSchema($context, $record)
+                        : $tab->resolveSchema($context),
+                    $record
+                ),
+                $isActive
             );
+            if ($hasValidationError) {
+                $item->prop('validationError', true);
+
+                if ($validationErrorIcon !== '') {
+                    $item->prop('validationErrorIcon', $validationErrorIcon);
+                }
+            }
+            $tabComponent->child($item);
         }
 
-        if ($activeTab instanceof ResourceFormTab && $activeTab->isRouted()) {
+        if ($activeTab instanceof ResourceFormTab && $activeTab->shouldNavigateWithRoute()) {
             $tabComponent->slot('content', $this->wrapFormTabContent($activeTab, $context, $activeSchema, $record));
         }
 
@@ -188,18 +308,332 @@ trait InteractsWithResourceFormTabs
         array $content,
         ?Model $record = null
     ): array {
+        $resource = $this->resource();
+        $config = $resource->resolveFormConfig($context, $record);
+        $tabConfig = (array) ($config['tab'] ?? []);
+        $defaultCard = $this->normalizeBool($tabConfig['card'] ?? true, true);
+
+        $resolvedCard = $record instanceof Model
+            ? $tab->resolveCard($context, $record)
+            : $tab->resolveCard($context);
+
+        if ($resolvedCard === null) {
+            $tab->card($defaultCard);
+        }
+
+        $this->applyResourceFormTabDefaults($resource, $tab, $context, $tabConfig, $record);
+
+        $resolvedFieldColSpan = $record instanceof Model
+            ? $tab->resolveFieldColSpan($context, $record)
+            : $tab->resolveFieldColSpan($context);
+        if ($resolvedFieldColSpan !== null) {
+            $content = $this->applyDefaultFieldColSpanToNode($content, $resolvedFieldColSpan);
+        }
+
         $layoutClass = config('upsoftware.resource.form_tab_layout', FormTabLayout::class);
 
         if (! is_string($layoutClass) || $layoutClass === '' || ! class_exists($layoutClass)) {
             $layoutClass = FormTabLayout::class;
         }
 
-        return (array) (new $layoutClass(
+        $built = (new $layoutClass(
             $tab,
             $context,
             $content,
             $record
         ))->build();
+
+        return $this->normalizeTabContentNodes($built);
+    }
+
+    protected function applyResourceFormTabDefaults(
+        mixed $resource,
+        ResourceFormTab $tab,
+        PanelContext $context,
+        array $tabConfig,
+        ?Model $record = null
+    ): void {
+        $configuredDefaults = (array) ($tabConfig['defaults'] ?? []);
+        $resourceDefaults = $record instanceof Model
+            ? $resource->formTabDefaults($context, $record)
+            : $resource->formTabDefaults($context);
+
+        if (! is_array($resourceDefaults)) {
+            $resourceDefaults = [];
+        }
+
+        $defaults = array_replace($configuredDefaults, $resourceDefaults);
+        if ($defaults === []) {
+            return;
+        }
+
+        $resolvedWidth = $record instanceof Model
+            ? $tab->resolveWidthContent($context, $record)
+            : $tab->resolveWidthContent($context);
+
+        if ($resolvedWidth === null) {
+            $defaultWidth = $this->firstValue($defaults, ['widthContent', 'width_content', 'width']);
+            if ($defaultWidth !== null) {
+                $tab->widthContent($defaultWidth);
+            }
+        }
+
+        $resolvedPadding = $record instanceof Model
+            ? $tab->resolvePaddingContent($context, $record)
+            : $tab->resolvePaddingContent($context);
+
+        if ($resolvedPadding === null) {
+            $defaultPadding = $this->firstValue($defaults, ['paddingContent', 'padding_content', 'padding']);
+            if ($defaultPadding !== null) {
+                $tab->paddingContent($defaultPadding);
+            }
+        }
+
+        $resolvedColSpan = $record instanceof Model
+            ? $tab->resolveColSpan($context, $record)
+            : $tab->resolveColSpan($context);
+
+        if ($resolvedColSpan === null) {
+            $defaultColSpan = $this->firstValue($defaults, ['colSpan', 'col_span', 'colspan', 'span']);
+            if ($defaultColSpan !== null) {
+                $tab->colSpan($defaultColSpan);
+            }
+        }
+
+        $resolvedGrid = $record instanceof Model
+            ? $tab->resolveGrid($context, $record)
+            : $tab->resolveGrid($context);
+
+        if ($resolvedGrid === null) {
+            $defaultGrid = $this->firstValue($defaults, ['grid', 'gridColumns', 'grid_columns']);
+            if (is_int($defaultGrid) && $defaultGrid > 0) {
+                $tab->grid($defaultGrid);
+            }
+        }
+
+        $resolvedContentCols = $record instanceof Model
+            ? $tab->resolveContentCols($context, $record)
+            : $tab->resolveContentCols($context);
+
+        if ($resolvedContentCols === null) {
+            $defaultContentCols = $this->firstValue($defaults, ['content', 'contentCols', 'content_cols', 'cols']);
+            if ($defaultContentCols !== null) {
+                $tab->contentCols($defaultContentCols);
+            }
+        }
+
+        $resolvedFieldColSpan = $record instanceof Model
+            ? $tab->resolveFieldColSpan($context, $record)
+            : $tab->resolveFieldColSpan($context);
+
+        if ($resolvedFieldColSpan === null) {
+            $defaultFieldColSpan = $this->firstValue($defaults, ['fieldColSpan', 'field_col_span', 'field_colspan']);
+            if ($defaultFieldColSpan !== null) {
+                $tab->fieldColSpan($defaultFieldColSpan);
+            }
+        }
+    }
+
+    protected function firstValue(array $source, array $keys): mixed
+    {
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $source) && $source[$key] !== null && $source[$key] !== '') {
+                return $source[$key];
+            }
+        }
+
+        return null;
+    }
+
+    protected function applyDefaultFieldColSpanToNode(mixed $node, string|int $fieldColSpan): mixed
+    {
+        if ($node instanceof FieldComponent) {
+            if (! $this->hasExplicitColSpan($node)) {
+                $node->colSpan($fieldColSpan);
+            }
+        }
+
+        if ($node instanceof Component) {
+            $children = $node->getChildrenComponents();
+            if ($children !== []) {
+                $resolvedChildren = [];
+
+                foreach ($children as $child) {
+                    $resolvedChildren[] = $this->applyDefaultFieldColSpanToNode($child, $fieldColSpan);
+                }
+
+                $node->setChildrenComponents($resolvedChildren);
+            }
+
+            return $node;
+        }
+
+        if (is_array($node)) {
+            $resolvedNodes = [];
+            foreach ($node as $key => $entry) {
+                $resolvedNodes[$key] = $this->applyDefaultFieldColSpanToNode($entry, $fieldColSpan);
+            }
+
+            return $resolvedNodes;
+        }
+
+        return $node;
+    }
+
+    protected function hasExplicitColSpan(FieldComponent $component): bool
+    {
+        $appearance = $component->getProp('appearance', []);
+        if (! is_array($appearance)) {
+            return false;
+        }
+
+        $classString = trim((string) ($appearance['class'] ?? ''));
+        if (
+            $classString !== ''
+            && preg_match('/(?:^|\s)(?:[a-z0-9-]+:)?col-span-(?:\[[^\]]+\]|\d+|full|auto)(?=\s|$)/i', $classString) === 1
+        ) {
+            return true;
+        }
+
+        $style = $appearance['style'] ?? null;
+        if (is_array($style) && isset($style['gridColumn'])) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array<int, Component|array>
+     */
+    protected function normalizeTabContentNodes(mixed $nodes): array
+    {
+        if ($nodes instanceof Component) {
+            return [$nodes];
+        }
+
+        if (! is_array($nodes)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($nodes as $node) {
+            if ($node instanceof Component) {
+                $normalized[] = $node;
+                continue;
+            }
+
+            if (is_array($node) && isset($node['type']) && is_string($node['type'])) {
+                $normalized[] = $node;
+                continue;
+            }
+
+            if (is_array($node)) {
+                $normalized = [
+                    ...$normalized,
+                    ...$this->normalizeTabContentNodes($node),
+                ];
+            }
+        }
+
+        return array_values($normalized);
+    }
+
+    /**
+     * @param array<int, ResourceFormTab> $tabs
+     * @param array<int, string> $errorFields
+     */
+    protected function resolveTabKeyForValidationErrors(
+        PanelContext $context,
+        array $tabs,
+        array $errorFields,
+        ?Model $record = null
+    ): ?string {
+        if ($tabs === [] || $errorFields === []) {
+            return null;
+        }
+
+        $normalizedErrorFields = array_values(array_filter(array_map(
+            static fn (mixed $field): string => trim((string) $field),
+            $errorFields
+        )));
+
+        if ($normalizedErrorFields === []) {
+            return null;
+        }
+
+        foreach ($tabs as $tab) {
+            if (! $tab instanceof ResourceFormTab) {
+                continue;
+            }
+
+            $schema = $record instanceof Model
+                ? $tab->resolveSchema($context, $record)
+                : $tab->resolveSchema($context);
+
+            if ($tab->shouldNavigateWithRoute()) {
+                $schema = $record instanceof Model
+                    ? $this->resolveRoutedTabSchema($tab, $context, $record)
+                    : $this->resolveRoutedTabSchema($tab, $context);
+            }
+
+            $fieldNames = array_values(array_filter(array_map(
+                static fn (mixed $name): string => trim((string) $name),
+                $this->collectFieldNames($schema)
+            )));
+
+            if ($fieldNames === []) {
+                continue;
+            }
+
+            foreach ($normalizedErrorFields as $errorField) {
+                foreach ($fieldNames as $fieldName) {
+                    if ($fieldName === '') {
+                        continue;
+                    }
+
+                    if ($errorField === $fieldName || Str::startsWith($errorField, $fieldName.'.')) {
+                        return $tab->key();
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<int, ResourceFormTab> $tabs
+     * @param array<int, string> $errorFields
+     * @return array<int, string>
+     */
+    protected function resolveTabKeysForValidationErrors(
+        PanelContext $context,
+        array $tabs,
+        array $errorFields,
+        ?Model $record = null
+    ): array {
+        if ($tabs === [] || $errorFields === []) {
+            return [];
+        }
+
+        $keys = [];
+
+        foreach ($errorFields as $errorField) {
+            $tabKey = $this->resolveTabKeyForValidationErrors(
+                $context,
+                $tabs,
+                [(string) $errorField],
+                $record
+            );
+
+            if (is_string($tabKey) && trim($tabKey) !== '') {
+                $keys[] = $tabKey;
+            }
+        }
+
+        return array_values(array_unique($keys));
     }
 
     protected function resourceTabUrl(
@@ -317,7 +751,7 @@ trait InteractsWithResourceFormTabs
 
             $schema = [];
 
-            if ($tab->isRouted()) {
+            if ($tab->shouldNavigateWithRoute()) {
                 $operation = $tab->resolveOperation();
 
                 if ($operation instanceof Operation && ! $operation->delegatedAuthorize($context)) {

@@ -124,6 +124,18 @@ class OperationRegistry
         $this->registerOperationsFromPath(__DIR__.'/Operations');
     }
 
+    public function bootFromModule(\Upsoftware\Svarium\Modules\Module $module): void
+    {
+        $activation = app(ActivationRegistry::class);
+        $moduleClass = get_class($module);
+
+        if (! $activation->isEnabled($moduleClass)) {
+            return;
+        }
+
+        $this->registerOperationsFromPath($module->path('Panel'));
+    }
+
     protected function registerOperationsFromPath(string $path): void
     {
         if (! is_dir($path)) {

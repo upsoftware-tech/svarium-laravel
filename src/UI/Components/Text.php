@@ -22,6 +22,16 @@ class Text extends Component
         return $this->prop('text', $text);
     }
 
+    public function from(string $field): static
+    {
+        $normalized = trim($field);
+        if ($normalized === '') {
+            return $this;
+        }
+
+        return $this->prop('from', $normalized);
+    }
+
     public function as(string $tag): static
     {
         $normalizedTag = $this->normalizeTag($tag);

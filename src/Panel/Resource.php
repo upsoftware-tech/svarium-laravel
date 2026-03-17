@@ -102,6 +102,11 @@ abstract class Resource
         return $this->resolveFormConfig($context, $record)['tab'];
     }
 
+    public function formTabDefaults(PanelContext $context, ?Model $record = null): array
+    {
+        return [];
+    }
+
     public function formTabHeader(PanelContext $context, ?Model $record = null): Component|array|string|\Closure|null
     {
         return null;
@@ -296,9 +301,15 @@ abstract class Resource
     {
         $defaults = [
             'tab' => [
-                'position' => 'top',
-                'variant' => 'default',
+                'position' => 'left',
+                'variant' => 'simple',
                 'title' => true,
+                'card' => true,
+                'defaults' => [],
+                'validation_error_icon' => [
+                    'enabled' => false,
+                    'icon' => 'lucide:circle-alert',
+                ],
             ],
             'language' => [
                 'display' => 'inline',
@@ -327,27 +338,54 @@ abstract class Resource
 
     protected function normalizeFormConfig(array $config, ?PanelContext $context = null, ?Model $record = null): array
     {
-        if (array_key_exists('position', $config) || array_key_exists('variant', $config)) {
+        if (
+            array_key_exists('position', $config)
+            || array_key_exists('variant', $config)
+            || array_key_exists('title', $config)
+            || array_key_exists('card', $config)
+        ) {
             $config['tab'] = array_filter([
                 'position' => $config['position'] ?? ($context instanceof PanelContext
                     ? $this->formTabPosition($context, $record)
                     : 'top'),
                 'variant' => $config['variant'] ?? 'default',
                 'title' => $config['title'] ?? true,
+                'card' => $config['card'] ?? true,
             ], static fn ($value) => $value !== null);
 
-            unset($config['position'], $config['variant'], $config['title']);
+            unset($config['position'], $config['variant'], $config['title'], $config['card']);
         }
 
         if (! isset($config['tab']) || ! is_array($config['tab'])) {
-            $config['tab'] = [
-                'position' => $context instanceof PanelContext
-                    ? $this->formTabPosition($context, $record)
-                    : 'top',
-            ];
+            if ($context instanceof PanelContext && $this->isFormTabPositionOverridden()) {
+                $config['tab'] = [
+                    'position' => $this->formTabPosition($context, $record),
+                ];
+            }
+
+            return $config;
+        }
+
+        if (
+            $context instanceof PanelContext
+            && $this->isFormTabPositionOverridden()
+            && ! array_key_exists('position', $config['tab'])
+        ) {
+            $config['tab']['position'] = $this->formTabPosition($context, $record);
         }
 
         return $config;
+    }
+
+    protected function isFormTabPositionOverridden(): bool
+    {
+        try {
+            $reflection = new \ReflectionMethod($this, 'formTabPosition');
+        } catch (\ReflectionException) {
+            return false;
+        }
+
+        return $reflection->getDeclaringClass()->getName() !== self::class;
     }
 
     public function getFormFieldNames(): array

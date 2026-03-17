@@ -57,6 +57,54 @@ Use it when you want dynamic props/behavior without creating another layout clas
 - wrapper is then mounted into layout slot `body`
 - if there is no wrapper, the operation/page component goes directly to layout slot `body`
 
+## Automatic `Container` in `PanelLayout`
+
+`PanelLayout` automatically wraps rendered panel content with `Container`.
+
+This means:
+
+- regular operation/page content injected into panel `Body::make()` is wrapped with `Container`
+- custom panel `body` content mounted through `Panel::content(...)` is also wrapped with `Container`
+- panel `contentHeader` and `contentFooter` are not wrapped
+- wrapper is applied only for `PanelLayout` (not globally for every layout type)
+- wrapper renders CSS classes `container app__container` (or `app__container w-full max-w-none` in `fluid` mode)
+
+Default configuration:
+
+```php
+'panel' => [
+    'container' => [
+        'enabled' => true,
+        'fluid' => false,
+        'position' => 'center',
+    ],
+],
+```
+
+You can override it globally in `config/upsoftware.php` or directly on layout instance:
+
+```php
+->layoutUsing(function ($layout) {
+    $layout
+        ->container(true)
+        ->containerFluid(false)
+        ->containerPosition('center');
+})
+```
+
+Disable wrapper completely:
+
+```php
+->layoutUsing(function ($layout) {
+    $layout->container(false);
+})
+```
+
+Important:
+
+- if you manually add your own `Container` inside page content, then you will get nested containers
+- if your layout is not based on `PanelLayout`, automatic wrapper is not added
+
 ## Global root layout (`CleanLayout`)
 
 By default, Svarium wraps rendered panel layout with `CleanLayout` as the top/root node.

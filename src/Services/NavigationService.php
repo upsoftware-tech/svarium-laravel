@@ -195,6 +195,8 @@ class NavigationService
     protected function appendRegisteredItems(array $children, string|int|null $navigationId): array
     {
         $registered = app(MenuRegistry::class)->allForNavigation($navigationId);
+        $declaredGroups = $this->collectDeclaredGroups($registered);
+        $pathIdParentMap = $this->buildPathIdParentMap($registered);
 
         foreach ($registered as $item) {
             $source = (string) ($item['source'] ?? '');
@@ -210,9 +212,7 @@ class NavigationService
                 ))
                 : [];
             $parentId = trim((string) ($item['parent_id'] ?? ''));
-            if ($parentId !== '' && (($pathIds[0] ?? null) !== $parentId)) {
-                array_unshift($pathIds, $parentId);
-            }
+            $pathIds = $this->prependParentPathIds($pathIds, $parentId, $pathIdParentMap);
             $branch = &$children;
 
             $segmentsCount = max(count($path), count($pathIds));
@@ -222,6 +222,17 @@ class NavigationService
 
                 if ($segment === '' && is_string($segmentPathId) && trim($segmentPathId) !== '') {
                     $segment = trim((string) $segmentPathId);
+                }
+
+                $declaredGroup = is_string($segmentPathId)
+                    ? ($declaredGroups[trim($segmentPathId)] ?? null)
+                    : null;
+
+                if (is_array($declaredGroup)) {
+                    $declaredLabel = trim((string) ($declaredGroup['label'] ?? ''));
+                    if ($declaredLabel !== '') {
+                        $segment = $declaredLabel;
+                    }
                 }
 
                 if ($segment === '') {
@@ -244,6 +255,110 @@ class NavigationService
         $children = $this->sortNodesByOrder($children);
 
         return $children;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $registered
+     * @return array<string, string>
+     */
+    protected function buildPathIdParentMap(array $registered): array
+    {
+        $map = [];
+
+        foreach ($registered as $item) {
+            $pathId = trim((string) ($item['path_id'] ?? ''));
+            if ($pathId === '') {
+                continue;
+            }
+
+            $parentId = trim((string) ($item['parent_id'] ?? ''));
+            if ($parentId === '' || $parentId === $pathId) {
+                continue;
+            }
+
+            $map[$pathId] = $parentId;
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param array<int, string> $pathIds
+     * @param array<string, string> $pathIdParentMap
+     * @return array<int, string>
+     */
+    protected function prependParentPathIds(array $pathIds, string $parentId, array $pathIdParentMap): array
+    {
+        $parentId = trim($parentId);
+        if ($parentId === '') {
+            return $pathIds;
+        }
+
+        $chain = [];
+        $visited = [];
+        $cursor = $parentId;
+        $safety = 0;
+
+        while ($cursor !== '' && $safety < 100) {
+            if (isset($visited[$cursor])) {
+                break;
+            }
+
+            $visited[$cursor] = true;
+            array_unshift($chain, $cursor);
+            $cursor = trim((string) ($pathIdParentMap[$cursor] ?? ''));
+            $safety++;
+        }
+
+        if ($chain === []) {
+            return $pathIds;
+        }
+
+        foreach ($pathIds as $pathId) {
+            $normalizedPathId = trim((string) $pathId);
+            if ($normalizedPathId === '') {
+                continue;
+            }
+
+            if (! in_array($normalizedPathId, $chain, true)) {
+                $chain[] = $normalizedPathId;
+            }
+        }
+
+        return $chain;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $registered
+     * @return array<string, array{label: string}>
+     */
+    protected function collectDeclaredGroups(array $registered): array
+    {
+        $groups = [];
+
+        foreach ($registered as $item) {
+            $type = (string) ($item['type'] ?? 'item');
+            $label = trim((string) ($item['label'] ?? ''));
+            $pathId = trim((string) (
+                $item['path_id']
+                ?? (is_array($item['path_ids'] ?? null) ? ($item['path_ids'][array_key_last($item['path_ids'])] ?? null) : null)
+                ?? ''
+            ));
+            $routeName = trim((string) ($item['route_name'] ?? ''));
+            $url = trim((string) ($item['url'] ?? ''));
+
+            if ($type !== 'item' || $label === '' || $pathId === '') {
+                continue;
+            }
+
+            if ($routeName !== '' || $url !== '') {
+                continue;
+            }
+
+            $groups[$pathId] = ['label' => $this->translateMenuLabel($label, (string) ($item['source'] ?? ''))];
+        }
+
+        return $groups;
     }
 
     /**

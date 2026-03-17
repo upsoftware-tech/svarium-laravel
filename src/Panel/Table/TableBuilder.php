@@ -49,6 +49,8 @@ class TableBuilder
 
     protected $query;
 
+    protected ?EloquentBuilder $dropdownSearchQueryBase = null;
+
     protected bool $bulkEnabled = false;
     protected ?string $bulkMode = null;
     protected bool $numberingEnabled = false;
@@ -77,6 +79,7 @@ class TableBuilder
     protected array $multiSortableColumns = [];
     protected bool $multiSortableConfigured = false;
     protected bool $multiSortableAllColumns = false;
+    protected ?string $defaultSortQuery = null;
 
     protected array $actions = [];
 
@@ -114,6 +117,9 @@ class TableBuilder
     protected ?string $appearance = null;
 
     protected array $headerComponents = [];
+    protected ?bool $columnVisibilityEnabled = null;
+    protected ?bool $createHeaderActionEnabled = null;
+    protected bool $createHeaderActionSupported = true;
 
     protected array $headerAppearanceProps = [];
 
@@ -154,9 +160,12 @@ class TableBuilder
     protected bool|array $exported = true;
 
     protected bool $imported = true;
+    protected ?bool $viewsAddable = null;
 
     protected ?string $exportUrl = null;
     protected array $schemaColumnsCache = [];
+    protected ?string $runtimeTableIdentifier = null;
+    protected ?string $resolvedTableIdentifier = null;
 
     public function searchbar($searchbar): static
     {
@@ -172,11 +181,22 @@ class TableBuilder
 
         if ($normalized === '') {
             $this->id = null;
+            $this->resolvedTableIdentifier = null;
 
             return $this;
         }
 
         $this->id = $normalized;
+        $this->resolvedTableIdentifier = null;
+
+        return $this;
+    }
+
+    public function withTableIdentifier(?string $identifier): static
+    {
+        $normalized = $this->normalizeTableIdentifier((string) $identifier);
+        $this->runtimeTableIdentifier = $normalized !== '' ? $normalized : null;
+        $this->resolvedTableIdentifier = null;
 
         return $this;
     }
@@ -255,6 +275,10 @@ class TableBuilder
                     $this->imported($parsed);
                 }
             }
+        }
+
+        if (is_array($tableConfig) && array_key_exists('views_addable', $tableConfig)) {
+            $this->viewsAddable($this->toBoolean($tableConfig['views_addable'], true));
         }
 
         if (is_array($tableConfig) && array_key_exists('custom_columns', $tableConfig)) {
@@ -590,6 +614,31 @@ class TableBuilder
         return $this;
     }
 
+    public function defaultSort(array|string $columns, ?string $direction = null): static
+    {
+        $normalizedDirection = strtolower(trim((string) ($direction ?? 'asc')));
+        if (! in_array($normalizedDirection, ['asc', 'desc'], true)) {
+            $normalizedDirection = 'asc';
+        }
+
+        $normalizedColumns = is_array($columns)
+            ? $this->normalizeSortableColumns($columns)
+            : $this->normalizeSortableColumns([$columns]);
+
+        if ($normalizedColumns === []) {
+            $this->defaultSortQuery = null;
+
+            return $this;
+        }
+
+        $this->defaultSortQuery = implode(',', array_map(
+            static fn (string $column): string => $normalizedDirection === 'desc' ? '-'.$column : $column,
+            $normalizedColumns
+        ));
+
+        return $this;
+    }
+
     public function actions(array|bool $actions): static
     {
         if (is_bool($actions)) {
@@ -610,6 +659,18 @@ class TableBuilder
         return $this;
     }
 
+    public function viewsAddable(bool $state = true): static
+    {
+        $this->viewsAddable = $state;
+
+        return $this;
+    }
+
+    public function canAddViews(): bool
+    {
+        return $this->resolveViewsAddable();
+    }
+
     public function baseUri(string $uri): static
     {
         $this->baseUri = '/'.trim($uri, '/');
@@ -620,6 +681,27 @@ class TableBuilder
     public function header(array $components): static
     {
         $this->headerComponents = $components;
+
+        return $this;
+    }
+
+    public function columnVisibility(bool $state = true): static
+    {
+        $this->columnVisibilityEnabled = $state;
+
+        return $this;
+    }
+
+    public function createAction(bool $state = true): static
+    {
+        $this->createHeaderActionEnabled = $state;
+
+        return $this;
+    }
+
+    public function supportsCreateAction(bool $state = true): static
+    {
+        $this->createHeaderActionSupported = $state;
 
         return $this;
     }
@@ -1536,6 +1618,92 @@ class TableBuilder
         });
     }
 
+    public function applyDropdownSearchFilters($query, ?\Illuminate\Http\Request $request = null): void
+    {
+        if (! $query instanceof EloquentBuilder) {
+            return;
+        }
+
+        $request ??= request();
+        if (! $request) {
+            return;
+        }
+
+        if ($this->dropdownSearchQueryBase === null) {
+            $this->dropdownSearchQueryBase = clone $query;
+        }
+
+        foreach ($this->resolveSearchbarComponents() as $component) {
+            if (! $component instanceof DropdownSearch) {
+                continue;
+            }
+
+            $column = trim((string) ($component->getProp('column') ?? ''));
+            if ($column === '') {
+                continue;
+            }
+
+            $name = trim((string) ($component->getProp('name') ?? $column));
+            if ($name === '') {
+                continue;
+            }
+
+            $values = $this->resolveDropdownRequestValues($request, $name);
+
+            if ($values === []) {
+                continue;
+            }
+
+            if (count($values) === 1) {
+                $query->where($column, '=', $values[0]);
+                continue;
+            }
+
+            $query->whereIn($column, $values);
+        }
+    }
+
+    protected function resolveDropdownRequestValues(\Illuminate\Http\Request $request, string $name): array
+    {
+        $values = [];
+
+        foreach ([$name, "{$name}[]"] as $candidate) {
+            $raw = $request->query($candidate);
+
+            if (is_array($raw)) {
+                foreach ($raw as $entry) {
+                    if (is_scalar($entry)) {
+                        $normalized = trim((string) $entry);
+                        if ($normalized !== '') {
+                            $values[] = $normalized;
+                        }
+                    }
+                }
+            } elseif (is_scalar($raw)) {
+                $normalized = trim((string) $raw);
+                if ($normalized !== '') {
+                    $values[] = $normalized;
+                }
+            }
+        }
+
+        $queryBag = $request->query();
+        foreach ($queryBag as $key => $raw) {
+            if (! is_string($key) || ! preg_match('/^'.preg_quote($name, '/').'\[\d+\]$/', $key)) {
+                continue;
+            }
+
+            if (is_scalar($raw)) {
+                $normalized = trim((string) $raw);
+                if ($normalized !== '') {
+                    $values[] = $normalized;
+                }
+            }
+        }
+
+        return array_values(array_unique($values));
+    }
+
     protected function tokenizeSearchTerms(string $search): array
     {
         $normalized = trim(preg_replace('/\s+/u', ' ', $search) ?? $search);
@@ -1640,6 +1808,7 @@ class TableBuilder
         $sortableMap = $this->resolveSortableColumnsMap();
         $multiSortableMap = $this->resolveMultiSortableColumnsMap($sortableMap);
         $directives = $this->parseSortDirectives($sort);
+        $directives = $this->sanitizeSortDirectives($directives, $multiSortableMap);
 
         if ($directives === []) {
             return;
@@ -1684,6 +1853,85 @@ class TableBuilder
 
             $appliedSortCount++;
         }
+    }
+
+    public function applyDefaultSort($query): void
+    {
+        $defaultSort = trim((string) ($this->defaultSortQuery ?? ''));
+        if ($defaultSort === '') {
+            return;
+        }
+
+        $sortableMap = $this->resolveSortableColumnsMap();
+        $directives = $this->parseSortDirectives($defaultSort);
+
+        if ($directives === []) {
+            return;
+        }
+
+        $model = $query instanceof EloquentBuilder ? $query->getModel() : null;
+        $modelColumns = $model instanceof Model ? $this->resolveModelSearchableColumns($model) : [];
+        $modelColumnLookup = array_fill_keys($modelColumns, true);
+
+        foreach ($directives as $directive) {
+            $field = trim((string) ($directive['field'] ?? ''));
+            $direction = strtolower(trim((string) ($directive['direction'] ?? 'asc'))) === 'desc' ? 'desc' : 'asc';
+
+            if ($field === '') {
+                continue;
+            }
+
+            $definition = $sortableMap[$field] ?? null;
+            if (is_array($definition) && ($definition['enabled'] ?? false)) {
+                $columns = is_array($definition['columns'] ?? null) ? $definition['columns'] : [];
+
+                foreach ($columns as $column) {
+                    if (! is_string($column)) {
+                        continue;
+                    }
+
+                    $normalized = trim($column);
+                    if ($normalized === '' || str_contains($normalized, '.')) {
+                        continue;
+                    }
+
+                    $query->orderBy($normalized, $direction);
+                }
+
+                continue;
+            }
+
+            if (str_contains($field, '.')) {
+                continue;
+            }
+
+            if (! isset($modelColumnLookup[$field])) {
+                continue;
+            }
+
+            $query->orderBy($field, $direction);
+        }
+    }
+
+    /**
+     * @param  array<int, array{field:string, direction:string}>  $directives
+     * @param  array<string, array{enabled:bool}>  $multiSortableMap
+     * @return array<int, array{field:string, direction:string}>
+     */
+    protected function sanitizeSortDirectives(array $directives, array $multiSortableMap): array
+    {
+        if ($directives === []) {
+            return [];
+        }
+
+        $multiSortEnabled = $this->hasEnabledMultiSortableColumns($multiSortableMap);
+
+        if ($multiSortEnabled) {
+            return $directives;
+        }
+
+        // Multi-sort disabled: honor only the first valid directive from URL.
+        return [array_values($directives)[0]];
     }
 
     protected function resolveActions(): array
@@ -1731,89 +1979,755 @@ class TableBuilder
 
     protected function getSavedViews(): \Illuminate\Support\Collection
     {
-        return collect([
-            [
-                'id' => 1,
-                'tenant_id' => 10,
-                'user_id' => 5,
-                'resource' => 'patients',
-                'name' => 'Moi pacjenci',
-                'key' => 'my_patients',
-                'filters' => [
-                    [
-                        'field' => 'assigned_user_id',
-                        'operator' => '=',
-                        'value' => 5,
-                    ],
-                ],
-                'sort' => [
-                    'field' => 'created_at',
-                    'direction' => 'desc',
-                ],
-                'columns' => [
-                    'first_name',
-                    'last_name',
-                    'email',
-                    'status',
-                ],
-                'is_default' => true,
-            ],
+        $settingModel = $this->resolveSettingModelClass();
+        if ($settingModel === null || ! method_exists($settingModel, 'getSettingGlobal')) {
+            return collect();
+        }
 
-            [
-                'id' => 2,
-                'tenant_id' => 10,
-                'user_id' => 5,
-                'resource' => 'patients',
-                'name' => 'Nowi w tym miesiącu',
-                'key' => 'new_this_month',
-                'filters' => [
-                    [
-                        'field' => 'created_at',
-                        'operator' => '>=',
-                        'value' => now()->startOfMonth()->toDateString(),
-                    ],
-                ],
-                'sort' => [
-                    'field' => 'created_at',
-                    'direction' => 'desc',
-                ],
-                'columns' => [
-                    'first_name',
-                    'last_name',
-                    'phone',
-                    'created_at',
-                ],
-                'is_default' => false,
-            ],
+        $settingKey = $this->tableViewsSettingKey();
+        $publicRaw = $settingModel::getSettingGlobal($settingKey, []);
+        $publicViews = $this->normalizeStoredViews($publicRaw, true);
 
-            [
-                'id' => 3,
-                'tenant_id' => 10,
-                'user_id' => 5,
-                'resource' => 'patients',
-                'name' => 'Zaległe płatności',
-                'key' => 'overdue_payments',
-                'filters' => [
-                    [
-                        'field' => 'payment_status',
-                        'operator' => '=',
-                        'value' => 'overdue',
-                    ],
-                ],
-                'sort' => [
-                    'field' => 'last_visit_at',
-                    'direction' => 'asc',
-                ],
-                'columns' => [
-                    'first_name',
-                    'last_name',
-                    'last_visit_at',
-                    'payment_status',
-                ],
-                'is_default' => false,
-            ],
-        ])
-            ->map(fn ($view) => (object) $view);
+        if (! $this->resolveViewsAddable()) {
+            $order = $this->loadStoredViewOrderByScope($settingModel, $this->tableViewsOrderSettingKey(), true);
+
+            if ($order !== []) {
+                $publicViews = $this->reorderStoredViewsByKeys($publicViews, $order);
+            }
+
+            return collect($publicViews)->map(static fn (array $view) => (object) $view);
+        }
+
+        $userViews = [];
+        if (auth()->check() && method_exists($settingModel, 'getSettingGlobalForUser')) {
+            $userRaw = $settingModel::getSettingGlobalForUser($settingKey, [], null, auth()->id(), false);
+            $userViews = $this->normalizeStoredViews($userRaw, false);
+        }
+
+        $merged = $this->mergeSavedViewsByKey($publicViews, $userViews);
+        $merged = $this->applyStoredViewOrder($settingModel, $merged);
+
+        return collect($merged)->map(static fn (array $view) => (object) $view);
+    }
+
+    public function saveView(array $payload): ?array
+    {
+        $settingModel = $this->resolveSettingModelClass();
+        if ($settingModel === null || ! method_exists($settingModel, 'setSettingGlobal')) {
+            return null;
+        }
+
+        $name = trim((string) ($payload['name'] ?? ''));
+        if ($name === '') {
+            return null;
+        }
+
+        $isPublic = $this->normalizeBooleanValue($payload['is_public'] ?? $payload['public'] ?? false, false);
+        $query = $this->normalizeViewQuery($payload['query'] ?? []);
+
+        $settingKey = $this->tableViewsSettingKey();
+        $storedViews = $this->loadStoredViewsByScope($settingModel, $settingKey, $isPublic);
+        $existing = $this->normalizeStoredViews($storedViews, $isPublic);
+
+        $baseKey = trim((string) ($payload['key'] ?? ''));
+        if ($baseKey === '') {
+            $baseKey = $name;
+        }
+
+        $normalizedBaseKey = $this->normalizeViewKey($baseKey);
+        if ($normalizedBaseKey === '') {
+            $normalizedBaseKey = 'view';
+        }
+
+        $viewKey = $this->ensureUniqueSavedViewKey($existing, $normalizedBaseKey);
+        $sort = $this->normalizeSortFromQuery($query);
+        $now = now()->toDateTimeString();
+
+        $view = [
+            'id' => (string) Str::uuid(),
+            'name' => $name,
+            'key' => $viewKey,
+            'icon' => $this->normalizeNullableString($payload['icon'] ?? null),
+            'color' => $this->normalizeNullableString($payload['color'] ?? null),
+            'is_public' => $isPublic,
+            'query' => $query,
+            'filters' => [],
+            'sort' => $sort,
+            'columns' => [],
+            'is_default' => false,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ];
+
+        $existing[] = $view;
+        $this->storeViewsByScope($settingModel, $settingKey, array_values($existing), $isPublic);
+
+        return $view;
+    }
+
+    public function updateView(array $payload): ?array
+    {
+        $settingModel = $this->resolveSettingModelClass();
+        if ($settingModel === null || ! method_exists($settingModel, 'setSettingGlobal')) {
+            return null;
+        }
+
+        $viewKey = $this->normalizeViewKey((string) ($payload['key'] ?? ''));
+        if ($viewKey === '') {
+            return null;
+        }
+
+        $name = trim((string) ($payload['name'] ?? ''));
+        if ($name === '') {
+            return null;
+        }
+
+        $scopes = [true];
+        if (auth()->check()
+            && method_exists($settingModel, 'getSettingGlobalForUser')
+            && method_exists($settingModel, 'setSettingGlobalForUser')) {
+            $scopes[] = false;
+        }
+
+        $settingKey = $this->tableViewsSettingKey();
+        $viewsByScope = [];
+        $sourceScope = null;
+        $sourceIndex = null;
+        $sourceView = null;
+
+        foreach ($scopes as $scope) {
+            $normalizedScope = (bool) $scope;
+            $views = $this->normalizeStoredViews(
+                $this->loadStoredViewsByScope($settingModel, $settingKey, $normalizedScope),
+                $normalizedScope
+            );
+            $viewsByScope[$normalizedScope] = $views;
+
+            foreach ($views as $index => $view) {
+                if ($this->normalizeViewKey((string) ($view['key'] ?? '')) !== $viewKey) {
+                    continue;
+                }
+
+                $sourceScope = $normalizedScope;
+                $sourceIndex = $index;
+                $sourceView = $view;
+                break 2;
+            }
+        }
+
+        if ($sourceScope === null || $sourceIndex === null || ! is_array($sourceView)) {
+            return null;
+        }
+
+        $targetScope = $this->normalizeBooleanValue($payload['is_public'] ?? null, (bool) ($sourceView['is_public'] ?? $sourceScope));
+        $hasIconInPayload = array_key_exists('icon', $payload);
+        $hasColorInPayload = array_key_exists('color', $payload);
+
+        $queryPayload = $payload['query'] ?? null;
+        $query = is_array($queryPayload)
+            ? $this->normalizeViewQuery($queryPayload)
+            : (is_array($sourceView['query'] ?? null) ? $this->normalizeViewQuery($sourceView['query']) : []);
+
+        $now = now()->toDateTimeString();
+
+        $updatedView = array_merge($sourceView, [
+            'name' => $name,
+            'icon' => $hasIconInPayload
+                ? $this->normalizeNullableString($payload['icon'])
+                : $this->normalizeNullableString($sourceView['icon'] ?? null),
+            'color' => $hasColorInPayload
+                ? $this->normalizeNullableString($payload['color'])
+                : $this->normalizeNullableString($sourceView['color'] ?? null),
+            'is_public' => $targetScope,
+            'query' => $query,
+            'sort' => $this->normalizeSortFromQuery($query),
+            'updated_at' => $now,
+        ]);
+
+        $sourceViews = $viewsByScope[$sourceScope] ?? [];
+        unset($sourceViews[$sourceIndex]);
+        $viewsByScope[$sourceScope] = array_values($sourceViews);
+
+        $targetViews = $viewsByScope[$targetScope] ?? [];
+        $targetViews = array_values(array_filter(
+            $targetViews,
+            fn (array $view): bool => $this->normalizeViewKey((string) ($view['key'] ?? '')) !== $viewKey
+        ));
+        $targetViews[] = $updatedView;
+        $viewsByScope[$targetScope] = $targetViews;
+
+        foreach ($scopes as $scope) {
+            $normalizedScope = (bool) $scope;
+            $scopeViews = array_values($viewsByScope[$normalizedScope] ?? []);
+            $this->storeViewsByScope($settingModel, $settingKey, $scopeViews, $normalizedScope);
+
+            $orderKey = $this->tableViewsOrderSettingKey();
+            $currentOrder = $this->loadStoredViewOrderByScope($settingModel, $orderKey, $normalizedScope);
+            if ($currentOrder !== []) {
+                $filteredOrder = array_values(array_filter(
+                    $currentOrder,
+                    fn (string $key): bool => $this->normalizeViewKey($key) !== $viewKey
+                ));
+
+                if ($normalizedScope === $targetScope) {
+                    $filteredOrder[] = $viewKey;
+                }
+
+                $this->storeViewOrderByScope($settingModel, $filteredOrder, $normalizedScope);
+            }
+        }
+
+        return $updatedView;
+    }
+
+    public function reorderViews(array $orderedKeys): bool
+    {
+        $settingModel = $this->resolveSettingModelClass();
+        if ($settingModel === null || ! method_exists($settingModel, 'setSettingGlobal')) {
+            return false;
+        }
+
+        $normalizedKeys = $this->normalizeViewOrderKeys($orderedKeys);
+
+        if ($normalizedKeys === []) {
+            return false;
+        }
+
+        $settingKey = $this->tableViewsSettingKey();
+        $scopes = [true];
+
+        if (auth()->check()
+            && method_exists($settingModel, 'getSettingGlobalForUser')
+            && method_exists($settingModel, 'setSettingGlobalForUser')) {
+            $scopes[] = false;
+        }
+
+        $updated = false;
+
+        foreach ($scopes as $isPublic) {
+            $storedViews = $this->loadStoredViewsByScope($settingModel, $settingKey, (bool) $isPublic);
+            $existing = $this->normalizeStoredViews($storedViews, (bool) $isPublic);
+
+            if ($existing === []) {
+                continue;
+            }
+
+            $reordered = $this->reorderStoredViewsByKeys($existing, $normalizedKeys);
+
+            if ($reordered === $existing) {
+                continue;
+            }
+
+            $this->storeViewsByScope($settingModel, $settingKey, $reordered, (bool) $isPublic);
+            $updated = true;
+        }
+
+        $orderStored = false;
+        foreach ($scopes as $isPublic) {
+            $orderStored = $this->storeViewOrderByScope($settingModel, $normalizedKeys, (bool) $isPublic) || $orderStored;
+        }
+
+        return $updated || $orderStored;
+    }
+
+    public function deleteView(string $viewKey): bool
+    {
+        $settingModel = $this->resolveSettingModelClass();
+        if ($settingModel === null || ! method_exists($settingModel, 'setSettingGlobal')) {
+            return false;
+        }
+
+        $normalizedViewKey = $this->normalizeViewKey($viewKey);
+        if ($normalizedViewKey === '') {
+            return false;
+        }
+
+        $viewsSettingKey = $this->tableViewsSettingKey();
+        $orderSettingKey = $this->tableViewsOrderSettingKey();
+        $scopes = [true];
+
+        if (auth()->check()
+            && method_exists($settingModel, 'getSettingGlobalForUser')
+            && method_exists($settingModel, 'setSettingGlobalForUser')) {
+            $scopes[] = false;
+        }
+
+        $updated = false;
+
+        foreach ($scopes as $isPublic) {
+            $existingViews = $this->normalizeStoredViews(
+                $this->loadStoredViewsByScope($settingModel, $viewsSettingKey, (bool) $isPublic),
+                (bool) $isPublic
+            );
+
+            if ($existingViews !== []) {
+                $filteredViews = array_values(array_filter(
+                    $existingViews,
+                    fn (array $view): bool => $this->normalizeViewKey((string) ($view['key'] ?? '')) !== $normalizedViewKey
+                ));
+
+                if (count($filteredViews) !== count($existingViews)) {
+                    $this->storeViewsByScope($settingModel, $viewsSettingKey, $filteredViews, (bool) $isPublic);
+                    $updated = true;
+                }
+            }
+
+            $existingOrder = $this->loadStoredViewOrderByScope($settingModel, $orderSettingKey, (bool) $isPublic);
+            if ($existingOrder === []) {
+                continue;
+            }
+
+            $filteredOrder = array_values(array_filter(
+                $existingOrder,
+                fn (string $key): bool => $this->normalizeViewKey($key) !== $normalizedViewKey
+            ));
+
+            if ($filteredOrder === $existingOrder) {
+                continue;
+            }
+
+            $this->storeViewOrderByScope($settingModel, $filteredOrder, (bool) $isPublic);
+            $updated = true;
+        }
+
+        return $updated;
+    }
+
+    protected function tableViewsSettingKey(): string
+    {
+        return 'table.views.' . $this->resolveTableIdentifier();
+    }
+
+    protected function tableViewsOrderSettingKey(): string
+    {
+        return 'table.views.order.' . $this->resolveTableIdentifier();
+    }
+
+    /**
+     * @param  array<int, string>  $orderedKeys
+     */
+    protected function storeViewOrderByScope(string $settingModel, array $orderedKeys, ?bool $isPublic = null): bool
+    {
+        $settingKey = $this->tableViewsOrderSettingKey();
+
+        if ($isPublic === true) {
+            $settingModel::setSettingGlobal($settingKey, array_values($orderedKeys), true);
+
+            return true;
+        }
+
+        if ($isPublic === false && auth()->check() && method_exists($settingModel, 'setSettingGlobalForUser')) {
+            $settingModel::setSettingGlobalForUser($settingKey, array_values($orderedKeys), true, auth()->id());
+
+            return true;
+        }
+
+        if (auth()->check() && method_exists($settingModel, 'setSettingGlobalForUser')) {
+            $settingModel::setSettingGlobalForUser($settingKey, array_values($orderedKeys), true, auth()->id());
+        } else {
+            $settingModel::setSettingGlobal($settingKey, array_values($orderedKeys), true);
+        }
+
+        return true;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $views
+     * @return array<int, array<string, mixed>>
+     */
+    protected function applyStoredViewOrder(string $settingModel, array $views): array
+    {
+        if ($views === []) {
+            return [];
+        }
+
+        $order = $this->resolveStoredViewOrder($settingModel);
+        if ($order === []) {
+            return $views;
+        }
+
+        return $this->reorderStoredViewsByKeys($views, $order);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function resolveStoredViewOrder(string $settingModel): array
+    {
+        $settingKey = $this->tableViewsOrderSettingKey();
+        $raw = [];
+
+        if (auth()->check() && method_exists($settingModel, 'getSettingGlobalForUser')) {
+            $raw = $this->loadStoredViewOrderByScope($settingModel, $settingKey, false);
+        }
+
+        if (! is_array($raw) || $raw === []) {
+            $raw = $this->loadStoredViewOrderByScope($settingModel, $settingKey, true);
+        }
+
+        return is_array($raw) ? $raw : [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function loadStoredViewOrderByScope(string $settingModel, string $settingKey, bool $isPublic): array
+    {
+        if ($isPublic) {
+            $raw = $settingModel::getSettingGlobal($settingKey, []);
+
+            return is_array($raw) ? $this->normalizeViewOrderKeys($raw) : [];
+        }
+
+        if (! auth()->check() || ! method_exists($settingModel, 'getSettingGlobalForUser')) {
+            return [];
+        }
+
+        $raw = $settingModel::getSettingGlobalForUser($settingKey, [], null, auth()->id(), false);
+
+        return is_array($raw) ? $this->normalizeViewOrderKeys($raw) : [];
+    }
+
+    /**
+     * @param  array<int, mixed>  $orderedKeys
+     * @return array<int, string>
+     */
+    protected function normalizeViewOrderKeys(array $orderedKeys): array
+    {
+        $normalizedKeys = [];
+        foreach ($orderedKeys as $entry) {
+            $key = trim((string) $entry);
+            if ($key === '' || in_array($key, $normalizedKeys, true)) {
+                continue;
+            }
+
+            $normalizedKeys[] = $key;
+        }
+
+        return $normalizedKeys;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $views
+     * @param  array<int, string>  $orderedKeys
+     * @return array<int, array<string, mixed>>
+     */
+    protected function reorderStoredViewsByKeys(array $views, array $orderedKeys): array
+    {
+        $byKey = [];
+        foreach ($views as $view) {
+            $key = trim((string) ($view['key'] ?? ''));
+            if ($key === '') {
+                continue;
+            }
+
+            $byKey[$key] = $view;
+        }
+
+        if ($byKey === []) {
+            return $views;
+        }
+
+        $ordered = [];
+
+        foreach ($orderedKeys as $key) {
+            $normalizedKey = trim((string) $key);
+            if ($normalizedKey === '' || ! array_key_exists($normalizedKey, $byKey)) {
+                continue;
+            }
+
+            $ordered[] = $byKey[$normalizedKey];
+            unset($byKey[$normalizedKey]);
+        }
+
+        foreach ($views as $view) {
+            $key = trim((string) ($view['key'] ?? ''));
+            if ($key === '' || ! array_key_exists($key, $byKey)) {
+                continue;
+            }
+
+            $ordered[] = $byKey[$key];
+            unset($byKey[$key]);
+        }
+
+        return array_values($ordered);
+    }
+
+    protected function resolveSettingModelClass(): ?string
+    {
+        $model = (string) config('upsoftware.models.setting', \Upsoftware\Svarium\Models\Setting::class);
+        $model = trim($model);
+
+        if ($model === '' || ! class_exists($model)) {
+            return null;
+        }
+
+        return $model;
+    }
+
+    protected function normalizeStoredViews(mixed $stored, bool $defaultPublic): array
+    {
+        if (! is_array($stored)) {
+            return [];
+        }
+
+        $rows = array_is_list($stored) ? $stored : array_values($stored);
+        $normalized = [];
+
+        foreach ($rows as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $name = trim((string) ($item['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+
+            $key = $this->normalizeViewKey($item['key'] ?? $name);
+            if ($key === '') {
+                continue;
+            }
+
+            $query = $this->normalizeViewQuery($item['query'] ?? []);
+            $sort = is_array($item['sort'] ?? null) ? $item['sort'] : $this->normalizeSortFromQuery($query);
+
+            $normalized[] = [
+                'id' => (string) ($item['id'] ?? ''),
+                'name' => $name,
+                'key' => $key,
+                'icon' => $this->normalizeNullableString($item['icon'] ?? null),
+                'color' => $this->normalizeNullableString($item['color'] ?? null),
+                'is_public' => $this->normalizeBooleanValue($item['is_public'] ?? null, $defaultPublic),
+                'query' => $query,
+                'filters' => is_array($item['filters'] ?? null) ? $item['filters'] : [],
+                'sort' => $sort,
+                'columns' => is_array($item['columns'] ?? null) ? array_values($item['columns']) : [],
+                'is_default' => $this->normalizeBooleanValue($item['is_default'] ?? false, false),
+                'created_at' => (string) ($item['created_at'] ?? ''),
+                'updated_at' => (string) ($item['updated_at'] ?? ''),
+            ];
+        }
+
+        return $this->deduplicateSavedViews($normalized);
+    }
+
+    protected function mergeSavedViewsByKey(array $primary, array $overrides): array
+    {
+        $merged = [];
+
+        foreach ($primary as $view) {
+            $key = trim((string) ($view['key'] ?? ''));
+            if ($key === '') {
+                continue;
+            }
+
+            $merged[$key] = $view;
+        }
+
+        foreach ($overrides as $view) {
+            $key = trim((string) ($view['key'] ?? ''));
+            if ($key === '') {
+                continue;
+            }
+
+            $merged[$key] = $view;
+        }
+
+        return array_values($merged);
+    }
+
+    protected function deduplicateSavedViews(array $views): array
+    {
+        $result = [];
+
+        foreach ($views as $view) {
+            if (! is_array($view)) {
+                continue;
+            }
+
+            $key = trim((string) ($view['key'] ?? ''));
+            if ($key === '') {
+                continue;
+            }
+
+            $result[$key] = $view;
+        }
+
+        return array_values($result);
+    }
+
+    protected function normalizeViewKey(mixed $value): string
+    {
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return '';
+        }
+
+        return Str::of($raw)
+            ->replaceMatches('/[^A-Za-z0-9\-_:.]+/', '-')
+            ->replaceMatches('/-+/', '-')
+            ->trim('-')
+            ->lower()
+            ->value();
+    }
+
+    protected function ensureUniqueSavedViewKey(array $existing, string $base): string
+    {
+        $base = $this->normalizeViewKey($base);
+        if ($base === '') {
+            $base = 'view';
+        }
+
+        $taken = [];
+        foreach ($existing as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $key = $this->normalizeViewKey($item['key'] ?? '');
+            if ($key !== '') {
+                $taken[$key] = true;
+            }
+        }
+
+        if (! isset($taken[$base])) {
+            return $base;
+        }
+
+        $counter = 2;
+        while (isset($taken["{$base}-{$counter}"])) {
+            $counter++;
+        }
+
+        return "{$base}-{$counter}";
+    }
+
+    protected function normalizeNullableString(mixed $value): ?string
+    {
+        $normalized = trim((string) $value);
+
+        return $normalized !== '' ? $normalized : null;
+    }
+
+    protected function normalizeBooleanValue(mixed $value, bool $default = false): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            return ((int) $value) !== 0;
+        }
+
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+
+            if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+                return true;
+            }
+
+            if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+                return false;
+            }
+        }
+
+        return $default;
+    }
+
+    protected function normalizeViewQuery(mixed $query): array
+    {
+        if (! is_array($query)) {
+            return [];
+        }
+
+        $excludedKeys = [
+            'view',
+            'page',
+            'perPage',
+            'rowsPerPage',
+            'per_page',
+            'limit',
+            'offset',
+        ];
+
+        $normalized = [];
+
+        foreach ($query as $rawKey => $rawValue) {
+            $key = trim((string) $rawKey);
+            if ($key === '' || in_array($key, $excludedKeys, true) || str_starts_with($key, '_')) {
+                continue;
+            }
+
+            if (is_array($rawValue)) {
+                $items = [];
+
+                foreach ($rawValue as $entry) {
+                    if (is_string($entry) || is_numeric($entry)) {
+                        $value = trim((string) $entry);
+                        if ($value !== '') {
+                            $items[] = $value;
+                        }
+                    }
+                }
+
+                if ($items !== []) {
+                    $normalized[$key] = $items;
+                }
+
+                continue;
+            }
+
+            if (is_string($rawValue) || is_numeric($rawValue)) {
+                $value = trim((string) $rawValue);
+                if ($value !== '') {
+                    $normalized[$key] = $value;
+                }
+            }
+        }
+
+        return $normalized;
+    }
+
+    protected function normalizeSortFromQuery(array $query): ?array
+    {
+        $raw = trim((string) ($query['sort'] ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+
+        $field = ltrim($raw, '-');
+        if ($field === '') {
+            return null;
+        }
+
+        return [
+            'field' => $field,
+            'direction' => str_starts_with($raw, '-') ? 'desc' : 'asc',
+        ];
+    }
+
+    protected function loadStoredViewsByScope(string $settingModel, string $settingKey, bool $isPublic): mixed
+    {
+        if ($isPublic) {
+            return $settingModel::getSettingGlobal($settingKey, []);
+        }
+
+        if (! auth()->check() || ! method_exists($settingModel, 'getSettingGlobalForUser')) {
+            return [];
+        }
+
+        return $settingModel::getSettingGlobalForUser($settingKey, [], null, auth()->id(), false);
+    }
+
+    protected function storeViewsByScope(string $settingModel, string $settingKey, array $views, bool $isPublic): void
+    {
+        if ($isPublic || ! auth()->check() || ! method_exists($settingModel, 'setSettingGlobalForUser')) {
+            $settingModel::setSettingGlobal($settingKey, array_values($views), true);
+            return;
+        }
+
+        $settingModel::setSettingGlobalForUser($settingKey, array_values($views), true, auth()->id());
     }
 
     protected function resolveSavedView(string $viewKey): ?object
@@ -1866,6 +2780,25 @@ class TableBuilder
             if ($sortField !== '') {
                 $direction = strtolower(trim((string) ($view->sort['direction'] ?? 'asc')));
                 $this->applySort($query, ($direction === 'desc' ? '-' : '').$sortField);
+            }
+        }
+
+        $request = request();
+        $querySnapshot = $this->normalizeViewQuery((array) ($view->query ?? []));
+
+        if ($querySnapshot !== []) {
+            if (! $request?->filled('q') && ! $request?->filled('search')) {
+                $search = trim((string) ($querySnapshot['q'] ?? $querySnapshot['search'] ?? ''));
+                if ($search !== '') {
+                    $this->applySearch($query, $search);
+                }
+            }
+
+            if ($applySort && ! $request?->filled('sort')) {
+                $sort = trim((string) ($querySnapshot['sort'] ?? ''));
+                if ($sort !== '') {
+                    $this->applySort($query, $sort);
+                }
             }
         }
 
@@ -1937,6 +2870,16 @@ class TableBuilder
                 $tabItem = TabItem::make($view->name)
                     ->prop('value', $view->key);
 
+                $icon = trim((string) ($view->icon ?? ''));
+                if ($icon !== '') {
+                    $tabItem->icon($icon);
+                }
+
+                $color = trim((string) ($view->color ?? ''));
+                if ($color !== '') {
+                    $tabItem->color($color);
+                }
+
                 $items[] = $tabItem;
             }
         }
@@ -1944,6 +2887,19 @@ class TableBuilder
         if (empty($items)) {
             return null;
         }
+
+        $allTabValue = '__all__';
+        $items = array_values(array_filter($items, static function ($item) use ($allTabValue): bool {
+            if (! $item instanceof TabItem) {
+                return true;
+            }
+
+            $value = trim((string) ($item->getProp('value') ?? ''));
+
+            return $value !== $allTabValue;
+        }));
+
+        array_unshift($items, TabItem::make(__('All'))->prop('value', $allTabValue));
 
         $allowedValues = [];
         foreach ($items as $item) {
@@ -1968,7 +2924,7 @@ class TableBuilder
             ->items($items);
     }
 
-    protected function resolveSearchbarComponents(): array
+    protected function resolveSearchbarConfiguredComponents(): array
     {
         $components = [];
 
@@ -1988,13 +2944,20 @@ class TableBuilder
             array_unshift($components, InputSearch::make('q')->placeholder(__('Search...')));
         }
 
+        return $components;
+    }
+
+    protected function resolveSearchbarComponents(): array
+    {
+        $components = $this->resolveSearchbarConfiguredComponents();
+
         if ($components === []) {
             return [];
         }
 
         foreach ($components as $component) {
             if ($component instanceof DropdownSearch) {
-                $component->resolveFromQuery($this->query);
+                $component->resolveFromQuery($this->resolveDropdownSearchComponentQuery($component));
             }
         }
 
@@ -2003,6 +2966,45 @@ class TableBuilder
         }
 
         return $components;
+    }
+
+    protected function resolveDropdownSearchComponentQuery(DropdownSearch $target): EloquentBuilder
+    {
+        $base = $this->dropdownSearchQueryBase instanceof EloquentBuilder
+            ? clone $this->dropdownSearchQueryBase
+            : clone $this->query;
+
+        $request = request();
+        if (! $request) {
+            return $base;
+        }
+
+        foreach ($this->resolveSearchbarConfiguredComponents() as $component) {
+            if (! $component instanceof DropdownSearch || $component === $target) {
+                continue;
+            }
+
+            $column = trim((string) ($component->getProp('column') ?? ''));
+            $name = trim((string) ($component->getProp('name') ?? $column));
+
+            if ($column === '' || $name === '') {
+                continue;
+            }
+
+            $values = $this->resolveDropdownRequestValues($request, $name);
+
+            if ($values === []) {
+                continue;
+            }
+
+            if (count($values) === 1) {
+                $base->where($column, '=', $values[0]);
+            } else {
+                $base->whereIn($column, $values);
+            }
+        }
+
+        return $base;
     }
 
     protected function shouldAutoAddSearchbarInput(): bool
@@ -2063,11 +3065,26 @@ class TableBuilder
 
     protected function resolveHeaderComponents(): array
     {
+        $components = $this->collectResolvedHeaderComponents();
+
+        if (! $this->resolveSearchbarComponents()) {
+            $components[] = $this->resolveFilterComponents($this->resolveFilters());
+        }
+
+        return $components;
+    }
+
+    protected function collectResolvedHeaderComponents(): array
+    {
         $components = [];
         $serializedColumns = $this->serializeColumns();
 
         foreach ($this->headerComponents as $component) {
             if (! is_object($component) || ! method_exists($component, 'toArray')) {
+                continue;
+            }
+
+            if (! $this->shouldRenderHeaderComponent($component)) {
                 continue;
             }
 
@@ -2082,8 +3099,18 @@ class TableBuilder
             $components[] = $component;
         }
 
-        if (! $this->resolveSearchbarComponents()) {
-            $components[] = $this->resolveFilterComponents($this->resolveFilters());
+        if ($this->shouldAutoAddColumnVisibility($components)) {
+            $components[] = ColumnVisibility::make()
+                ->variant('outline')
+                ->size('sm')
+                ->columns($serializedColumns);
+        }
+
+        if ($this->shouldAutoAddCreateHeaderAction($components)) {
+            $components[] = Action::create()
+                ->variant('outline')
+                ->size('sm')
+                ->baseUri($this->baseUri ?? '');
         }
 
         return $components;
@@ -2091,7 +3118,7 @@ class TableBuilder
 
     protected function resolveEmptyCreateAction(): ?array
     {
-        foreach ($this->headerComponents as $component) {
+        foreach ($this->collectResolvedHeaderComponents() as $component) {
             if (! $component instanceof Action) {
                 continue;
             }
@@ -2108,6 +3135,71 @@ class TableBuilder
         }
 
         return null;
+    }
+
+    protected function shouldRenderHeaderComponent(object $component): bool
+    {
+        if ($component instanceof ColumnVisibility) {
+            return $this->columnVisibilityEnabled !== false;
+        }
+
+        if ($component instanceof Action && strtolower(trim($component->getType())) === 'create') {
+            if (! $this->createHeaderActionSupported) {
+                return false;
+            }
+
+            return $this->createHeaderActionEnabled !== false;
+        }
+
+        return true;
+    }
+
+    protected function shouldAutoAddColumnVisibility(array $components): bool
+    {
+        if (! $this->resolveColumnVisibilityEnabled()) {
+            return false;
+        }
+
+        foreach ($components as $component) {
+            if ($component instanceof ColumnVisibility) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    protected function shouldAutoAddCreateHeaderAction(array $components): bool
+    {
+        if (! $this->createHeaderActionSupported || ! $this->resolveCreateHeaderActionEnabled()) {
+            return false;
+        }
+
+        foreach ($components as $component) {
+            if ($component instanceof Action && strtolower(trim($component->getType())) === 'create') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    protected function resolveColumnVisibilityEnabled(): bool
+    {
+        if ($this->columnVisibilityEnabled !== null) {
+            return $this->columnVisibilityEnabled;
+        }
+
+        return $this->toBoolean(config('upsoftware.table.column_visibility', false), false);
+    }
+
+    protected function resolveCreateHeaderActionEnabled(): bool
+    {
+        if ($this->createHeaderActionEnabled !== null) {
+            return $this->createHeaderActionEnabled;
+        }
+
+        return $this->toBoolean(config('upsoftware.table.create_action', false), false);
     }
 
     protected function resolveFilterComponents(array $filters)
@@ -2333,6 +3425,17 @@ class TableBuilder
         }
 
         return $map;
+    }
+
+    protected function hasEnabledMultiSortableColumns(array $multiSortableMap): bool
+    {
+        foreach ($multiSortableMap as $definition) {
+            if (is_array($definition) && (bool) ($definition['enabled'] ?? false)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function resolveMultiSortableDefaults(): array
@@ -3255,6 +4358,7 @@ class TableBuilder
         $heads = [];
         $sortableMap = $this->resolveSortableColumnsMap();
         $multiSortableMap = $this->resolveMultiSortableColumnsMap($sortableMap);
+        $multiSortingEnabled = $this->hasEnabledMultiSortableColumns($multiSortableMap);
         $globalHeaderAppearance = $this->headerAppearanceProps['appearance'] ?? [];
         $globalHeaderAppearance = is_array($globalHeaderAppearance) ? $globalHeaderAppearance : [];
 
@@ -3304,6 +4408,7 @@ class TableBuilder
             if (is_array($multiSortable)) {
                 $headProps['multiSortable'] = (bool) ($multiSortable['enabled'] ?? false);
             }
+            $headProps['multiSortingEnabled'] = $multiSortingEnabled;
 
             if (! empty($globalHeaderAppearance)) {
                 $columnHeaderAppearance = $headProps['appearance'] ?? [];
@@ -3563,9 +4668,75 @@ class TableBuilder
             ]);
         }
 
+        if ($column->getValueDisplayType() === 'bool') {
+            $icon = $this->buildBooleanCellIcon($value, $displayValue, $isPlaceholder);
+
+            if ($icon !== null) {
+                return $cell->children([$icon]);
+            }
+        }
+
         return $cell->children([
             Text::make($displayValue),
         ]);
+    }
+
+    protected function buildBooleanCellIcon(mixed $value, string $displayValue, bool $isPlaceholder): ?Icon
+    {
+        if ($isPlaceholder) {
+            return null;
+        }
+
+        $normalized = $this->normalizeBooleanCellValue($value);
+
+        if ($normalized === null && $displayValue !== '') {
+            $normalized = $this->normalizeBooleanCellValue($displayValue);
+        }
+
+        if ($normalized === null) {
+            return null;
+        }
+
+        return $normalized
+            ? Icon::make('lucide:check')
+                ->appearance([
+                    'class' => 'h-4 w-4 text-green-600 dark:text-green-500',
+                ])
+            : Icon::make('lucide:x')
+                ->appearance([
+                    'class' => 'h-4 w-4 text-red-600 dark:text-red-500',
+                ]);
+    }
+
+    protected function normalizeBooleanCellValue(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_int($value) || is_float($value)) {
+            return ((float) $value) !== 0.0;
+        }
+
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($value));
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        if (in_array($normalized, ['1', 'true', 'yes', 'y', 'on'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'no', 'n', 'off'], true)) {
+            return false;
+        }
+
+        return null;
     }
 
     protected function normalizeCellValue(mixed $value): string
@@ -4329,6 +5500,9 @@ class TableBuilder
         $resolvedTableId = $this->resolveTableIdentifier();
         $hasRecords = $paginator->total() > 0;
         $emptyCreateAction = $this->resolveEmptyCreateAction();
+        $multiSortingEnabled = $this->hasEnabledMultiSortableColumns(
+            $this->resolveMultiSortableColumnsMap($this->resolveSortableColumnsMap())
+        );
 
         $table = Table::make()
             ->prop('id', $resolvedTableId)
@@ -4346,6 +5520,7 @@ class TableBuilder
             ->prop('searchAppearance', $this->resolveSearchAppearanceProps())
             ->slot('header', $this->resolveHeaderComponents())
             ->prop('views', $this->getSavedViews())
+            ->prop('viewsAddable', $this->resolveViewsAddable())
             ->prop('appearance', $this->appearance ?? 'card')
             ->prop('title', $this->title)
             ->prop('description', $this->description)
@@ -4362,6 +5537,7 @@ class TableBuilder
             ->prop('exported', $this->exported)
             ->prop('exportUrl', $this->exportUrl)
             ->prop('imported', $this->imported)
+            ->prop('multiSortingEnabled', $multiSortingEnabled)
             ->prop('rowSelectionColumn', $this->shouldRenderRowMultiSelectColumn($bulkMode))
             ->prop('hasActions', $hasActions)
             ->prop('footer', $footer)
@@ -4400,13 +5576,25 @@ class TableBuilder
 
     protected function resolveTableIdentifier(): string
     {
+        if (is_string($this->resolvedTableIdentifier) && trim($this->resolvedTableIdentifier) !== '') {
+            return $this->resolvedTableIdentifier;
+        }
+
+        if (is_string($this->runtimeTableIdentifier) && trim($this->runtimeTableIdentifier) !== '') {
+            $this->resolvedTableIdentifier = $this->runtimeTableIdentifier;
+
+            return $this->resolvedTableIdentifier;
+        }
+
         $preferred = $this->id;
 
         if (! is_string($preferred) || trim($preferred) === '') {
             $preferred = $this->generateDefaultTableIdentifier();
         }
 
-        return $this->ensureUniqueTableIdentifier($preferred);
+        $this->resolvedTableIdentifier = $this->ensureUniqueTableIdentifier($preferred);
+
+        return $this->resolvedTableIdentifier;
     }
 
     protected function generateDefaultTableIdentifier(): string
@@ -4592,6 +5780,15 @@ class TableBuilder
         }
 
         return $this->toBoolean(config('upsoftware.table.custom_columns'), true);
+    }
+
+    protected function resolveViewsAddable(): bool
+    {
+        if ($this->viewsAddable !== null) {
+            return $this->viewsAddable;
+        }
+
+        return $this->toBoolean(config('upsoftware.table.views_addable'), true);
     }
 
     protected function applyConfiguredColumnAttributes(): void

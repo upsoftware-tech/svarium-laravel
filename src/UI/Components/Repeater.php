@@ -9,6 +9,17 @@ use Upsoftware\Svarium\UI\Component;
 class Repeater extends FieldComponent
 {
     protected Component|array|string|Closure|null $template = null;
+    protected Component|array|string|Closure|null $separatorTemplate = null;
+
+    public function cols(int|string $cols): static
+    {
+        return $this->prop('cols', $cols);
+    }
+
+    public function columns(int|string $cols): static
+    {
+        return $this->cols($cols);
+    }
 
     public function label(string $label, string ...$labels): static
     {
@@ -43,6 +54,38 @@ class Repeater extends FieldComponent
         }
 
         return $this->prop('mode', $normalized);
+    }
+
+    public function delete(bool $enabled = true): static
+    {
+        return $this->prop('delete', $enabled);
+    }
+
+    public function created(bool $enabled = true): static
+    {
+        return $this->prop('created', $enabled);
+    }
+
+    public function separator(bool $enabled = true): static
+    {
+        return $this->prop('separator', $enabled);
+    }
+
+    public function separatorTemplate(Component|array|string|Closure|null $template = null): static
+    {
+        $this->separatorTemplate = $template ?? Separator::make()->margin('my-4');
+
+        return $this;
+    }
+
+    public function separatorPosition(string $position): static
+    {
+        $normalized = strtolower(trim($position));
+        if (! in_array($normalized, ['top', 'bottom', 'both'], true)) {
+            $normalized = 'bottom';
+        }
+
+        return $this->prop('separatorPosition', $normalized);
     }
 
     public function labels(string|array $labels, ?string $valueLabel = null): static
@@ -151,7 +194,18 @@ class Repeater extends FieldComponent
     public function toArray(): array
     {
         if (! $this->getProp('templateComponents')) {
-            $this->prop('templateComponents', $this->normalizeTemplateComponents($this->template));
+            $resolvedTemplate = $this->normalizeTemplateComponents($this->template);
+
+            if ($resolvedTemplate === [] && $this->getChildrenComponents() !== []) {
+                $resolvedTemplate = $this->normalizeTemplateComponents($this->getChildrenComponents());
+                $this->setChildrenComponents([]);
+            }
+
+            $this->prop('templateComponents', $resolvedTemplate);
+        }
+
+        if (! $this->getProp('separatorTemplateComponents') && $this->separatorTemplate !== null) {
+            $this->prop('separatorTemplateComponents', $this->normalizeTemplateComponents($this->separatorTemplate));
         }
 
         $array = parent::toArray();

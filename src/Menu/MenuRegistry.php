@@ -156,8 +156,7 @@ class MenuRegistry
             $type = 'item';
         }
 
-        $label = isset($rawItem['label']) ? trim((string) $rawItem['label']) : '';
-        $label = $this->normalizeTranslatedLabel($label);
+        $rawLabel = isset($rawItem['label']) ? trim((string) $rawItem['label']) : '';
         $routeName = isset($rawItem['route_name']) ? trim((string) $rawItem['route_name']) : null;
         $url = isset($rawItem['url']) ? trim((string) $rawItem['url']) : null;
         $icon = isset($rawItem['icon']) ? trim((string) $rawItem['icon']) : null;
@@ -181,6 +180,10 @@ class MenuRegistry
         ];
         $pathId = $this->normalizePathId($rawItem['path_id'] ?? $rawItem['path_key'] ?? null);
         $parentId = $this->normalizePathId($rawItem['parent'] ?? $rawItem['parent_id'] ?? null);
+        $hasExplicitStableId = $pathId !== '' || $parentId !== '' || $pathIds !== [];
+        $label = $hasExplicitStableId
+            ? $rawLabel
+            : $this->normalizeTranslatedLabel($rawLabel);
 
         if ($parentId !== '' && (($pathIds[0] ?? null) !== $parentId)) {
             array_unshift($pathIds, $parentId);

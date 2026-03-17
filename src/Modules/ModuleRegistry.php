@@ -104,6 +104,26 @@ class ModuleRegistry
             ->enable(get_class($module));
     }
 
+    public function registerRuntime(Module $module): Module
+    {
+        $existing = $this->getByClass(get_class($module));
+        if ($existing instanceof Module) {
+            return $existing;
+        }
+
+        $reflection = new \ReflectionClass($module);
+        $moduleFile = $reflection->getFileName();
+        if (is_string($moduleFile) && $moduleFile !== '') {
+            $module->setPath(dirname($moduleFile));
+        }
+
+        $this->register($module);
+        $this->bootRegistrationForModule($module);
+        $this->bootModule($module);
+
+        return $module;
+    }
+
     protected function registerTranslations(Module $module): void
     {
         $translationPath = $module->translationPath();
@@ -185,31 +205,36 @@ class ModuleRegistry
         $fieldAttributesRegistry->addLockedDefinitions($this->resolveGlobalFieldAttributes());
 
         foreach ($this->modules as $module) {
-            $fieldAttributes = $this->resolveFieldAttributesWithKeyLocale($module);
-            if (is_array($fieldAttributes) && $fieldAttributes !== []) {
-                $fieldAttributesRegistry->addDefinitions($fieldAttributes);
-            }
+            $this->bootRegistrationForModule($module);
+        }
+    }
 
-            $roleParameters = $module->roleParameters();
-            if (is_array($roleParameters) && $roleParameters !== []) {
-                $roleParameterRegistry->registerMany($roleParameters, get_class($module));
-            }
+    protected function bootRegistrationForModule(Module $module): void
+    {
+        $fieldAttributes = $this->resolveFieldAttributesWithKeyLocale($module);
+        if (is_array($fieldAttributes) && $fieldAttributes !== []) {
+            app(FieldAttributesRegistry::class)->addDefinitions($fieldAttributes);
+        }
 
-            $module->register();
+        $roleParameters = $module->roleParameters();
+        if (is_array($roleParameters) && $roleParameters !== []) {
+            app(RoleParameterRegistry::class)->registerMany($roleParameters, get_class($module));
+        }
 
-            $menu = $module->menu();
-            if (is_array($menu) && $menu !== []) {
-                app(MenuRegistry::class)->register($menu, [
-                    'source' => get_class($module),
-                ]);
-            }
+        $module->register();
 
-            $widgets = $module->widgets();
-            if (is_array($widgets) && $widgets !== []) {
-                app(WidgetRegistry::class)->register($widgets, [
-                    'source' => get_class($module),
-                ]);
-            }
+        $menu = $module->menu();
+        if (is_array($menu) && $menu !== []) {
+            app(MenuRegistry::class)->register($menu, [
+                'source' => get_class($module),
+            ]);
+        }
+
+        $widgets = $module->widgets();
+        if (is_array($widgets) && $widgets !== []) {
+            app(WidgetRegistry::class)->register($widgets, [
+                'source' => get_class($module),
+            ]);
         }
     }
 
@@ -283,12 +308,18 @@ class ModuleRegistry
         $bus = app(EventBus::class);
 
         foreach ($this->modules as $module) {
+            $this->bootModule($module, $bus);
+        }
+    }
 
-            $module->boot();
+    protected function bootModule(Module $module, ?EventBus $bus = null): void
+    {
+        $bus ??= app(EventBus::class);
 
-            foreach ($module->listen() as $event => $listener) {
-                $bus->listen($event, $listener);
-            }
+        $module->boot();
+
+        foreach ($module->listen() as $event => $listener) {
+            $bus->listen($event, $listener);
         }
     }
 

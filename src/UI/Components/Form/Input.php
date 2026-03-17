@@ -9,6 +9,21 @@ class Input extends FieldComponent
 {
     use HasVariant;
 
+    public function textAlign(string $alignment): static
+    {
+        return $this->prop('textAlign', $alignment);
+    }
+
+    public function prepend(mixed $value): static
+    {
+        return $this->prop('prepend', $value);
+    }
+
+    public function append(mixed $value): static
+    {
+        return $this->prop('append', $value);
+    }
+
     public function toArray(): array
     {
         $array = parent::toArray();

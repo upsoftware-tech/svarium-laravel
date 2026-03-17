@@ -28,8 +28,10 @@ Niepoprawnie:
 ```php
 return [
     'middleware' => [...],
+    'debug' => [...],
     'api' => [...],
     'table' => [...],
+    'form' => [...],
     'resource' => [...],
     'colors' => [...],
     'panel' => [...],
@@ -42,6 +44,21 @@ return [
     'modules' => [...],
     'logo' => [...],
 ];
+```
+
+## `debug`
+
+- `form` – włącza debug formularzy w UI:
+  - store pól formularza,
+  - błędy walidacji,
+  - debug `showWhen(...)` / `visibleWhen(...)`.
+
+Przykład:
+
+```php
+'debug' => [
+    'form' => false,
+],
 ```
 
 ## `middleware`
@@ -102,7 +119,9 @@ Przykład:
 
 - `action_display` – domyślny tryb akcji (`inline` / `dropdown`).
 - `condensed` – domyślna kondensacja tabel (`true`/`false`).
+- `bordered` – domyślnie dodaje pionowe linie między komórkami.
 - `searchbar` – automatyczne dodawanie `InputSearch::make('q')`.
+- `selectable` – globalnie włącza/wyłącza zaznaczanie wierszy i komórek.
 - `sortable` – domyślne sortowanie kolumn:
   - `false` – domyślnie brak sortowania,
   - `true` – wszystkie kolumny domyślnie sortowalne,
@@ -111,12 +130,16 @@ Przykład:
   - `false` – brak multi-sortowania,
   - `true` – każda sortowalna kolumna może być dodana jako kolejna (`CTRL/CMD + klik`),
   - `['name', 'created_at']` – multi-sort tylko dla wskazanych kolumn.
+- `column_visibility` – automatycznie pokazuje przycisk `ColumnVisibility` w nagłówku tabeli.
+- `create_action` – automatycznie pokazuje `Action::create()` w nagłówku tabeli.
+- `views_addable` – pozwala użytkownikowi zapisywać własne widoki tabel.
 - `custom_columns` – globalna widoczność przycisku/dialogu „Custom columns”.
 - `exported` – domyślna dostępność eksportu:
   - `true` - eksport włączony (wszystkie formaty),
   - `false` - eksport wyłączony,
   - `['sql', 'csv']` - tylko wskazane formaty.
   - Dostępne formaty: `csv`, `tsv`, `xlsx`, `xls`, `ods`, `json`, `xml`, `sql`, `pdf`.
+- `imported` – domyślna dostępność importu.
 - `pagination` – pełna konfiguracja paginacji:
   - `enabled`
   - `rowsPerPageOptions`
@@ -139,11 +162,17 @@ Przykład:
 'table' => [
     'action_display' => 'inline',
     'condensed' => false,
+    'bordered' => false,
     'searchbar' => true,
+    'selectable' => true,
     'sortable' => false,
     'multi_sortable' => false,
+    'column_visibility' => false,
+    'create_action' => false,
+    'views_addable' => true,
     'custom_columns' => true,
     'exported' => true,
+    'imported' => true,
     'pagination' => [
         'enabled' => true,
         'rowsPerPageOptions' => [10, 20, 50, 100, 0],
@@ -161,6 +190,38 @@ Przykład:
         'lastButtonLabel' => null,
     ],
 ],
+```
+
+## `form`
+
+- `required_indicator.enabled` - globalnie włącza/wyłącza oznaczenie pól wymaganych.
+- `required_indicator.label` - sposób oznaczenia pola:
+  - `false` - klasyczna gwiazdka `*`,
+  - `true` - tekst `required`,
+  - `'wymagane'` - własny tekst.
+- `required_indicator.position` - pozycja znacznika:
+  - `left` - przy etykiecie, np. `Imię *`,
+  - `right` - po prawej stronie tego samego wiersza etykiety.
+
+Przykład:
+
+```php
+'form' => [
+    'required_indicator' => [
+        'enabled' => true,
+        'label' => false,
+        'position' => 'left',
+    ],
+],
+```
+
+Per formularz możesz to nadpisać przez:
+
+```php
+Form::make()
+    ->requiredIndicator(true)
+    ->requiredIndicatorLabel('wymagane')
+    ->requiredIndicatorPosition('right');
 ```
 
 ## `colors`
@@ -197,6 +258,16 @@ Przykład:
 - `form.tab.position` – domyślna pozycja tabów formularza (`top`, `right`, `bottom`, `left`).
 - `form.tab.variant` – domyślny wariant tabów formularza (`default`, `simple`).
 - `form.tab.title` – czy pokazywać automatyczny tytuł nad tabami.
+- `form.tab.card` – czy aktywny tab ma być domyślnie renderowany w wrapperze karty.
+- `form.tab.defaults` – domyślne parametry layoutu contentu tabów formularza:
+  - `content` (aliasy: `contentCols`, `cols`) – wewnętrzna liczba kolumn contentu.
+  - `colSpan` (aliasy: `colspan`, `span`) – szerokość wrappera taba w siatce nadrzędnej.
+  - `grid` (aliasy: `gridColumns`) – liczba kolumn siatki nadrzędnej wrappera taba.
+  - `widthContent` (alias: `width`) – `max-width` contentu taba.
+  - `paddingContent` (alias: `padding`) – padding contentu taba.
+  - `fieldColSpan` (alias: `field_col_span`) – domyślny `colSpan` dla pól (`FieldComponent`) bez jawnie ustawionego `colSpan`.
+- `form.tab.validation_error_icon.enabled` – pokazuje ikonę błędu na zakładce z błędami walidacji.
+- `form.tab.validation_error_icon.icon` – ikona błędu zakładki (np. `lucide:circle-alert`).
 - `form.language.display` – domyślny sposób wyświetlania wyboru języków w formularzach (`inline`, `select`).
 - `form.language.multiple` – czy wybór języków ma być wielokrotnego wyboru (`Select` i `LocaleInline`).
 - `form.language.showIcon` – czy pokazywać flagę/ikonę w `LocaleInline`.
@@ -212,6 +283,12 @@ Domyślnie:
             'position' => 'top',
             'variant' => 'default',
             'title' => true,
+            'card' => true,
+            'defaults' => [],
+            'validation_error_icon' => [
+                'enabled' => false,
+                'icon' => 'lucide:circle-alert',
+            ],
         ],
         'language' => [
             'display' => 'inline',
@@ -258,6 +335,19 @@ public function formConfig(PanelContext $context, ?Model $record = null): array
             'position' => 'left',
             'variant' => 'simple',
             'title' => false,
+            'card' => true,
+            'defaults' => [
+                'content' => 12,
+                'colSpan' => 'full',
+                'grid' => 12,
+                'widthContent' => '72rem',
+                'paddingContent' => '4',
+                'fieldColSpan' => '1/2',
+            ],
+            'validation_error_icon' => [
+                'enabled' => true,
+                'icon' => 'lucide:circle-alert',
+            ],
         ],
         'language' => [
             'display' => 'select',
@@ -269,16 +359,54 @@ public function formConfig(PanelContext $context, ?Model $record = null): array
 }
 ```
 
+Lub wprost w `Resource`:
+
+```php
+public function formTabDefaults(PanelContext $context, ?Model $record = null): array
+{
+    return [
+        'content' => 12,
+        'colSpan' => 'full',
+        'grid' => 12,
+        'widthContent' => '72rem',
+        'paddingContent' => '4',
+        'fieldColSpan' => '1/2',
+    ];
+}
+```
+
+Priorytet jest taki: `config` -> `formTabDefaults()` -> ustawienia pojedynczego taba.
+
 ## `panel`
 
 - `enabled` – czy panel Svarium jest aktywny.
 - `name` – nazwa domyślnego panelu.
 - `route_prefix` – prefix nazw tras auth (np. `app.auth`).
 - `prefix` – prefix URL panelu (`''` oznacza `noPrefix()`).
+- `container.enabled` – czy `PanelLayout` ma automatycznie owijać body/content komponentem `Container`.
+- `container.fluid` – czy automatyczny `Container` ma być pełnej szerokości (`w-full max-w-none`).
+- `container.position` – pozycjonowanie automatycznego `Container` (`left`, `center`, `right`).
+- automatyczny `Container` renderuje klasy `container app__container`.
 - `root_layout` – root layout (np. `CleanLayout`).
 - `definition_layout_types` – layouty traktowane jako definicyjne.
 - `public_auth_route_patterns` – route names dostępne bez auth middleware.
 - `public_auth_path_patterns` – ścieżki dostępne bez auth middleware.
+
+Przykład:
+
+```php
+'panel' => [
+    'enabled' => true,
+    'name' => 'admin',
+    'prefix' => '',
+    'container' => [
+        'enabled' => true,
+        'fluid' => false,
+        'position' => 'center',
+    ],
+    'root_layout' => 'CleanLayout',
+],
+```
 
 ## `ui`
 
@@ -470,6 +598,33 @@ Przykład:
 ## `components`
 
 - `prefix` – prefix używany w integracji frontu komponentów.
+- `select_icon.collections` – domyślne kolekcje widoczne w pickerze `SelectIcon`.
+- `select_icon.icons` – opcjonalna domyślna lista ikon dla `SelectIcon`:
+  - lista pełnych nazw (`lucide:user`, `mdi:account`),
+  - albo mapa kolekcji (`'mdi' => ['account', 'cog']`).
+
+Przykład:
+
+```php
+'components' => [
+    'prefix' => '',
+    'select_icon' => [
+        'collections' => ['lucide', 'solar'],
+        'icons' => [
+            'solar' => ['home-2-bold', 'user-bold'],
+            'mdi' => ['account', 'cog'],
+        ],
+    ],
+],
+```
+
+Per pole formularza możesz nadpisać te ustawienia przez:
+
+```php
+SelectIcon::make('icon')
+    ->collections(['carbon', 'solar'])
+    ->icons(['carbon:add-alt', 'solar:home-2-bold']);
+```
 
 ## `logo`
 

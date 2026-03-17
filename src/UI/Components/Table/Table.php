@@ -32,6 +32,7 @@ class Table extends Component
     protected bool|array $exported = true;
 
     protected bool $imported = true;
+    protected ?bool $viewsAddable = null;
 
     protected ?string $id = null;
 
@@ -240,6 +241,14 @@ class Table extends Component
         return $this;
     }
 
+    public function viewsAddable(bool $state = true): static
+    {
+        $this->viewsAddable = $state;
+        $this->prop('viewsAddable', $state);
+
+        return $this;
+    }
+
     protected function wrapActions(array $actions): array
     {
         if (empty($actions)) {
@@ -322,6 +331,19 @@ class Table extends Component
                 $this->imported($parsed ?? $this->imported);
             } else {
                 $this->prop('imported', $this->imported);
+            }
+        }
+
+        if (! array_key_exists('viewsAddable', $this->props)) {
+            $configuredViewsAddable = config('upsoftware.table.views_addable', $this->viewsAddable ?? true);
+
+            if (is_bool($configuredViewsAddable)) {
+                $this->viewsAddable($configuredViewsAddable);
+            } elseif (is_string($configuredViewsAddable)) {
+                $parsed = filter_var($configuredViewsAddable, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                $this->viewsAddable($parsed ?? ($this->viewsAddable ?? true));
+            } else {
+                $this->viewsAddable($this->viewsAddable ?? true);
             }
         }
 

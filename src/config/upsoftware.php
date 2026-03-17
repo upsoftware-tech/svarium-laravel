@@ -8,6 +8,9 @@ return [
         'web' => [],
         'api' => [],
     ],
+    'debug' => [
+        'form' => false,
+    ],
     'api' => [
         'enabled' => true,
         'prefix' => 'api/v1',
@@ -63,18 +66,33 @@ return [
         'selectable' => true,
         'sortable' => false,
         'multi_sortable' => false,
+        'column_visibility' => false,
+        'create_action' => false,
+        'views_addable' => true,
         'custom_columns' => true,
         'exported' => true,
         'imported' => true,
+    ],
+    'form' => [
+        'required_indicator' => [
+            'enabled' => false,
+            'label' => false,
+            'position' => 'left',
+        ],
     ],
     'resource' => [
         // Layout wrapper used to render form tab content in Resource create/edit screens.
         'form_tab_layout' => FormTabLayout::class,
         'form' => [
             'tab' => [
-                'position' => 'top',
-                'variant' => 'default',
+                'position' => 'left',
+                'variant' => 'simple',
                 'title' => true,
+                'card' => true,
+                'validation_error_icon' => [
+                    'enabled' => false,
+                    'icon' => 'lucide:circle-alert',
+                ],
             ],
             'language' => [
                 // inline = checklist/inline options, select = Select component.
@@ -111,6 +129,14 @@ return [
         // Legacy auth route prefix used for backward compatibility aliases.
         'route_prefix' => 'panel.auth',
         'prefix' => '',
+        'container' => [
+            // Wrap panel body content with Container component.
+            'enabled' => true,
+            // false = Tailwind .container, true = full width.
+            'fluid' => false,
+            // left|center|right
+            'position' => 'center',
+        ],
         'root_layout' => 'CleanLayout',
         'definition_layout_types' => ['AuthLayout'],
         'auth' => [
@@ -417,6 +443,17 @@ return [
     ],
     'components' => [
         'prefix' => '',
+        'select_icon' => [
+            // Default collections visible in SelectIcon picker.
+            'collections' => ['lucide'],
+            // Optional predefined icon list (list or map by collection).
+            // Example:
+            // 'icons' => [
+            //     'mdi' => ['account', 'cog', 'home'],
+            //     'solar' => ['home-2-bold', 'user-bold'],
+            // ],
+            'icons' => [],
+        ],
     ],
     'ui' => [
         'sidebar_user' => [

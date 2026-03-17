@@ -122,6 +122,37 @@ abstract class Component
         return $this->prop('vIf', $condition);
     }
 
+    public function showWhen(string $field, mixed ...$arguments): static
+    {
+        $field = trim($field);
+
+        if ($field === '') {
+            return $this;
+        }
+
+        $operator = 'truthy';
+        $value = null;
+
+        if (count($arguments) === 1) {
+            $operator = '=';
+            $value = $arguments[0];
+        } elseif (count($arguments) >= 2) {
+            $operator = (string) $arguments[0];
+            $value = $arguments[1];
+        }
+
+        return $this->prop('showWhen', [
+            'field' => $field,
+            'operator' => $operator,
+            'value' => $value,
+        ]);
+    }
+
+    public function visibleWhen(string $field, mixed ...$arguments): static
+    {
+        return $this->showWhen($field, ...$arguments);
+    }
+
     public function shouldRender(): bool
     {
         return $this->phpIf;
@@ -288,6 +319,52 @@ abstract class Component
         return $this;
     }
 
+    public function map(iterable $items, ?\Closure $builder = null): static
+    {
+        foreach ($items as $key => $item) {
+            $result = $builder ? $builder($item, $key) : $item;
+            $this->appendMappedNode($result);
+        }
+
+        return $this;
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    public function getChildrenComponents(): array
+    {
+        return is_array($this->children) ? $this->children : [];
+    }
+
+    /**
+     * @param array<int, mixed> $children
+     */
+    public function setChildrenComponents(array $children): static
+    {
+        $this->children = $children;
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function getSlotsComponents(): array
+    {
+        return is_array($this->slots) ? $this->slots : [];
+    }
+
+    /**
+     * @param array<int, mixed> $components
+     */
+    public function setSlotComponents(string $name, array $components): static
+    {
+        $this->slots[$name] = $components;
+
+        return $this;
+    }
+
     protected function resolveSlot(mixed $content): array
     {
         // jeśli podano nazwę klasy
@@ -360,6 +437,25 @@ abstract class Component
                 }, $nodes)
             )
         );
+    }
+
+    protected function appendMappedNode(mixed $node): void
+    {
+        if ($node instanceof Component) {
+            $this->children[] = $node;
+            return;
+        }
+
+        if (is_array($node)) {
+            if (array_key_exists('type', $node)) {
+                $this->children[] = $node;
+                return;
+            }
+
+            foreach ($node as $entry) {
+                $this->appendMappedNode($entry);
+            }
+        }
     }
 
     protected function mergeAppearanceClasses(mixed $current, mixed $incoming): string

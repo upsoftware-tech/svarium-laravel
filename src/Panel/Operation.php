@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Panel;
 
 use Illuminate\Validation\ValidationException;
+use Illuminate\Validation\Rule;
 use Upsoftware\Svarium\Enums\ExecutionMode;
 use Upsoftware\Svarium\Enums\TableActionDisplay;
 use Upsoftware\Svarium\Http\ComponentResult;
@@ -13,6 +14,7 @@ use Upsoftware\Svarium\UI\Components\Block;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
 use Upsoftware\Svarium\UI\Components\Form\Form;
 use Upsoftware\Svarium\Support\PermissionMatcher;
+use Upsoftware\Svarium\Support\ShowWhenEvaluator;
 use Upsoftware\Svarium\Widgets\WidgetRegistry;
 
 abstract class Operation
@@ -359,11 +361,20 @@ abstract class Operation
 
         /*
         |--------------------------------------------------------------------------
+        | DROPDOWN SEARCH FILTERS
+        |--------------------------------------------------------------------------
+        */
+        $builder->applyDropdownSearchFilters($query, $context->request());
+
+        /*
+        |--------------------------------------------------------------------------
         | SORT
         |--------------------------------------------------------------------------
         */
         if ($sort = $context->request()->get('sort')) {
             $builder->applySort($query, $sort);
+        } else {
+            $builder->applyDefaultSort($query);
         }
 
         /*
@@ -524,19 +535,28 @@ abstract class Operation
                     }
 
                     $componentRules = $component->getValidationRules();
+                    $showWhen = $component->getProp('showWhen');
+
+                    if ($showWhen !== null) {
+                        array_unshift($componentRules, Rule::excludeIf(
+                            fn () => ! ShowWhenEvaluator::matches($showWhen, request()->all())
+                        ));
+                    }
 
                     if (!empty($componentRules)) {
                         $rules[$component->getName()] = $componentRules;
                     }
                 }
 
-                if (!empty($component->children)) {
-                    $walk($component->children);
+                $children = $this->getComponentChildren($component);
+                if ($children !== []) {
+                    $walk($children);
                 }
 
-                if (!empty($component->slots)) {
-                    foreach ($component->slots as $slot) {
-                        $walk($slot);
+                $slots = $this->getComponentSlots($component);
+                if ($slots !== []) {
+                    foreach ($slots as $slot) {
+                        $walk($this->normalizeComponentNodes($slot));
                     }
                 }
             }
@@ -569,12 +589,12 @@ abstract class Operation
                     $attributes[$name] = $attribute;
                 }
 
-                foreach ($component->children ?? [] as $child) {
+                foreach ($this->getComponentChildren($component) as $child) {
                     $walk([$child]);
                 }
 
-                foreach ($component->slots ?? [] as $slot) {
-                    $walk($slot);
+                foreach ($this->getComponentSlots($component) as $slot) {
+                    $walk($this->normalizeComponentNodes($slot));
                 }
             }
         };
@@ -601,12 +621,12 @@ abstract class Operation
                     }
                 }
 
-                foreach ($component->children ?? [] as $child) {
+                foreach ($this->getComponentChildren($component) as $child) {
                     $walk([$child]);
                 }
 
-                foreach ($component->slots ?? [] as $slot) {
-                    $walk($slot);
+                foreach ($this->getComponentSlots($component) as $slot) {
+                    $walk($this->normalizeComponentNodes($slot));
                 }
             }
         };
@@ -637,13 +657,15 @@ abstract class Operation
                     }
                 }
 
-                if (!empty($component->children)) {
-                    $walk($component->children);
+                $children = $this->getComponentChildren($component);
+                if ($children !== []) {
+                    $walk($children);
                 }
 
-                if (!empty($component->slots)) {
-                    foreach ($component->slots as $slot) {
-                        $walk($slot);
+                $slots = $this->getComponentSlots($component);
+                if ($slots !== []) {
+                    foreach ($slots as $slot) {
+                        $walk($this->normalizeComponentNodes($slot));
                     }
                 }
             }
@@ -703,13 +725,15 @@ abstract class Operation
                     }
                 }
 
-                if (!empty($component->children)) {
-                    $walk($component->children);
+                $children = $this->getComponentChildren($component);
+                if ($children !== []) {
+                    $walk($children);
                 }
 
-                if (!empty($component->slots)) {
-                    foreach ($component->slots as $slot) {
-                        $walk($slot);
+                $slots = $this->getComponentSlots($component);
+                if ($slots !== []) {
+                    foreach ($slots as $slot) {
+                        $walk($this->normalizeComponentNodes($slot));
                     }
                 }
             }
@@ -735,6 +759,11 @@ abstract class Operation
         }
 
         return $this->resolvedSchema = is_array($schema) ? $schema : [$schema];
+    }
+
+    protected function clearResolvedSchema(): void
+    {
+        $this->resolvedSchema = null;
     }
 
     protected function resolveFieldAccessMap(PanelContext $context): array
@@ -1148,21 +1177,23 @@ abstract class Operation
                 }
             }
 
-            if (!empty($component->children)) {
-                $component->children = $this->filterByOperation(
-                    $component->children,
+            $children = $this->getComponentChildren($component);
+            if ($children !== []) {
+                $this->setComponentChildren($component, $this->filterByOperation(
+                    $children,
                     $context,
                     $accessMap
-                );
+                ));
             }
 
-            if (!empty($component->slots)) {
-                foreach ($component->slots as $key => $slot) {
-                    $component->slots[$key] = $this->filterByOperation(
-                        $slot,
+            $slots = $this->getComponentSlots($component);
+            if ($slots !== []) {
+                foreach ($slots as $key => $slot) {
+                    $this->setComponentSlot($component, (string) $key, $this->filterByOperation(
+                        $this->normalizeComponentNodes($slot),
                         $context,
                         $accessMap
-                    );
+                    ));
                 }
             }
 
@@ -1178,6 +1209,74 @@ abstract class Operation
             $this->execution(),
             [ExecutionMode::FORM, ExecutionMode::DUPLICATE]
         );
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    protected function getComponentChildren(object $component): array
+    {
+        if (method_exists($component, 'getChildrenComponents')) {
+            $children = $component->getChildrenComponents();
+
+            return is_array($children) ? $children : [];
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function getComponentSlots(object $component): array
+    {
+        if (method_exists($component, 'getSlotsComponents')) {
+            $slots = $component->getSlotsComponents();
+
+            return is_array($slots) ? $slots : [];
+        }
+
+        return [];
+    }
+
+    /**
+     * @param array<int, mixed> $children
+     */
+    protected function setComponentChildren(object $component, array $children): void
+    {
+        if (method_exists($component, 'setChildrenComponents')) {
+            $component->setChildrenComponents($children);
+        }
+    }
+
+    /**
+     * @param array<int, mixed> $slot
+     */
+    protected function setComponentSlot(object $component, string $name, array $slot): void
+    {
+        if (method_exists($component, 'setSlotComponents')) {
+            $component->setSlotComponents($name, $slot);
+        }
+    }
+
+    /**
+     * @return array<int, mixed>
+     */
+    protected function normalizeComponentNodes(mixed $value): array
+    {
+        if ($value === null) {
+            return [];
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (is_object($value)) {
+            return [$value];
+        }
+
+        return [];
     }
 
     protected function render(PanelContext $context, ...$args): ComponentResult

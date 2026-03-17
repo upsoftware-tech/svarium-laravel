@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Panel\Resource\Operations;
 
 use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 use Upsoftware\Svarium\Enums\ExecutionMode;
 use Upsoftware\Svarium\Http\JsonResult;
@@ -76,6 +77,10 @@ class ResourceListOperation extends Operation
             $builder->disableDefaultActions(['view']);
         }
 
+        if (method_exists($resource, 'canCreate') && ! $resource->canCreate($context)) {
+            $builder->supportsCreateAction(false);
+        }
+
         if (method_exists($resource, 'canEdit') && ! $resource->canEdit($context)) {
             $builder->disableDefaultActions(['edit']);
         }
@@ -130,9 +135,30 @@ class ResourceListOperation extends Operation
 
         $this->applyTableAccess($builder, $context);
 
+        $requestedTableId = trim((string) $context->input->get('_table_id', ''));
+        if ($requestedTableId !== '') {
+            $builder->withTableIdentifier($requestedTableId);
+        }
+
         $tableAction = trim((string) $context->input->get('_table_action', ''));
         if ($tableAction === 'prepare_import') {
             return $this->runPrepareImportAction($context);
+        }
+
+        if ($tableAction === 'save_view') {
+            return $this->runSaveViewAction($context, $builder);
+        }
+
+        if ($tableAction === 'update_view') {
+            return $this->runUpdateViewAction($context, $builder);
+        }
+
+        if ($tableAction === 'reorder_views') {
+            return $this->runReorderViewsAction($context, $builder);
+        }
+
+        if ($tableAction === 'delete_view') {
+            return $this->runDeleteViewAction($context, $builder);
         }
 
         if ($tableAction === 'import') {
@@ -146,6 +172,353 @@ class ResourceListOperation extends Operation
         }
 
         return $this->runBulkAction($context, $builder, $bulkAction);
+    }
+
+    protected function runSaveViewAction(PanelContext $context, TableBuilder $builder): RedirectResult
+    {
+        if (method_exists($builder, 'canAddViews') && ! $builder->canAddViews()) {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Adding views is disabled for this table.'));
+        }
+
+        // Backward compatible payload resolver:
+        // - legacy nested: _table_view[name|icon|color|is_public|query]
+        // - new flat: _table_view_name, _table_view_icon, _table_view_color, _table_view_isPublic
+        $payload = [];
+        $legacyPayload = $context->input->get('_table_view', []);
+        if (is_array($legacyPayload)) {
+            $payload = $legacyPayload;
+        }
+
+        $flatName = $context->input->get('_table_view_name', null);
+        if ($flatName !== null) {
+            $payload['name'] = trim((string) $flatName);
+        }
+
+        $flatIcon = $context->input->get('_table_view_icon', null);
+        if ($flatIcon !== null) {
+            $normalizedIcon = trim((string) $flatIcon);
+            $payload['icon'] = $normalizedIcon !== '' ? $normalizedIcon : null;
+        }
+
+        $flatColor = $context->input->get('_table_view_color', null);
+        if ($flatColor !== null) {
+            $normalizedColor = trim((string) $flatColor);
+            $payload['color'] = $normalizedColor !== '' ? $normalizedColor : null;
+        }
+
+        $flatIsPublic = $context->input->get('_table_view_isPublic', $context->input->get('_table_view_is_public', null));
+        if ($flatIsPublic !== null) {
+            $normalized = strtolower(trim((string) $flatIsPublic));
+            $payload['is_public'] = in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+        }
+
+        $flatQuery = $context->input->get('_table_view_query', null);
+        if (is_array($flatQuery)) {
+            $payload['query'] = $flatQuery;
+        } elseif (is_string($flatQuery) && trim($flatQuery) !== '') {
+            $decoded = json_decode($flatQuery, true);
+            if (is_array($decoded)) {
+                $payload['query'] = $decoded;
+            }
+        }
+
+        if (! isset($payload['query']) || ! is_array($payload['query']) || $payload['query'] === []) {
+            $payload['query'] = $this->resolveQuerySnapshotFromRequest($context);
+        }
+
+        try {
+            $validated = validator(
+                ['_table_view_name' => $payload['name'] ?? null],
+                ['_table_view_name' => ['required', 'string', 'max:255']],
+                [],
+                ['_table_view_name' => __('View name')]
+            )->validate();
+        } catch (ValidationException $exception) {
+            throw $exception;
+        }
+
+        $payload['name'] = (string) ($validated['_table_view_name'] ?? '');
+
+        $saved = $builder->saveView($payload);
+        if (! is_array($saved) || trim((string) ($saved['key'] ?? '')) === '') {
+            return RedirectResult::to($this->listUrl($context))
+                ->warning(__('View name is required.'));
+        }
+
+        $queryParts = [];
+        $query = $saved['query'] ?? [];
+        if (is_array($query)) {
+            foreach ($query as $key => $value) {
+                $name = trim((string) $key);
+                if ($name === '') {
+                    continue;
+                }
+
+                if (is_array($value)) {
+                    foreach ($value as $entry) {
+                        $normalized = trim((string) $entry);
+                        if ($normalized !== '') {
+                            $queryParts[] = urlencode($name) . '=' . urlencode($normalized);
+                        }
+                    }
+                    continue;
+                }
+
+                $normalized = trim((string) $value);
+                if ($normalized !== '') {
+                    $queryParts[] = urlencode($name) . '=' . urlencode($normalized);
+                }
+            }
+        }
+
+        $queryParts[] = 'view=' . urlencode((string) $saved['key']);
+        $queryParts[] = 'page=1';
+
+        $base = rtrim($this->listUrl($context), '?');
+        $url = $base . (str_contains($base, '?') ? '&' : '?') . implode('&', $queryParts);
+
+        return RedirectResult::to($url)
+            ->success(__('View saved.'));
+    }
+
+    protected function runReorderViewsAction(PanelContext $context, TableBuilder $builder): RedirectResult
+    {
+        if (method_exists($builder, 'canAddViews') && ! $builder->canAddViews()) {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Views configuration is disabled for this table.'));
+        }
+
+        $rawOrder = $context->input->get('_table_view_order', []);
+
+        if (is_string($rawOrder)) {
+            $decoded = json_decode($rawOrder, true);
+            if (is_array($decoded)) {
+                $rawOrder = $decoded;
+            } else {
+                $rawOrder = array_map('trim', explode(',', $rawOrder));
+            }
+        }
+
+        $normalizedOrder = [];
+        if (is_array($rawOrder)) {
+            foreach ($rawOrder as $entry) {
+                $key = trim((string) $entry);
+                if ($key === '' || in_array($key, $normalizedOrder, true)) {
+                    continue;
+                }
+
+                $normalizedOrder[] = $key;
+            }
+        }
+
+        if ($normalizedOrder === []) {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('View order is required.'));
+        }
+
+        $reordered = $builder->reorderViews($normalizedOrder);
+
+        if (! $reordered) {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Unable to save view order.'));
+        }
+
+        return RedirectResult::to($context->request()->fullUrl())
+            ->success(__('View order updated.'));
+    }
+
+    protected function runUpdateViewAction(PanelContext $context, TableBuilder $builder): RedirectResult
+    {
+        if (method_exists($builder, 'canAddViews') && ! $builder->canAddViews()) {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Views configuration is disabled for this table.'));
+        }
+
+        $payload = [];
+        $legacyPayload = $context->input->get('_table_view', []);
+        if (is_array($legacyPayload)) {
+            $payload = $legacyPayload;
+        }
+
+        $flatKey = $context->input->get('_table_view_key', null);
+        if ($flatKey !== null) {
+            $payload['key'] = trim((string) $flatKey);
+        }
+
+        $flatName = $context->input->get('_table_view_name', null);
+        if ($flatName !== null) {
+            $payload['name'] = trim((string) $flatName);
+        }
+
+        $flatIcon = $context->input->get('_table_view_icon', null);
+        if ($flatIcon !== null) {
+            $normalizedIcon = trim((string) $flatIcon);
+            $payload['icon'] = $normalizedIcon !== '' ? $normalizedIcon : null;
+        }
+
+        $flatColor = $context->input->get('_table_view_color', null);
+        if ($flatColor !== null) {
+            $normalizedColor = trim((string) $flatColor);
+            $payload['color'] = $normalizedColor !== '' ? $normalizedColor : null;
+        }
+
+        $flatIsPublic = $context->input->get('_table_view_isPublic', $context->input->get('_table_view_is_public', null));
+        if ($flatIsPublic !== null) {
+            $normalized = strtolower(trim((string) $flatIsPublic));
+            $payload['is_public'] = in_array($normalized, ['1', 'true', 'yes', 'on'], true);
+        }
+
+        $flatQuery = $context->input->get('_table_view_query', null);
+        if (is_array($flatQuery)) {
+            $payload['query'] = $flatQuery;
+        } elseif (is_string($flatQuery) && trim($flatQuery) !== '') {
+            $decoded = json_decode($flatQuery, true);
+            if (is_array($decoded)) {
+                $payload['query'] = $decoded;
+            }
+        }
+
+        try {
+            $validated = validator(
+                [
+                    '_table_view_key' => $payload['key'] ?? null,
+                    '_table_view_name' => $payload['name'] ?? null,
+                ],
+                [
+                    '_table_view_key' => ['required', 'string', 'max:255'],
+                    '_table_view_name' => ['required', 'string', 'max:255'],
+                ],
+                [],
+                [
+                    '_table_view_key' => __('View key'),
+                    '_table_view_name' => __('View name'),
+                ]
+            )->validate();
+        } catch (ValidationException $exception) {
+            throw $exception;
+        }
+
+        $payload['key'] = (string) ($validated['_table_view_key'] ?? '');
+        $payload['name'] = (string) ($validated['_table_view_name'] ?? '');
+
+        $updated = $builder->updateView($payload);
+
+        if (! is_array($updated) || trim((string) ($updated['key'] ?? '')) === '') {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Unable to update view.'));
+        }
+
+        return RedirectResult::to($context->request()->fullUrl())
+            ->success(__('View updated.'));
+    }
+
+    protected function runDeleteViewAction(PanelContext $context, TableBuilder $builder): RedirectResult
+    {
+        if (method_exists($builder, 'canAddViews') && ! $builder->canAddViews()) {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Views configuration is disabled for this table.'));
+        }
+
+        $viewKey = trim((string) $context->input->get('_table_view_key', ''));
+
+        if ($viewKey === '') {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('View key is required.'));
+        }
+
+        $deleted = $builder->deleteView($viewKey);
+
+        if (! $deleted) {
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Unable to delete view.'));
+        }
+
+        $query = $context->request()->query();
+        if (is_array($query) && strcasecmp(trim((string) ($query['view'] ?? '')), $viewKey) === 0) {
+            unset($query['view'], $query['page']);
+        }
+
+        $url = $context->request()->url();
+        if (is_array($query) && $query !== []) {
+            $url .= '?' . http_build_query($query);
+        }
+
+        return RedirectResult::to($url)
+            ->success(__('View deleted.'));
+    }
+
+    protected function resolveQuerySnapshotFromRequest(PanelContext $context): array
+    {
+        $request = $context->request();
+        $query = $request->query();
+
+        if (! is_array($query) || $query === []) {
+            $referer = trim((string) $request->headers->get('referer', ''));
+            if ($referer !== '') {
+                $parsedQuery = parse_url($referer, PHP_URL_QUERY);
+                if (is_string($parsedQuery) && trim($parsedQuery) !== '') {
+                    $decoded = [];
+                    parse_str($parsedQuery, $decoded);
+                    if (is_array($decoded)) {
+                        $query = $decoded;
+                    }
+                }
+            }
+        }
+
+        if (! is_array($query)) {
+            return [];
+        }
+
+        $excludedKeys = [
+            'view',
+            'page',
+            'perPage',
+            'rowsPerPage',
+            'per_page',
+            'limit',
+            'offset',
+        ];
+
+        $normalized = [];
+
+        foreach ($query as $rawKey => $rawValue) {
+            $key = trim((string) $rawKey);
+            if ($key === '' || str_starts_with($key, '_') || in_array($key, $excludedKeys, true)) {
+                continue;
+            }
+
+            if (is_array($rawValue)) {
+                $items = [];
+
+                foreach ($rawValue as $entry) {
+                    if (! is_string($entry) && ! is_numeric($entry)) {
+                        continue;
+                    }
+
+                    $value = trim((string) $entry);
+                    if ($value !== '') {
+                        $items[] = $value;
+                    }
+                }
+
+                if ($items !== []) {
+                    $normalized[$key] = $items;
+                }
+
+                continue;
+            }
+
+            if (is_string($rawValue) || is_numeric($rawValue)) {
+                $value = trim((string) $rawValue);
+                if ($value !== '') {
+                    $normalized[$key] = $value;
+                }
+            }
+        }
+
+        return $normalized;
     }
 
     protected function runBulkAction(PanelContext $context, TableBuilder $builder, string $bulkActionKey): RedirectResult

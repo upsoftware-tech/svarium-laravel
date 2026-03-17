@@ -25,6 +25,9 @@ class HandleInertiaRequests extends Middleware
         return array_merge(parent::share($request), [
             'locale' => session()->has('locale') ? session()->get('locale') : app()->getLocale(),
             'locales' => Inertia::once(fn () => locales()),
+            'debug' => [
+                'form' => (bool) config('upsoftware.debug.form', false),
+            ],
             'theme' => fn () => $request->attributes->get('svarium.theme'),
             'seo' => fn () => $request->attributes->get('svarium.seo', []),
             'domain' => fn () => $this->resolveDomainContext($request),

@@ -49,6 +49,16 @@ class Button extends Component
         return $this;
     }
 
+    public function from(string $field): static
+    {
+        $normalized = trim($field);
+        if ($normalized === '') {
+            return $this;
+        }
+
+        return $this->prop('from', $normalized);
+    }
+
     public function name(string $name): static
     {
         $this->name = $name;

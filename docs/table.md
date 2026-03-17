@@ -49,22 +49,27 @@ Sekcja:
         'enabled' => true,
         'rowsPerPageOptions' => [10, 20, 30, 50, 100, 0],
         'rowsPerPage' => 50,
-        'rowsPerPageLabel' => __('Rows per page'),
+        'rowsPerPageLabel' => null,
         'rowsPerPageAllLabel' => null,
         'paginationLabel' => null,
         'showButtonLabel' => true,
         'showFirstLabel' => true,
         'showLastLabel' => true,
         'ellipsisAfter' => 7,
-        'firstButtonLabel' => __('First'),
-        'previousButtonLabel' => __('Previous'),
-        'nextButtonLabel' => __('Next'),
-        'lastButtonLabel' => __('Last'),
+        'firstButtonLabel' => null,
+        'previousButtonLabel' => null,
+        'nextButtonLabel' => null,
+        'lastButtonLabel' => null,
     ],
     'condensed' => false,
+    'bordered' => false,
     'searchbar' => false,
+    'selectable' => true,
     'sortable' => false,
     'multi_sortable' => false,
+    'column_visibility' => false,
+    'create_action' => false,
+    'views_addable' => true,
     'custom_columns' => true,
     'exported' => true,
     'imported' => true,
@@ -76,7 +81,9 @@ Znaczenie:
 - `action_display`: domyślny tryb akcji (`inline` lub `dropdown`).
 - `pagination`: pełna konfiguracja paginacji i etykiet.
 - `condensed`: domyślna kondensacja tabel (`false` = standardowe odstępy).
+- `bordered`: domyślnie włącza pionowe linie między komórkami.
 - `searchbar`: automatyczne dodanie `InputSearch::make('q')` do każdej tabeli.
+- `selectable`: globalnie włącza/wyłącza zaznaczanie wierszy i komórek.
 - `sortable`: domyślne sortowanie:
   - `false` - brak automatycznego sortowania kolumn,
   - `true` - wszystkie kolumny są domyślnie sortowalne,
@@ -85,6 +92,9 @@ Znaczenie:
   - `false` - dodatkowe kolumny sortowania są wyłączone,
   - `true` - każda sortowalna kolumna może być dodana jako kolejna (`CTRL/CMD + klik`),
   - `['name', 'created_at']` - tylko wskazane kolumny mogą być dodawane jako kolejne.
+- `column_visibility`: automatycznie pokazuje przycisk `ColumnVisibility` w nagłówku tabeli.
+- `create_action`: automatycznie pokazuje `Action::create()` w nagłówku tabeli.
+- `views_addable`: pozwala użytkownikowi zapisywać własne widoki tabeli. Po wyłączeniu zostają tylko widoki publiczne i znika UI zapisu/konfiguracji widoków.
 - `custom_columns`: pokazuje/ukrywa globalnie przycisk i dialog „Custom columns”.
 - `exported`: domyślna widoczność przycisku eksportu.
 - `imported`: domyślna widoczność przycisku importu.
@@ -130,6 +140,10 @@ Czyli oba URL działają:
 - `->columnAttributes(array $attributes)` / `->columnsAttributes(...)` / `->attrs(...)`
 - `->filterColumns(callable $callback)`
 - `->searchable(array $columns)`
+- `->defaultSort('name')`
+- `->defaultSort('name', 'desc')`
+- `->defaultSort(['name', 'id'])`
+- `->defaultSort(['name', 'id'], 'desc')`
 - `->sortable()`  
   Włącza sortowanie dla wszystkich kolumn tabeli.
 - `->sortable(false)`  
@@ -173,6 +187,21 @@ Czyli oba URL działają:
   Włącza/wyłącza funkcje zaznaczania kolumn/obszarów.
 - `->customColumns(bool $state = true)`  
   Pokazuje/ukrywa przycisk i dialog „Custom columns” per tabela.
+- `->columnVisibility(bool $state = true)`  
+  Pokazuje/ukrywa automatyczny przycisk `ColumnVisibility` w nagłówku tabeli.
+- `->createAction(bool $state = true)`  
+  Pokazuje/ukrywa automatyczny przycisk `Action::create()` w nagłówku tabeli.
+- `->viewsAddable(bool $state = true)`  
+  Włącza/wyłącza możliwość zapisywania własnych widoków tej tabeli.
+- `->bordered(bool $state = true)`  
+  Włącza/wyłącza pionowe linie między komórkami.
+- `->selectable(bool $state = true)`  
+  Włącza/wyłącza zaznaczanie wierszy i komórek.
+
+Uwaga:
+
+- nawet jeśli `createAction(true)` jest ustawione globalnie lub per tabela, przycisk nie pokaże się, jeśli resource/operation nie wspiera `create`.
+
 - `->sticky('header', 'search', 'footer')`  
   Możesz też podać tablicę.
 - `->numbering(bool|string $mode = true, ?string $label = null)`  
@@ -238,10 +267,18 @@ Obsługiwane zwroty z `import()`:
 ### Akcje
 
 - `->actions(array $actions)`
+- `->actions(false)`  
+  Całkowicie usuwa kolumnę akcji z tabeli.
 - `->actionDisplay(TableActionDisplay|string $mode)` (`inline|dropdown`)
 - `->disableDefaultActions(array $types)`
 - `->onlyDefaultActions(array $types)`
 - `->withoutDefaultActions()`
+
+Ważne:
+
+- klucz domyślnego podglądu to `view`, nie `preview`,
+- `disableDefaultActions(...)` steruje tylko akcjami wbudowanymi,
+- jeśli w `->actions([...])` sam dodasz `Action::delete()` albo `Action::edit()`, to pozostaną widoczne jako akcje customowe.
 
 ### Akcje masowe (bulk)
 
@@ -275,8 +312,67 @@ Obsługiwane zwroty z `import()`:
 - `->tabsFromViews(bool $enabled = true)`  
   Dodaje zakładki z zapisanych widoków.
 
-Po kliknięciu zakładki widoku tabela ustawia parametr `?view=<key>` w URL.
-Po stronie backendu klucz widoku nakłada zdefiniowane filtry i domyślne sortowanie zapisane w widoku.
+#### Zapis widoków (UI)
+
+Przycisk `Save view` nad tabelą zapisuje aktualny widok i potem pokazuje go jako tab nad tabelą.
+
+Zapisywany jest snapshot query (np. `q`, `sort`, filtry z URL), a następnie:
+
+- tab pojawia się na liście widoków,
+- kliknięcie taba przełącza URL na zapisany snapshot + `view=<key>`.
+
+Zakres zapisu:
+
+- prywatny widok (`Make public = false`) – tylko dla bieżącego użytkownika,
+- publiczny widok (`Make public = true`) – globalnie dla wszystkich użytkowników.
+
+Jeśli `views_addable = false`:
+
+- użytkownik nie może zapisywać własnych widoków,
+- nie widzi przycisku `Save view`,
+- nie widzi panelu konfiguracji widoków,
+- nadal może korzystać z widoków publicznych zapisanych wcześniej.
+
+Dane widoków są trzymane w `settings` pod kluczem:
+
+```text
+table.views.<table_id>
+```
+
+`<table_id>` to identyfikator tabeli (`->id(...)` albo auto-generowany `resource-action-table`).
+
+#### Przykład
+
+```php
+TableBuilder::make(Page::query())
+    ->id('pages-index-table')
+    ->tabsFromViews(true);
+```
+
+### Domyślne sortowanie
+
+`defaultSort(...)` działa jako fallback:
+
+1. jeśli w URL jest `sort`, to ma pierwszeństwo,
+2. jeśli aktywny zapisany widok ma własne sortowanie, ono też ma pierwszeństwo,
+3. dopiero na końcu używane jest `defaultSort(...)`.
+
+Przykłady:
+
+```php
+->defaultSort('id', 'desc')
+->defaultSort('name')
+->defaultSort(['name', 'id'])
+->defaultSort(['created_at', 'id'], 'desc')
+```
+
+`defaultSort(...)` nie wymaga `->sortable()` na kolumnie. Możesz ustawić np.:
+
+```php
+->defaultSort('id', 'desc')
+```
+
+nawet jeśli `id` nie jest sortowalne z poziomu kliknięcia w nagłówku.
 
 ## API kolumny (`Column`)
 
@@ -293,7 +389,7 @@ Najczęściej używane:
 - `->multiSortable(true|false)`  
   Steruje, czy kolumna może być dodana jako kolejna w multi-sortowaniu (`CTRL/CMD + klik`).
 - `->searchable()`
-- `->selected(false)` - blokuje zaznaczanie tej kolumny z poziomu nagłówka.
+- `->selected(false)` - ukrywa kolumnę domyślnie przy pierwszym renderze, ale nadal pozwala ją włączyć przez `ColumnVisibility`.
 - `->exported(bool $state = true)` - steruje, czy kolumna ma być uwzględniana w eksporcie (`true` domyślnie).
 - `->hide()`
 - `->state(fn ($row) => ...)`
@@ -301,6 +397,8 @@ Najczęściej używane:
 - `->placeholder('...')`
 - `->concat('first_name', 'last_name')`
 - `->type('string|number|date|...')` (dla filtrów)
+- `->bool()` / `->boolean()`  
+  Renderuje wartość logiczną jako ikonę: zielony `check` dla `true`, czerwony `x` dla `false`.
 - `->filter(...)`
 - `->filterRule(...)`
 - `->operators([...])`
@@ -314,6 +412,14 @@ Przykład wyłączenia kolumny z eksportu:
 Column::make('internal_note')
     ->label('Internal note')
     ->exported(false);
+```
+
+Przykład kolumny bool:
+
+```php
+Column::make('is_default')
+    ->label(__('Is default'))
+    ->bool();
 ```
 
 Przykład sortowania `concat`:
@@ -391,6 +497,23 @@ Dalsza konfiguracja:
 - `->variant('...')`, `->size('...')`
 - `->show(fn (array $row) => bool)`
 
+Jeśli chcesz zostawić tylko własne akcje i wyłączyć `view/edit/duplicate/delete`, użyj:
+
+```php
+->withoutDefaultActions()
+->actions([
+    Action::make('sync')->label(__('Synchronize')),
+])
+```
+
+Jeśli chcesz całkowicie ukryć kolumnę akcji:
+
+```php
+->actions(false)
+```
+
+`Action::delete()` ma domyślnie potwierdzenie usunięcia przez `AlertDialog`. To samo zadziała dla każdej akcji, której ustawisz `->confirm(...)`.
+
 ## Akcje masowe (`BulkAction`)
 
 Fabryki:
@@ -428,6 +551,7 @@ public function table(): TableBuilder
             Column::make('id')->label('ID')->sortable()->selected(false),
             Column::make('first_name')->label(__('First name'))->sortable()->searchable(),
             Column::make('last_name')->label(__('Last name'))->sortable()->searchable(),
+            Column::make('is_active')->label(__('Active'))->bool()->selected(false),
             Column::make('status')
                 ->label(__('Status'))
                 ->filter('both', 'multiple')
@@ -445,6 +569,9 @@ public function table(): TableBuilder
                 ]),
         ])
         ->showInputSearchInSidebar(true)
+        ->columnVisibility(true)
+        ->createAction(true)
+        ->viewsAddable(true)
         ->bulk('multiple')
         ->bulkActions([
             BulkAction::delete(),

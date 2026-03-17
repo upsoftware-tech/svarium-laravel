@@ -96,6 +96,7 @@ abstract class FieldComponent extends Component
     public function toArray(): array
     {
         $array = parent::toArray();
+        $array['props']['required'] = $this->hasRequiredRule();
 
         if ($this->value !== null) {
             $array['props']['value'] = $this->value;

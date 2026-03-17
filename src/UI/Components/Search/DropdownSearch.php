@@ -10,6 +10,8 @@ class DropdownSearch extends Search
 {
     use HasBorderStyle;
 
+    protected ?string $name = null;
+
     protected ?string $column = null;
 
     protected ?array $items = null;
@@ -50,8 +52,13 @@ class DropdownSearch extends Search
     {
         $instance = new static;
 
-        if ($name !== null && method_exists($instance, 'name')) {
-            $instance->label(empty($name) ? __('View') : $name);
+        if (is_string($name) && trim($name) !== '') {
+            $normalizedName = trim($name);
+            $instance->name = $normalizedName;
+            $instance->prop('name', $normalizedName);
+            $instance->label($normalizedName);
+        } elseif ($name !== null && method_exists($instance, 'name')) {
+            $instance->label(__('View'));
         }
 
         return $instance;
@@ -66,6 +73,16 @@ class DropdownSearch extends Search
     public function column(string $column): static
     {
         $this->column = $column;
+        $this->prop('column', $column);
+
+        return $this;
+    }
+
+    public function name(string $name): static
+    {
+        $normalized = trim($name);
+        $this->name = $normalized !== '' ? $normalized : null;
+        $this->prop('name', $this->name);
 
         return $this;
     }
@@ -239,6 +256,7 @@ class DropdownSearch extends Search
         }
 
         $grouped = (clone $query)
+            ->reorder()
             ->selectRaw("{$this->column}, COUNT(*) as aggregate")
             ->groupBy($this->column)
             ->get();
@@ -431,6 +449,15 @@ class DropdownSearch extends Search
         if (! $this->label) {
             $props['label'] = $this->column;
         }
+
+        if (! array_key_exists('name', $props) || trim((string) ($props['name'] ?? '')) === '') {
+            $props['name'] = $this->name ?? $this->column;
+        }
+
+        if (! array_key_exists('column', $props) || trim((string) ($props['column'] ?? '')) === '') {
+            $props['column'] = $this->column;
+        }
+
         $props['items'] = $this->items ?? [];
         $props['searchable'] = [
             'enabled' => $this->searchable,

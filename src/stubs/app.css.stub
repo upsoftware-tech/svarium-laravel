@@ -8,6 +8,11 @@
 @source "../../node_modules/@upsoftware_tech/svarium/dist/**/*.{js,mjs,vue}";
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
+@source inline("{col-span,row-span}-{1..12}");
+@source inline("{col-span,row-span}-full");
+@source inline("{col,row}-auto");
+@source inline("{col-start,col-end,row-start,row-end}-{1..13}");
+@source inline("{col-start,col-end,row-start,row-end}-auto");
 
 @theme inline {
     --font-sans: Geist, Instrument Sans, ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';

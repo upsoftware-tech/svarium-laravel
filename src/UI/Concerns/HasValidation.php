@@ -32,6 +32,26 @@ trait HasValidation
         return $this->attribute;
     }
 
+    public function hasRequiredRule(): bool
+    {
+        foreach ($this->rules as $rule) {
+            if (! is_string($rule)) {
+                continue;
+            }
+
+            $normalized = strtolower(trim($rule));
+            if ($normalized === '') {
+                continue;
+            }
+
+            if (preg_match('/^required(?::|_|$)/', $normalized) === 1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function messages(array $messages): static
     {
         foreach ($messages as $rule => $message) {

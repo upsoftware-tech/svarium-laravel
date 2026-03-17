@@ -434,7 +434,10 @@ class ModuleCommand extends CoreCommand
         }
 
         if ($parentMenu !== null) {
-            $order = $this->resolveChildMenuOrder($parentMenu);
+            [$order, $shouldShift] = $this->resolveMenuOrderFromPrompt($parentMenu);
+            if ($shouldShift) {
+                $this->shiftExistingMenuOrders($order, $parentMenu);
+            }
         } else {
             [$order, $shouldShift] = $this->resolveMenuOrderFromPrompt();
             if ($shouldShift) {
@@ -549,10 +552,12 @@ class ModuleCommand extends CoreCommand
     /**
      * @return array{0: int, 1: bool} [order, shouldShiftExisting]
      */
-    protected function resolveMenuOrderFromPrompt(): array
+    protected function resolveMenuOrderFromPrompt(?string $parentMenu = null): array
     {
-        $positions = $this->topLevelMenuPositions();
-        $positions = $this->mergeCurrentMenuPosition($positions);
+        $positions = $this->menuPositionsByParent($parentMenu);
+        if ($parentMenu === null) {
+            $positions = $this->mergeCurrentMenuPosition($positions);
+        }
 
         if ($positions === []) {
             return [1, false];
@@ -563,13 +568,16 @@ class ModuleCommand extends CoreCommand
         ];
 
         foreach ($positions as $index => $position) {
-            $isCurrent = $this->isCurrentMenuPosition($position);
+            $isCurrent = $parentMenu === null ? $this->isCurrentMenuPosition($position) : false;
             $suffix = $isCurrent ? ' (aktualna pozycja)' : '';
-            $options["item_{$index}"] = "{$position['label']} (order: {$position['order']}){$suffix}";
+            $prefix = $parentMenu !== null ? "{$parentMenu} > " : '';
+            $options["item_{$index}"] = "{$prefix}{$position['label']} (etykieta, order: {$position['order']}){$suffix}";
         }
 
         $selected = (string) select(
-            'Za którą pozycją dodać nową pozycję menu?',
+            $parentMenu !== null
+                ? 'Za którą pozycją w tym podmenu dodać nową pozycję menu?'
+                : 'Za którą pozycją dodać nową pozycję menu?',
             $options,
             '__end'
         );
@@ -652,6 +660,88 @@ class ModuleCommand extends CoreCommand
         $seen = [];
 
         foreach ($children as $node) {
+            if (! is_array($node)) {
+                continue;
+            }
+
+            $type = (string) ($node['type'] ?? 'item');
+            if (! in_array($type, ['item', 'group'], true)) {
+                continue;
+            }
+
+            $label = trim((string) ($node['label'] ?? ''));
+            if ($label === '') {
+                continue;
+            }
+
+            $normalizedLabel = mb_strtolower($label);
+            if (isset($seen[$normalizedLabel])) {
+                continue;
+            }
+
+            $seen[$normalizedLabel] = true;
+
+            $positions[] = [
+                'label' => $label,
+                'order' => (int) ($node['order'] ?? 0),
+            ];
+        }
+
+        usort($positions, static function (array $left, array $right): int {
+            if ($left['order'] !== $right['order']) {
+                return $left['order'] <=> $right['order'];
+            }
+
+            return strcmp($left['label'], $right['label']);
+        });
+
+        return $positions;
+    }
+
+    /**
+     * @return array<int, array{label: string, order: int}>
+     */
+    protected function menuPositionsByParent(?string $parentMenu = null): array
+    {
+        if ($parentMenu === null) {
+            return $this->topLevelMenuPositions();
+        }
+
+        $parentMenu = trim($parentMenu);
+        if ($parentMenu === '') {
+            return [];
+        }
+
+        try {
+            $tree = NavigationService::make()->getRegisteredTree();
+            $rootChildren = is_array($tree['children'] ?? null) ? $tree['children'] : [];
+        } catch (Throwable) {
+            return [];
+        }
+
+        $subItems = [];
+        foreach ($rootChildren as $rootNode) {
+            if (! is_array($rootNode)) {
+                continue;
+            }
+
+            $rootLabel = trim((string) ($rootNode['label'] ?? ''));
+            if ($rootLabel === '' || ! $this->menuLabelsMatch($rootLabel, $parentMenu)) {
+                continue;
+            }
+
+            $subItems = is_array($rootNode['children'] ?? null) ? $rootNode['children'] : [];
+            break;
+        }
+
+        if ($subItems === []) {
+            return [];
+        }
+
+        $positions = [];
+        $seen = [];
+
+        foreach ($subItems as $node) {
             if (! is_array($node)) {
                 continue;
             }
@@ -785,7 +875,7 @@ class ModuleCommand extends CoreCommand
         return mb_strtolower(trim($label));
     }
 
-    protected function shiftExistingMenuOrders(int $fromOrder): void
+    protected function shiftExistingMenuOrders(int $fromOrder, ?string $parentMenu = null): void
     {
         $moduleFiles = glob(svarium_modules('*/').'*Module.php');
 
@@ -801,6 +891,18 @@ class ModuleCommand extends CoreCommand
             $content = (string) File::get($moduleFile);
             if ($content === '' || ! str_contains($content, '->order(')) {
                 continue;
+            }
+
+            if (is_string($parentMenu) && trim($parentMenu) !== '') {
+                $parentMenuEscaped = preg_quote(trim($parentMenu), '/');
+                $hasMatchingParentPath = preg_match(
+                    '/->path\(\s*\[\s*[\'"]'.$parentMenuEscaped.'[\'"]/u',
+                    $content
+                ) === 1;
+
+                if (! $hasMatchingParentPath) {
+                    continue;
+                }
             }
 
             $updated = preg_replace_callback(
@@ -833,7 +935,7 @@ class ModuleCommand extends CoreCommand
 
         $options = [];
         foreach ($positions as $index => $position) {
-            $options["item_{$index}"] = "{$position['label']} (order: {$position['order']})";
+            $options["item_{$index}"] = "{$position['label']} (etykieta, order: {$position['order']})";
         }
 
         $selected = (string) select(

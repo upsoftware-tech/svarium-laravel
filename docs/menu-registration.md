@@ -110,6 +110,7 @@ Jeśli etykiety są tłumaczone (`Ustawienia` / `Settings` / `Einstellungen`), b
 
 Dlatego zalecane jest użycie identyfikatorów technicznych:
 
+- `->id('ksef')` - alias do `->pathId('ksef')`,
 - `->pathId('ksef')` - ID bieżącego węzła,
 - `->parent('ksef')` - rodzic po ID (bez zależności od label),
 - `->pathIds(['settings', 'ksef'])` - pełna ścieżka ID,
@@ -118,8 +119,9 @@ Dlatego zalecane jest użycie identyfikatorów technicznych:
 Przykład:
 
 ```php
-MenuItem::make('KSeF')
-    ->pathId('ksef')
+MenuItem::make()
+    ->id('ksef')
+    ->label('KSeF')
     ->icon('lucide:file-check')
     ->order(36);
 
@@ -129,6 +131,17 @@ MenuItem::make('Połączenie i certyfikaty')
     ->url(panel_href('ksef/connection-certificates'))
     ->order(1);
 ```
+
+Jeśli używasz:
+
+```php
+MenuItem::make()
+    ->label('Rentals United')
+    ->id('rentalsunited')
+```
+
+to w menu pokazany zostanie literalny label `Rentals United`.
+`id('rentalsunited')` pozostaje technicznym identyfikatorem węzła i nie nadpisuje etykiety.
 
 Przykład z `pathIds`:
 
@@ -234,9 +247,11 @@ register_menu([
 ## API `MenuItem`
 
 - `MenuItem::make('Label')`
+- `MenuItem::make()` + `->label('Label')`
 - `->routeName('route.name')` albo `->url('/path')`
 - `->icon('lucide:home')`
 - `->path([...])` / `->under([...])`
+- `->id('ksef')` (alias do `pathId`)
 - `->pathId('ksef')` / `->pathKey('ksef')` (ID bieżącego węzła)
 - `->parent('ksef')` (rodzic po technicznym ID)
 - `->pathIds([...])` / `->pathKeys([...])` (ścieżka technicznych ID)
@@ -254,6 +269,37 @@ MenuItem::make('Lista pacjentów')
     ->path(['Pacjenci'])
     ->menu('main_menu');
 ```
+
+## Rejestracja modułu z zewnętrznej wtyczki
+
+Jeśli tworzysz moduł w osobnym pakiecie, najwygodniej zarejestrować go przez `SvariumPluginServiceProvider`.
+
+Przykład:
+
+```php
+<?php
+
+namespace Vendor\Package\Providers;
+
+use Upsoftware\Svarium\Providers\SvariumPluginServiceProvider;
+use Vendor\Package\Modules\Regions\RegionsModule;
+
+class PackageServiceProvider extends SvariumPluginServiceProvider
+{
+    public function boot(): void
+    {
+        $this->registerSvariumModule(RegionsModule::class);
+    }
+}
+```
+
+Helper:
+
+- tworzy instancję modułu,
+- rejestruje go w `ModuleRegistry`,
+- odpala `register()` / `boot()`,
+- rejestruje menu modułu,
+- rejestruje operacje z katalogu `Panel`.
 
 ## Widoczność wg uprawnień
 

@@ -3,6 +3,9 @@
 namespace Upsoftware\Svarium\Panel;
 
 use Illuminate\Database\Eloquent\Model;
+use ReflectionNamedType;
+use ReflectionType;
+use ReflectionUnionType;
 use Upsoftware\Svarium\Enums\ExecutionMode;
 
 class OperationParameterResolver
@@ -10,17 +13,11 @@ class OperationParameterResolver
     protected function resolveTargetMethod(Operation $operation, PanelContext $context): string
     {
         return match ($operation->execution()) {
-
             ExecutionMode::ACTION => 'run',
-
             ExecutionMode::FORM => $context->isPost() ? 'save' : 'schema',
-
             ExecutionMode::DUPLICATE => $context->isPost() ? 'save' : 'schema',
-
             ExecutionMode::TABLE => 'table',
-
             ExecutionMode::VIEW => 'render',
-
             default => 'render',
         };
     }
@@ -28,7 +25,6 @@ class OperationParameterResolver
     protected function resolveGenericModel($operation, $id)
     {
         if (method_exists($operation, 'getResourceClass')) {
-
             $resourceClass = $operation->getResourceClass();
             $resource = app($resourceClass);
 
@@ -48,33 +44,27 @@ class OperationParameterResolver
         $args = [];
 
         foreach ($reflection->getParameters() as $parameter) {
+            $typeNames = $this->resolveTypeNames($parameter->getType());
 
-            $type = $parameter->getType()?->getName();
-
-            if ($type === PanelContext::class) {
-                $args[] = $context;
-
+            // PanelContext is already passed as the first argument by operation executors.
+            if (in_array(PanelContext::class, $typeNames, true)) {
                 continue;
             }
 
-            if ($type === PanelInput::class) {
+            if (in_array(PanelInput::class, $typeNames, true)) {
                 $args[] = $context->input;
 
                 continue;
             }
 
-            if ($type && (
-                $type === Model::class ||
-                is_subclass_of($type, Model::class)
-            )
-            ) {
+            if ($this->acceptsModel($typeNames)) {
                 if (! empty($context->params)) {
-
                     $value = reset($context->params);
+                    $modelType = $this->resolveModelType($typeNames);
 
-                    $args[] = $type === Model::class
+                    $args[] = $modelType === Model::class
                         ? $this->resolveGenericModel($operation, $value)
-                        : $type::findOrFail($value);
+                        : $modelType::findOrFail($value);
 
                     continue;
                 }
@@ -98,5 +88,55 @@ class OperationParameterResolver
         }
 
         return $args;
+    }
+
+    /**
+     * @return list<string>
+     */
+    protected function resolveTypeNames(?ReflectionType $type): array
+    {
+        if ($type instanceof ReflectionNamedType) {
+            return [$type->getName()];
+        }
+
+        if ($type instanceof ReflectionUnionType) {
+            return array_values(array_map(
+                static fn (ReflectionNamedType $namedType): string => $namedType->getName(),
+                array_filter(
+                    $type->getTypes(),
+                    static fn ($namedType): bool => $namedType instanceof ReflectionNamedType,
+                ),
+            ));
+        }
+
+        return [];
+    }
+
+    /**
+     * @param  list<string>  $typeNames
+     */
+    protected function acceptsModel(array $typeNames): bool
+    {
+        foreach ($typeNames as $typeName) {
+            if ($typeName === Model::class || (class_exists($typeName) && is_subclass_of($typeName, Model::class))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param  list<string>  $typeNames
+     */
+    protected function resolveModelType(array $typeNames): string
+    {
+        foreach ($typeNames as $typeName) {
+            if ($typeName === Model::class || (class_exists($typeName) && is_subclass_of($typeName, Model::class))) {
+                return $typeName;
+            }
+        }
+
+        return Model::class;
     }
 }

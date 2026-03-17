@@ -163,6 +163,7 @@ class SvariumServiceProvider extends ServiceProvider
         ], 'upsoftware');
 
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        $this->loadModuleMigrationsFromAppModules();
 
         if (config('upsoftware.tenancy.enabled', config('tenancy.enabled', false))) {
             $tenantsMigrationsPath = __DIR__.'/../database/migrations/tenants';
@@ -315,6 +316,36 @@ class SvariumServiceProvider extends ServiceProvider
         |-----------------------------
         */
         $this->consoleCommands();
+    }
+
+    protected function loadModuleMigrationsFromAppModules(): void
+    {
+        $modulesBasePath = svarium_modules();
+
+        if (! is_dir($modulesBasePath)) {
+            return;
+        }
+
+        $loadedPaths = [];
+
+        foreach (File::directories($modulesBasePath) as $modulePath) {
+            foreach ([
+                $modulePath.DIRECTORY_SEPARATOR.'Database'.DIRECTORY_SEPARATOR.'Migrations',
+                $modulePath.DIRECTORY_SEPARATOR.'database'.DIRECTORY_SEPARATOR.'migrations',
+            ] as $migrationsPath) {
+                if (! is_dir($migrationsPath)) {
+                    continue;
+                }
+
+                $realPath = realpath($migrationsPath);
+                if (! is_string($realPath) || $realPath === '' || isset($loadedPaths[$realPath])) {
+                    continue;
+                }
+
+                $this->loadMigrationsFrom($realPath);
+                $loadedPaths[$realPath] = true;
+            }
+        }
     }
 
     /*

@@ -693,14 +693,34 @@ class Appearance
         ]);
     }
 
-    public function colSpan(string|int $value): static
+    public function colSpan(string|int $value, ?int $columns = null): static
     {
-        return $this->applyGridSpan($value, 'col-span');
+        return $this->applyGridSpan($value, 'col-span', $columns);
     }
 
     public function rowSpan(string|int $value): static
     {
         return $this->applyGridSpan($value, 'row-span');
+    }
+
+    public function colStart(string|int $value): static
+    {
+        return $this->applyGridLine($value, 'col-start', 'gridColumnStart');
+    }
+
+    public function colEnd(string|int $value): static
+    {
+        return $this->applyGridLine($value, 'col-end', 'gridColumnEnd');
+    }
+
+    public function rowStart(string|int $value): static
+    {
+        return $this->applyGridLine($value, 'row-start', 'gridRowStart');
+    }
+
+    public function rowEnd(string|int $value): static
+    {
+        return $this->applyGridLine($value, 'row-end', 'gridRowEnd');
     }
 
     protected function applyUtilityProperty(
@@ -734,7 +754,7 @@ class Appearance
         ]);
     }
 
-    protected function applyGridSpan(string|int $value, string $prefix): static
+    protected function applyGridSpan(string|int $value, string $prefix, ?int $columns = null): static
     {
         $raw = trim((string) $value);
 
@@ -760,7 +780,99 @@ class Appearance
             return $this->appendClass($prefix.'-'.$normalized);
         }
 
+        $baseColumns = ($columns !== null && $columns >= 1 && $columns <= 12) ? $columns : 12;
+        if (preg_match('/^(\d+)\s*\/\s*(\d+)(?:\s*@\s*(\d+))?$/', $normalized, $matches) === 1) {
+            $numerator = (int) ($matches[1] ?? 0);
+            $denominator = (int) ($matches[2] ?? 0);
+            $customColumns = (int) ($matches[3] ?? 0);
+
+            if ($customColumns >= 1 && $customColumns <= 12) {
+                $baseColumns = $customColumns;
+            }
+
+            if ($numerator > 0 && $denominator > 0) {
+                $resolvedSpan = ($baseColumns * $numerator) / $denominator;
+                $roundedSpan = (int) round($resolvedSpan);
+
+                if (abs($resolvedSpan - $roundedSpan) < 0.00001 && $roundedSpan >= 1 && $roundedSpan <= 12) {
+                    return $this->appendClass($prefix.'-'.$roundedSpan);
+                }
+            }
+        }
+
         return $this;
+    }
+
+    protected function applyGridLine(string|int $value, string $prefix, string $styleProperty): static
+    {
+        if (is_int($value)) {
+            if ($value <= 0) {
+                return $this;
+            }
+
+            return $this
+                ->appendClass($prefix.'-'.$value)
+                ->style([
+                    $styleProperty => (string) $value,
+                ]);
+        }
+
+        $raw = trim((string) $value);
+        if ($raw === '') {
+            return $this;
+        }
+
+        $normalized = strtolower($raw);
+
+        if (str_starts_with($normalized, $prefix.'-')) {
+            $fallback = substr($normalized, strlen($prefix) + 1);
+
+            if ($fallback === 'auto') {
+                return $this
+                    ->appendClass($normalized)
+                    ->style([
+                        $styleProperty => 'auto',
+                    ]);
+            }
+
+            if (preg_match('/^\d+$/', $fallback) === 1 && (int) $fallback > 0) {
+                return $this
+                    ->appendClass($normalized)
+                    ->style([
+                        $styleProperty => (string) ((int) $fallback),
+                    ]);
+            }
+
+            return $this->appendClass($normalized);
+        }
+
+        if ($normalized === 'auto') {
+            return $this
+                ->appendClass($prefix.'-auto')
+                ->style([
+                    $styleProperty => 'auto',
+                ]);
+        }
+
+        if (preg_match('/^\d+$/', $normalized) === 1) {
+            if ((int) $normalized <= 0) {
+                return $this;
+            }
+
+            return $this
+                ->appendClass($prefix.'-'.$normalized)
+                ->style([
+                    $styleProperty => (string) ((int) $normalized),
+                ]);
+        }
+
+        if ($this->shouldTreatAsCssValue($raw)) {
+            return $this->style([
+                $styleProperty => $raw,
+            ]);
+        }
+
+        return $this->appendClass($prefix.'-'.$normalized);
     }
 
     protected function shouldTreatAsCssValue(string $value): bool

@@ -42,8 +42,14 @@ class MenuItem
         return $this;
     }
 
-    public function label(string $label): static
+    public function label(?string $label = null): static
     {
+        if ($label === null) {
+            $this->data['type'] = 'label';
+
+            return $this;
+        }
+
         $this->data['label'] = $label;
 
         return $this;
@@ -115,6 +121,11 @@ class MenuItem
         $this->data['path_id'] = $pathId;
 
         return $this;
+    }
+
+    public function id(string $id): static
+    {
+        return $this->pathId($id);
     }
 
     public function pathKey(string $pathKey): static

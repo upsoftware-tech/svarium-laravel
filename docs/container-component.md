@@ -1,9 +1,9 @@
 # Komponent `Container`
 
-`Container` działa jak `Block`, ale domyślnie dodaje klasę Tailwinda:
+`Container` działa jak `Block`, ale domyślnie dodaje klasy:
 
 ```php
-container
+container app__container
 ```
 
 Nadaje się do klasycznego ograniczania szerokości treści w layoucie strony lub sekcji.
@@ -111,3 +111,9 @@ Container::make()
   - `bottom`
   - `appearance`
   - helpery typu `padding`, `margin`, `bg`, `rounded`
+- `PanelLayout` może automatycznie owijać panelowy `body/content` komponentem `Container`
+- automatyczny i ręcznie dodany `Container` zawsze renderuje klasę `app__container`, więc możesz go stylować własnym CSS niezależnie od klasy Tailwinda `container`
+- to zachowanie kontrolujesz przez `config('upsoftware.panel.container.*')` albo metody layoutu:
+  - `->container(true|false)`
+  - `->containerFluid(true|false)`
+  - `->containerPosition('left'|'center'|'right')`

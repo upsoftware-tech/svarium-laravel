@@ -85,6 +85,11 @@ public function formConfig(PanelContext $context, ?Model $record = null): array
             'position' => 'left',
             'variant' => 'simple',
             'title' => true,
+            'card' => true,
+            'validation_error_icon' => [
+                'enabled' => false,
+                'icon' => 'lucide:circle-alert',
+            ],
         ],
         'language' => [
             'display' => 'select',
@@ -114,6 +119,16 @@ Opcja `tab.title`:
 
 - `true` - pokazuje stały tytuł nad tabami,
 - `false` - ukrywa automatyczny tytuł nad tabami.
+
+Opcja `tab.card`:
+
+- `true` - aktywny tab renderuje schema wewnątrz karty (wrapper `Card` + wewnętrzny `Grid`),
+- `false` - schema renderowana bez wrappera karty.
+
+Opcja `tab.validation_error_icon`:
+
+- `enabled` - pokazuje ikonę błędu na zakładce zawierającej pola z błędami walidacji,
+- `icon` - ikona (np. `lucide:circle-alert`).
 
 Gdy `tab.title = true`, tytuł bierze się domyślnie z:
 
@@ -324,6 +339,9 @@ Najważniejsze metody:
 - `->action(Button::make('Dodaj'))`
 - `->icon('lucide:user')`
 - `->badge('3')`
+- `->card(true|false)`
+- `->widthContent(960)` / `->widthContent('72rem')`
+- `->paddingContent(4)` / `->paddingContent('4')` / `->paddingContent('8px')`
 - `->default()`
 - `->schema([...])`
 - `->content([...])` - alias dla `schema(...)`
@@ -341,11 +359,211 @@ Najważniejsze metody:
 - string, wtedy zostanie zamieniony na `Button::make('...')`
 - closure zwracające jedną z powyższych wartości
 
+`card(false)` wyłącza wrapper karty dla tej konkretnej zakładki (nawet jeśli globalnie `tab.card = true`).
+
+`widthContent(...)` zawęża wewnętrzną szerokość contentu taba (body karty), np.:
+
+- `960` -> `max-width: 960px`
+- `'72rem'` -> `max-width: 72rem`
+- `'80%'` -> `max-width: 80%`
+
+`paddingContent(...)` ustawia wewnętrzny padding body karty taba, np.:
+
+- `4` -> `padding: 4px`
+- `'4'` -> klasa Tailwind `p-4`
+- `'8px'` -> `padding: 8px`
+
+- `->colSpan('full')` / `->colSpan(6)`
+- `->grid(12)` - liczba kolumn siatki nadrzędnej dla wrappera taba
+- `->contentCols(12)` - liczba kolumn siatki contentu wewnątrz taba
+
 ### `->default()`
 
 Oznacza aktywną zakładkę domyślną, jeśli URL nie wskazuje konkretnej.
 
 Jeśli żadna zakładka nie ma `->default()`, aktywna będzie pierwsza.
+
+## 8A. Domyślne ustawienia tabów na poziomie `Resource`
+
+Możesz ustawić nadrzędne parametry layoutu tabów raz w `Resource`, a każdy tab może je lokalnie nadpisać.
+
+```php
+public function formTabDefaults(PanelContext $context, ?Model $record = null): array
+{
+    return [
+        'content' => 12,          // alias: contentCols / cols
+        'colSpan' => 'full',      // alias: colspan / span
+        'grid' => 12,             // alias: gridColumns
+        'widthContent' => '72rem',// alias: width
+        'paddingContent' => '4',  // alias: padding
+        'fieldColSpan' => '1/2',  // alias: field_col_span
+    ];
+}
+```
+
+Zasada działania:
+
+- najpierw brane są globalne defaulty (config),
+- potem `Resource::formTabDefaults(...)`,
+- na końcu wartości ustawione bezpośrednio na tabie.
+
+Czyli wartości na konkretnym tabie zawsze mają najwyższy priorytet.
+
+## 8B. Tab jako osobna klasa (abstrakcyjna baza)
+
+Jeśli chcesz trzymać `key`, `label`, `title`, `subtitle`, `icon`, `default` i `schema` w jednej klasie, użyj:
+
+- `Upsoftware\Svarium\Panel\Resource\FormTab` (najkrótsza, zalecana)
+- `Upsoftware\Svarium\Panel\Resource\FormTabDefinition` (pełna)
+- `Upsoftware\Svarium\Panel\Resource\ResourceFormTabDefinition` (pełna nazwa, kompatybilność)
+
+Przykład:
+
+```php
+<?php
+
+namespace App\Svarium\Modules\Apartment\Panel\Tabs;
+
+use Illuminate\Database\Eloquent\Model;
+use Upsoftware\Svarium\Panel\PanelContext;
+use Upsoftware\Svarium\Panel\Resource\FormTab;
+use Upsoftware\Svarium\UI\Components\Form\Input;
+
+class BasicTab extends FormTab
+{
+    protected static string $key = 'basic';
+    protected static ?string $icon = 'lucide:file-text';
+    protected static bool $default = true;
+
+    protected static function label(PanelContext $context, ?Model $record = null): ?string
+    {
+        return __('Basic information');
+    }
+
+    protected static function title(PanelContext $context, ?Model $record = null): ?string
+    {
+        return __('Basic information');
+    }
+
+    protected static function schema(PanelContext $context, ?Model $record = null): array
+    {
+        return [
+            Input::make('name')->label(__('Name'))->required(),
+        ];
+    }
+}
+```
+
+Jeśli nie ustawisz `protected static string $key`, klucz zostanie zbudowany automatycznie z nazwy klasy w `kebab-case`, np.:
+
+- `BasicTab` -> `basic-tab`
+- `ContactDetailsTab` -> `contact-details-tab`
+
+Możesz definiować wartości na dwa sposoby:
+
+- property, np. `protected static ?string $title = 'Basic information';`
+- metoda, np. `protected static function title(...) { return __('Basic information'); }`
+
+Oba warianty są wspierane. Jeśli zdefiniujesz oba jednocześnie, metoda ma priorytet.
+
+W `Resource`:
+
+```php
+public function formTabs(PanelContext $context, ?Model $record = null): array
+{
+    return [
+        \App\Svarium\Modules\Apartment\Panel\Tabs\BasicTab::make($context, $record),
+    ];
+}
+```
+
+Dodatkowo w klasie możesz opcjonalnie nadpisać:
+
+- `key(...)`
+- `label(...)`
+- `title(...)`
+- `subtitle(...)`
+- `icon(...)`
+- `badge(...)`
+- `card(...)`
+- `widthContent(...)`
+- `paddingContent(...)`
+- `tabColSpan(...)`
+- `tabGrid(...)`
+- `tabContent(...)`
+- `fieldColSpan(...)`
+- `isDefault(...)`
+- `action(...)`
+- `operation(...)`
+- `url(...)`
+- `visible(...)`
+- `routed(...)`
+
+Uwaga: w klasach `FormTab` domyślne `fieldColSpan` jest puste (`null`), więc `formTabDefaults()['fieldColSpan']` może poprawnie narzucić globalny span pól.
+
+## 8C. `cards()` w klasach `FormTab` / `ResourceFormTabDefinition`
+
+W klasie taba możesz budować sekcje kartowe przez `cards(...)`.  
+To działa niezależnie od `schema(...)` i jest automatycznie scalane na początku schema.
+
+### Globalne ustawienia siatki kart (w klasie taba)
+
+```php
+protected static int $grid = 1; // 1..12
+protected static int|string|float $gap = 4; // domyślnie 4
+```
+
+- `$grid` - liczba kolumn dla siatki kart (`Grid::cols(...)`),
+- `$gap` - odstęp między kartami (`Grid::gap(...)`).
+
+### Definicja pojedynczej karty
+
+```php
+protected static function cards(PanelContext $context, ?Model $record = null): array
+{
+    return [
+        [
+            'title' => __('Forms to generate'),
+            'subtitle' => __('Available actions'),
+            'icon' => 'lucide:file-text',
+            'action' => Button::make(__('Generate'))->variant('outline')->size('sm'),
+
+            'colSpan' => 1, // aliasy: span, colspan
+            'cols' => 1,    // wewnętrzny grid contentu karty
+            'padding' => 4, // domyślnie 4, np. 0 => brak wewnętrznego paddingu
+
+            'schema' => self::repeater(),
+        ],
+        [
+            'title' => __('Generated forms / documents'),
+            'description' => __('History'), // alias subtitle
+            'schema' => [
+                Text::make(__('No generated documents yet.')),
+            ],
+        ],
+    ];
+}
+```
+
+Obsługiwane klucze karty:
+
+- `title`
+- `subtitle` (alias: `description`)
+- `icon`
+- `action` (aliasy: `actions`, `headerComponents`, `header_components`)
+- `schema` (aliasy: `children`, `content`)
+- `card` (`true|false`)
+- `colSpan` (aliasy: `span`, `colspan`)
+- `cols` (wewnętrzny grid contentu karty)
+- `padding` (wewnętrzny padding body karty, domyślnie `4`)
+- `paddingContent` (alias `padding`)
+- `widthContent` (max-width contentu karty, np. `960`, `'72rem'`, `'80%'`)
+
+Uwagi:
+
+- `cols` steruje wewnętrzną siatką pól w danej karcie.
+- `colSpan` steruje szerokością karty w zewnętrznej siatce kart (`$grid`).
+- `action` może być komponentem, tablicą komponentów, stringiem (zamieniany na `Button`), albo `Closure`.
 
 ## 9. Taby lokalne
 

@@ -483,6 +483,18 @@ class Column extends Component
         return $this;
     }
 
+    public function bool(): static
+    {
+        $this->valueDisplayType = 'bool';
+
+        return $this;
+    }
+
+    public function boolean(): static
+    {
+        return $this->bool();
+    }
+
     public function format(string $format): static
     {
         $normalized = trim($format);
@@ -704,6 +716,11 @@ class Column extends Component
             'datetime' => 'Y-m-d H:i',
             default => null,
         };
+    }
+
+    public function getValueDisplayType(): ?string
+    {
+        return $this->valueDisplayType;
     }
 
     protected function parseDateValue(mixed $value): ?Carbon
