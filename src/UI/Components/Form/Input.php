@@ -24,6 +24,11 @@ class Input extends FieldComponent
         return $this->prop('append', $value);
     }
 
+    public function format(string $format): static
+    {
+        return $this->prop('format', $format);
+    }
+
     public function toArray(): array
     {
         $array = parent::toArray();

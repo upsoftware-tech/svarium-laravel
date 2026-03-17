@@ -1,6 +1,6 @@
 {
-    "version": "1.0.1+35",
-    "name": "upsoftware/svarium-laravel",
+    "version": "1.0.1+36",
+    "name": "upsoftware/svarium",
     "type": "library",
     "description": "Svarium Commercial System",
     "license": "proprietary",
