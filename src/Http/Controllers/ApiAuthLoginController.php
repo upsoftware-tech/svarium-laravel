@@ -41,13 +41,17 @@ class ApiAuthLoginController extends Controller
 
         if (($result['status'] ?? null) === AuthLoginService::STATUS_OTP_REQUIRED) {
             $otpToken = trim((string) ($result['otp_token'] ?? ''));
+            $otpResendUrl = $otpToken !== '' ? $this->buildApiOtpUrl($otpToken) : null;
+            $otpResendAfter = $otpToken !== '' ? $this->resolveOtpResendAfterSeconds($otpToken) : 0;
 
             return response()->json([
                 'status' => AuthLoginService::STATUS_OTP_REQUIRED,
                 'token' => null,
                 'requires_otp' => true,
                 'otp_token' => $otpToken !== '' ? $otpToken : null,
-                'otp_url' => $otpToken !== '' ? $this->buildApiOtpUrl($otpToken) : null,
+                'otp_url' => $otpResendUrl,
+                'otp_resend_url' => $otpResendUrl,
+                'otp_resend_after' => $otpResendAfter,
                 'otp_verify_url' => $otpToken !== '' ? $this->buildApiOtpVerifyUrl($otpToken) : null,
                 'otp_methods' => $this->buildOtpVerificationMethods($authLoginService, $result['user'] ?? null),
             ], 200);
@@ -455,6 +459,50 @@ class ApiAuthLoginController extends Controller
             $path = trim(implode('/', array_filter([$prefix, 'auth/otp/'.$normalized.'/verify'])), '/');
 
             return '/'.$path;
+        }
+    }
+
+    protected function resolveOtpResendAfterSeconds(string $otpToken): int
+    {
+        $normalized = trim($otpToken);
+        if ($normalized === '') {
+            return 0;
+        }
+
+        $userAuthModel = get_model('user_auth');
+        if (! is_string($userAuthModel) || ! class_exists($userAuthModel)) {
+            return 0;
+        }
+
+        try {
+            $userAuth = $userAuthModel::byHash($normalized);
+            if (! $userAuth || ! method_exists($userAuth, 'code')) {
+                return 0;
+            }
+
+            $resendSeconds = max(0, (int) config('upsoftware.auth.otp.resend_seconds', 60));
+            if ($resendSeconds <= 0) {
+                return 0;
+            }
+
+            $latestCreatedAt = $userAuth->code()
+                ->latest('id')
+                ->value('created_at');
+
+            if (! $latestCreatedAt) {
+                return 0;
+            }
+
+            $createdAt = Carbon::parse((string) $latestCreatedAt);
+            $availableAt = $createdAt->copy()->addSeconds($resendSeconds);
+
+            if (now()->greaterThanOrEqualTo($availableAt)) {
+                return 0;
+            }
+
+            return max(1, (int) now()->diffInSeconds($availableAt));
+        } catch (Throwable) {
+            return 0;
         }
     }
 }

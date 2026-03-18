@@ -48,7 +48,7 @@ class UserChangePasswordNotify extends Notification
         ]);
 
         $message = (new MailMessage)
-            ->greeting(__('Hello!'))
+            ->greeting(__('svarium::email.Hello!'))
             ->subject((string) ($rendered['subject'] ?? $subject))
             ->salutation(__('svarium::email.Team :system', ['system' => config('app.name')]));
 

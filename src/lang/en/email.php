@@ -1,0 +1,26 @@
+<?php
+
+return [
+    'Your one-time login code :code' => 'Your one-time login code :code',
+    'Hello!' => 'Hello!',
+    'We received a request to log in to your account in the' => 'We received a request to log in to your account in the',
+    'We received a request to log in to your account in the :system system.' => 'We received a request to log in to your account in the :system system.',
+    'To confirm the login, enter the code below:' => 'To confirm the login, enter the code below:',
+    'Your login code' => 'Your login code',
+    'The code and the link will expire in 30 minutes (:expires).' => 'The code and the link will expire in 30 minutes (:expires).',
+    'If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.' => 'If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.',
+    'Your one-time code :code for password reset' => 'Your one-time code :code for password reset',
+    'We received a request to reset the password for your account in the :system system.' => 'We received a request to reset the password for your account in the :system system.',
+    'To confirm the request to set a new password, enter the code below:' => 'To confirm the request to set a new password, enter the code below:',
+    'Team :system' => 'Team :system',
+    'Confirmation of password change' => 'Confirmation of password change',
+    'Your password for accessing the :system panel has been changed.' => 'Your password for accessing the :system panel has been changed.',
+    'Please remember this the next time you log in.' => 'Please remember this the next time you log in.',
+    'If you have not changed your password or believe this message to be incorrect, please contact us as soon as possible.' => 'If you have not changed your password or believe this message to be incorrect, please contact us as soon as possible.',
+    'We have detected a new login to your account' => 'We have detected a new login to your account',
+    'Device' => 'Device',
+    'Operating system' => 'Operating system',
+    'Browser' => 'Browser',
+    'If this was your login, you do not need to do anything.' => 'If this was your login, you do not need to do anything.',
+    'If you do not recognise this login, change your password immediately and contact us.' => 'If you do not recognise this login, change your password immediately and contact us.',
+];

@@ -208,13 +208,13 @@ class SystemMailTemplateEditOperation extends Operation
                 ]),
             ],
             'SendCodeNotificationEmailRegister' => [
-                'subject' => __('email.Your one-time login code :code', ['code' => '{code}']),
+                'subject' => __('svarium::email.Your one-time login code :code', ['code' => '{code}']),
                 'body' => implode("\n", [
-                    __('email.We received a request to log in to your account in the :system system.', ['system' => '{system}']),
-                    __('email.To confirm the login, enter the code below:'),
+                    __('svarium::email.We received a request to log in to your account in the :system system.', ['system' => '{system}']),
+                    __('svarium::email.To confirm the login, enter the code below:'),
                     '{code}',
-                    __('email.The code and the link will expire in 30 minutes (:expires).', ['expires' => '{expires}']),
-                    __('email.If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.'),
+                    __('svarium::email.The code and the link will expire in 30 minutes (:expires).', ['expires' => '{expires}']),
+                    __('svarium::email.If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.'),
                 ]),
             ],
             'SendCodeNotificationEmailReset' => [

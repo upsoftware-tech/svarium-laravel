@@ -40,13 +40,13 @@ class SendCodeNotificationEmailRegister extends Notification
      */
     public function toMail(object $notifiable): MailMessage
     {
-        $subject = __('email.Your one-time login code :code', ['code' => $this->code]);
+        $subject = __('svarium::email.Your one-time login code :code', ['code' => $this->code]);
         $defaultBody = [
-            __('email.We received a request to log in to your account in the :system system.', ['system' => config('app.name')]),
-            __('email.To confirm the login, enter the code below:'),
+            __('svarium::email.We received a request to log in to your account in the :system system.', ['system' => config('app.name')]),
+            __('svarium::email.To confirm the login, enter the code below:'),
             (string) $this->code,
-            __('email.The code and the link will expire in 30 minutes (:expires).', ['expires' => $this->expired_at]),
-            __('email.If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.'),
+            __('svarium::email.The code and the link will expire in 30 minutes (:expires).', ['expires' => $this->expired_at]),
+            __('svarium::email.If you did not request a verification code, you can safely ignore this message. If the message keeps repeating, please contact us.'),
         ];
 
         $rendered = $this->renderTemplateContent($subject, $defaultBody, [
@@ -57,8 +57,8 @@ class SendCodeNotificationEmailRegister extends Notification
 
         $message = (new MailMessage)
             ->subject((string) ($rendered['subject'] ?? $subject))
-            ->greeting(__('email.Hello!'))
-            ->salutation(__('Team :system', ['system' => config('app.name')]));
+            ->greeting(__('svarium::email.Hello!'))
+            ->salutation(__('svarium::email.Team :system', ['system' => config('app.name')]));
 
         $this->appendTemplateParagraphLines($message, (string) ($rendered['body'] ?? ''));
 

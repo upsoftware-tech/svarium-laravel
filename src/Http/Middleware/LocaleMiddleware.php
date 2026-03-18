@@ -14,11 +14,20 @@ class LocaleMiddleware
             $request->query('_locale', (string) $request->input('_locale', ''))
         ));
 
+        $hasSession = $request->hasSession();
+
         if ($requestedLocale !== '') {
-            session()->put('locale', $requestedLocale);
+            if ($hasSession) {
+                $request->session()->put('locale', $requestedLocale);
+            }
+
             app()->setLocale($requestedLocale);
         } else {
-            app()->setLocale(session()->has('locale') ? session()->get('locale') : app()->getLocale());
+            if ($hasSession && $request->session()->has('locale')) {
+                app()->setLocale((string) $request->session()->get('locale'));
+            } else {
+                app()->setLocale((string) config('app.locale', app()->getLocale()));
+            }
         }
 
         return $next($request);

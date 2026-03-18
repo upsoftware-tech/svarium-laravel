@@ -290,6 +290,10 @@ class SvariumServiceProvider extends ServiceProvider
             (array) config('upsoftware.middleware.api', ['api'])
         ), static fn (string $value): bool => $value !== ''));
 
+        if (! in_array(LocaleMiddleware::class, $apiMiddleware, true)) {
+            $apiMiddleware[] = LocaleMiddleware::class;
+        }
+
         Route::middleware($apiMiddleware)
             ->namespace('Upsoftware\Svarium\Http\Controllers')
             ->group(__DIR__.'/../routes/api-auth.php');

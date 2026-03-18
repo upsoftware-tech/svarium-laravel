@@ -45,13 +45,18 @@ class ApiAuthOtpSendController extends Controller
         }
 
         if ($this->hasActiveVerificationCodeForMethod($userAuthModel, $method)) {
+            $activeRetryAfter = $this->activeVerificationCodeRetryAfterSeconds($userAuthModel, $method);
+
             return response()->json([
                 'status' => 'otp_code_active',
                 'requires_otp' => true,
                 'otp_token' => $userAuthModel->hash,
                 'otp_send_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
+                'otp_resend_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
                 'otp_verify_url' => $this->buildApiOtpVerifyUrl((string) $userAuthModel->hash),
                 'method' => $method,
+                'retry_after' => $activeRetryAfter,
+                'otp_resend_after' => $activeRetryAfter,
                 'message' => __('Verification code is already active.'),
             ], 200);
         }
@@ -63,9 +68,11 @@ class ApiAuthOtpSendController extends Controller
                 'requires_otp' => true,
                 'otp_token' => $userAuthModel->hash,
                 'otp_send_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
+                'otp_resend_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
                 'otp_verify_url' => $this->buildApiOtpVerifyUrl((string) $userAuthModel->hash),
                 'method' => $method,
                 'retry_after' => $cooldownSeconds,
+                'otp_resend_after' => $cooldownSeconds,
                 'message' => __('Too many resend requests. Try again in :seconds seconds.', ['seconds' => $cooldownSeconds]),
             ], 429);
         }
@@ -89,13 +96,17 @@ class ApiAuthOtpSendController extends Controller
             ]);
         }
 
+        $resendAfter = $this->resendCooldownSecondsFromLastCode($userAuthModel, $method);
+
         return response()->json([
             'status' => 'otp_code_sent',
             'requires_otp' => true,
             'otp_token' => $userAuthModel->hash,
             'otp_send_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
+            'otp_resend_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
             'otp_verify_url' => $this->buildApiOtpVerifyUrl((string) $userAuthModel->hash),
             'method' => $method,
+            'otp_resend_after' => $resendAfter,
             'message' => __('A new verification code has been sent.'),
         ], 200);
     }
@@ -208,6 +219,35 @@ class ApiAuthOtpSendController extends Controller
         }
 
         return max(1, (int) now()->diffInSeconds($availableAt));
+    }
+
+    protected function activeVerificationCodeRetryAfterSeconds(mixed $userAuth, string $method): int
+    {
+        $activeExpiresAt = $userAuth->code()
+            ->where('method', strtolower(trim($method)))
+            ->where(function ($query) {
+                $query->whereNull('is_used')
+                    ->orWhere('is_used', false);
+            })
+            ->where('expired_at', '>=', now())
+            ->latest('expired_at')
+            ->value('expired_at');
+
+        if (! $activeExpiresAt) {
+            return 0;
+        }
+
+        try {
+            $expiresAt = Carbon::parse((string) $activeExpiresAt);
+        } catch (Throwable) {
+            return 0;
+        }
+
+        if (now()->greaterThanOrEqualTo($expiresAt)) {
+            return 0;
+        }
+
+        return max(1, (int) now()->diffInSeconds($expiresAt));
     }
 
     protected function buildApiOtpSendUrl(string $otpToken): ?string

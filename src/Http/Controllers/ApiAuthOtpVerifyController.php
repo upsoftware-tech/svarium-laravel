@@ -35,10 +35,14 @@ class ApiAuthOtpVerifyController extends Controller
 
         $lockSeconds = $this->verificationLockSeconds($request, $userAuthModel);
         if ($lockSeconds > 0) {
+            $otpToken = (string) ($userAuthModel->hash ?? '');
+
             return response()->json([
                 'status' => 'otp_locked',
                 'requires_otp' => true,
-                'otp_token' => $userAuthModel->hash ?? null,
+                'otp_token' => $otpToken !== '' ? $otpToken : null,
+                'otp_resend_url' => $otpToken !== '' ? $this->buildApiOtpSendUrl($otpToken) : null,
+                'otp_resend_after' => $otpToken !== '' ? $this->resolveOtpResendAfterSeconds($otpToken) : 0,
                 'retry_after' => $lockSeconds,
                 'message' => __('Too many invalid attempts. Try again in :seconds seconds.', ['seconds' => $lockSeconds]),
                 'errors' => [
@@ -56,11 +60,14 @@ class ApiAuthOtpVerifyController extends Controller
             $message = $lockSeconds > 0
                 ? __('Too many invalid attempts. Try again in :seconds seconds.', ['seconds' => $lockSeconds])
                 : __('svarium::messages.Invalid verification code');
+            $otpToken = (string) ($userAuthModel->hash ?? '');
 
             return response()->json([
                 'status' => 'invalid',
                 'requires_otp' => true,
-                'otp_token' => $userAuthModel->hash ?? null,
+                'otp_token' => $otpToken !== '' ? $otpToken : null,
+                'otp_resend_url' => $otpToken !== '' ? $this->buildApiOtpSendUrl($otpToken) : null,
+                'otp_resend_after' => $otpToken !== '' ? $this->resolveOtpResendAfterSeconds($otpToken) : 0,
                 'message' => $message,
                 'errors' => [
                     'code' => [$message],
@@ -477,5 +484,67 @@ class ApiAuthOtpVerifyController extends Controller
 
         return null;
     }
-}
 
+    protected function buildApiOtpSendUrl(string $otpToken): ?string
+    {
+        $normalized = trim($otpToken);
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            return route('svarium.api.auth.otp.send', [
+                'userAuth' => $normalized,
+            ]);
+        } catch (Throwable) {
+            $prefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
+            $path = trim(implode('/', array_filter([$prefix, 'auth/otp/'.$normalized.'/send'])), '/');
+
+            return '/'.$path;
+        }
+    }
+
+    protected function resolveOtpResendAfterSeconds(string $otpToken): int
+    {
+        $normalized = trim($otpToken);
+        if ($normalized === '') {
+            return 0;
+        }
+
+        $userAuthModelClass = get_model('user_auth');
+        if (! is_string($userAuthModelClass) || ! class_exists($userAuthModelClass)) {
+            return 0;
+        }
+
+        try {
+            $userAuthModel = $userAuthModelClass::byHash($normalized);
+            if (! $userAuthModel || ! method_exists($userAuthModel, 'code')) {
+                return 0;
+            }
+
+            $resendSeconds = max(0, (int) config('upsoftware.auth.otp.resend_seconds', 60));
+            if ($resendSeconds <= 0) {
+                return 0;
+            }
+
+            $latestCreatedAt = $userAuthModel->code()
+                ->latest('id')
+                ->value('created_at');
+
+            if (! $latestCreatedAt) {
+                return 0;
+            }
+
+            $createdAt = Carbon::parse((string) $latestCreatedAt);
+            $availableAt = $createdAt->copy()->addSeconds($resendSeconds);
+
+            if (now()->greaterThanOrEqualTo($availableAt)) {
+                return 0;
+            }
+
+            return max(1, (int) now()->diffInSeconds($availableAt));
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+}

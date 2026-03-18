@@ -57,7 +57,7 @@ class LoginFromNewDeviceNotify extends Notification
 
         if (! $hasOverride) {
             return (new MailMessage)
-                ->greeting(__('Hello!'))
+                ->greeting(__('svarium::email.Hello!'))
                 ->subject($subject)
                 ->line(new HtmlString('
                 <strong>IP:</strong> '.$variables['ip'].' <br />
@@ -82,7 +82,7 @@ class LoginFromNewDeviceNotify extends Notification
         $rendered = $this->renderTemplateContent($subject, $defaultBody, $variables);
 
         $message = (new MailMessage)
-            ->greeting(__('Hello!'))
+            ->greeting(__('svarium::email.Hello!'))
             ->subject((string) ($rendered['subject'] ?? $subject))
             ->salutation(__('svarium::email.Team :system', ['system' => config('app.name')]));
 
