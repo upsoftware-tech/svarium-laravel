@@ -44,8 +44,11 @@ class ApiAuthOtpSendController extends Controller
             ]);
         }
 
-        if ($this->hasActiveVerificationCodeForMethod($userAuthModel, $method)) {
-            $activeRetryAfter = $this->activeVerificationCodeRetryAfterSeconds($userAuthModel, $method);
+        $cooldownSeconds = $this->resendCooldownSecondsFromLastCode($userAuthModel, $method);
+        $hasActiveCode = $this->hasActiveVerificationCodeForMethod($userAuthModel, $method);
+
+        if ($hasActiveCode && $cooldownSeconds > 0) {
+            $activeRetryAfter = $cooldownSeconds;
 
             return response()->json([
                 'status' => 'otp_code_active',
@@ -61,7 +64,6 @@ class ApiAuthOtpSendController extends Controller
             ], 200);
         }
 
-        $cooldownSeconds = $this->resendCooldownSecondsFromLastCode($userAuthModel, $method);
         if ($cooldownSeconds > 0) {
             return response()->json([
                 'status' => 'otp_rate_limited',
@@ -219,35 +221,6 @@ class ApiAuthOtpSendController extends Controller
         }
 
         return max(1, (int) now()->diffInSeconds($availableAt));
-    }
-
-    protected function activeVerificationCodeRetryAfterSeconds(mixed $userAuth, string $method): int
-    {
-        $activeExpiresAt = $userAuth->code()
-            ->where('method', strtolower(trim($method)))
-            ->where(function ($query) {
-                $query->whereNull('is_used')
-                    ->orWhere('is_used', false);
-            })
-            ->where('expired_at', '>=', now())
-            ->latest('expired_at')
-            ->value('expired_at');
-
-        if (! $activeExpiresAt) {
-            return 0;
-        }
-
-        try {
-            $expiresAt = Carbon::parse((string) $activeExpiresAt);
-        } catch (Throwable) {
-            return 0;
-        }
-
-        if (now()->greaterThanOrEqualTo($expiresAt)) {
-            return 0;
-        }
-
-        return max(1, (int) now()->diffInSeconds($expiresAt));
     }
 
     protected function buildApiOtpSendUrl(string $otpToken): ?string

@@ -15,6 +15,13 @@ class Input extends FieldComponent
 {
     use HasVariant;
 
+    public function max(int $value): static
+    {
+        parent::max($value);
+
+        return $this->prop('maxlength', max(0, $value));
+    }
+
     public function textAlign(string $alignment): static
     {
         return $this->prop('textAlign', $alignment);
