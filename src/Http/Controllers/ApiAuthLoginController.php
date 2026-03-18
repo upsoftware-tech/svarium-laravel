@@ -45,7 +45,7 @@ class ApiAuthLoginController extends Controller
                 'token' => null,
                 'requires_otp' => true,
                 'otp_url' => $result['otp_url'] ?? null,
-                'user' => $this->serializeUser($result['user'] ?? null),
+                'otp_methods' => $this->buildOtpVerificationMethods($authLoginService, $result['user'] ?? null),
             ], 200);
         }
 
@@ -354,5 +354,63 @@ class ApiAuthLoginController extends Controller
         }
 
         return null;
+    }
+
+    protected function buildOtpVerificationMethods(AuthLoginService $authLoginService, mixed $user): array
+    {
+        if (! is_object($user) || ! $authLoginService->isOtpGloballyEnabled()) {
+            return [];
+        }
+
+        $definitions = $this->otpMethodDefinitions();
+        $methods = [];
+
+        $methodsToShow = $authLoginService->showAllOtpMethods()
+            ? $authLoginService->supportedOtpMethods()
+            : $authLoginService->allowedOtpMethods();
+
+        foreach ($methodsToShow as $method) {
+            if (! isset($definitions[$method])) {
+                continue;
+            }
+
+            $isAllowed = $authLoginService->isOtpMethodAllowed($method);
+            $isAvailable = $authLoginService->isOtpMethodAvailableForUser($user, $method);
+            $isDisabled = ! $isAllowed || ! $isAvailable;
+
+            if (! $authLoginService->showAllOtpMethods() && $isDisabled) {
+                continue;
+            }
+
+            $methods[] = [
+                'id' => $method,
+                'disabled' => $isDisabled,
+                'label' => $definitions[$method]['label'],
+                'description' => $definitions[$method]['description'],
+            ];
+        }
+
+        return $methods;
+    }
+
+    /**
+     * @return array<string, array{label:string, description:string}>
+     */
+    protected function otpMethodDefinitions(): array
+    {
+        return [
+            'app' => [
+                'label' => __('svarium::messages.Google Authenticator App'),
+                'description' => __('svarium::messages.The Google Authenticator app is available on all platforms, including iOS and Android'),
+            ],
+            'sms' => [
+                'label' => __('svarium::messages.SMS message'),
+                'description' => __('svarium::messages.SMS message to the registered phone number'),
+            ],
+            'email' => [
+                'label' => __('svarium::messages.Email message'),
+                'description' => __('svarium::messages.Email message to the registered email address'),
+            ],
+        ];
     }
 }
