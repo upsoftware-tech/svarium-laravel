@@ -49,6 +49,8 @@ class ApiAuthOtpSendController extends Controller
                 'status' => 'otp_code_active',
                 'requires_otp' => true,
                 'otp_token' => $userAuthModel->hash,
+                'otp_send_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
+                'otp_verify_url' => $this->buildApiOtpVerifyUrl((string) $userAuthModel->hash),
                 'method' => $method,
                 'message' => __('Verification code is already active.'),
             ], 200);
@@ -60,6 +62,8 @@ class ApiAuthOtpSendController extends Controller
                 'status' => 'otp_rate_limited',
                 'requires_otp' => true,
                 'otp_token' => $userAuthModel->hash,
+                'otp_send_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
+                'otp_verify_url' => $this->buildApiOtpVerifyUrl((string) $userAuthModel->hash),
                 'method' => $method,
                 'retry_after' => $cooldownSeconds,
                 'message' => __('Too many resend requests. Try again in :seconds seconds.', ['seconds' => $cooldownSeconds]),
@@ -89,6 +93,8 @@ class ApiAuthOtpSendController extends Controller
             'status' => 'otp_code_sent',
             'requires_otp' => true,
             'otp_token' => $userAuthModel->hash,
+            'otp_send_url' => $this->buildApiOtpSendUrl((string) $userAuthModel->hash),
+            'otp_verify_url' => $this->buildApiOtpVerifyUrl((string) $userAuthModel->hash),
             'method' => $method,
             'message' => __('A new verification code has been sent.'),
         ], 200);
@@ -203,5 +209,42 @@ class ApiAuthOtpSendController extends Controller
 
         return max(1, (int) now()->diffInSeconds($availableAt));
     }
-}
 
+    protected function buildApiOtpSendUrl(string $otpToken): ?string
+    {
+        $normalized = trim($otpToken);
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            return route('svarium.api.auth.otp.send', [
+                'userAuth' => $normalized,
+            ]);
+        } catch (Throwable) {
+            $prefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
+            $path = trim(implode('/', array_filter([$prefix, 'auth/otp/'.$normalized.'/send'])), '/');
+
+            return '/'.$path;
+        }
+    }
+
+    protected function buildApiOtpVerifyUrl(string $otpToken): ?string
+    {
+        $normalized = trim($otpToken);
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            return route('svarium.api.auth.otp.verify', [
+                'userAuth' => $normalized,
+            ]);
+        } catch (Throwable) {
+            $prefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
+            $path = trim(implode('/', array_filter([$prefix, 'auth/otp/'.$normalized.'/verify'])), '/');
+
+            return '/'.$path;
+        }
+    }
+}

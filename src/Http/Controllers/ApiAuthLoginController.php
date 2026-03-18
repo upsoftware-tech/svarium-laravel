@@ -48,6 +48,7 @@ class ApiAuthLoginController extends Controller
                 'requires_otp' => true,
                 'otp_token' => $otpToken !== '' ? $otpToken : null,
                 'otp_url' => $otpToken !== '' ? $this->buildApiOtpUrl($otpToken) : null,
+                'otp_verify_url' => $otpToken !== '' ? $this->buildApiOtpVerifyUrl($otpToken) : null,
                 'otp_methods' => $this->buildOtpVerificationMethods($authLoginService, $result['user'] ?? null),
             ], 200);
         }
@@ -432,6 +433,26 @@ class ApiAuthLoginController extends Controller
         } catch (Throwable) {
             $prefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
             $path = trim(implode('/', array_filter([$prefix, 'auth/otp/'.$normalized.'/send'])), '/');
+
+            return '/'.$path;
+        }
+    }
+
+    protected function buildApiOtpVerifyUrl(string $otpToken): ?string
+    {
+        $normalized = trim($otpToken);
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            return route('svarium.api.auth.otp.verify', [
+                'userAuth' => $normalized,
+            ]);
+        } catch (Throwable) {
+            $prefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
+            $path = trim(implode('/', array_filter([$prefix, 'auth/otp/'.$normalized.'/verify'])), '/');
 
             return '/'.$path;
         }
