@@ -356,6 +356,7 @@ class SvariumServiceProvider extends ServiceProvider
     protected function registerHelpers(): void
     {
         require_once __DIR__.'/../Helpers/index.php';
+        $this->registerAppSvariumBootstrapHooks();
 
         if (! File::exists(svarium_resources())) {
             return;
@@ -375,6 +376,37 @@ class SvariumServiceProvider extends ServiceProvider
                 }
             }
         }
+    }
+
+    protected function registerAppSvariumBootstrapHooks(): void
+    {
+        $paths = [];
+
+        foreach (['functions.php', 'hooks.php'] as $fileName) {
+            $path = svarium_path($fileName);
+            if (! is_string($path) || $path === '' || ! is_file($path)) {
+                continue;
+            }
+
+            $paths[] = $path;
+        }
+
+        if ($paths === []) {
+            return;
+        }
+
+        $load = static function () use ($paths): void {
+            foreach ($paths as $path) {
+                require_once $path;
+            }
+        };
+
+        if ($this->app->bound('translator')) {
+            $load();
+            return;
+        }
+
+        $this->app->booted($load);
     }
 
     /*

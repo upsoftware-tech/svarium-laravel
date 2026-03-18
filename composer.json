@@ -1,5 +1,5 @@
 {
-    "version": "1.0.1+36",
+    "version": "1.0.1+38",
     "name": "upsoftware/svarium",
     "type": "library",
     "description": "Svarium Commercial System",
@@ -36,8 +36,7 @@
         "laravel-lang/locales": "^2.10",
         "laravel/prompts": "^0.3.11",
         "laravel/socialite": "^5.24",
-        "vinkla/hashids": "^13.0",
-        "nativephp/mobile": "^3.0",
+        "hashids/hashids": "^5.0",
         "psr/http-message": "^1.1 || ^2.0",
         "spatie/laravel-activitylog": "^4.11",
         "spatie/laravel-permission": "^6.24 || ^7.0",
@@ -45,5 +44,8 @@
         "tightenco/ziggy": "^2.6",
         "barryvdh/laravel-ide-helper": "^3.6",
         "winter/laravel-config-writer": "^1.2"
+    },
+    "suggest": {
+        "nativephp/mobile": "Optional. Install to enable NativePHP commands (native:install)."
     }
 }

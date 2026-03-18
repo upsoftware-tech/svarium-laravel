@@ -96,6 +96,11 @@ class SvariumInstallOperation extends Operation
         }
 
         if ($action === 'native_install') {
+            if (! $this->artisanCommandExists('native:install')) {
+                return RedirectResult::to($this->url($context))
+                    ->warning(__('Command native:install is not available. Install nativephp/mobile first.'));
+            }
+
             Artisan::call('native:install');
 
             return RedirectResult::to($this->url($context))
@@ -129,5 +134,14 @@ class SvariumInstallOperation extends Operation
         return $prefix !== ''
             ? "{$prefix}/svarium/configuration"
             : 'svarium/configuration';
+    }
+
+    protected function artisanCommandExists(string $command): bool
+    {
+        try {
+            return array_key_exists($command, Artisan::all());
+        } catch (\Throwable) {
+            return false;
+        }
     }
 }

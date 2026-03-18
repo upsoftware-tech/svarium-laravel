@@ -381,6 +381,10 @@ class NavigationService
      */
     protected function ensureDashboardNode(array $children): array
     {
+        if (! $this->isDashboardVisible()) {
+            return $this->sortNodesByOrder($this->removeDashboardNodes($children));
+        }
+
         $dashboardUrl = $this->resolveDashboardUrl();
 
         foreach ($children as $index => $node) {
@@ -412,13 +416,66 @@ class NavigationService
     protected function resolveDashboardUrl(): string
     {
         $panel = $this->resolveCurrentPanel();
-        $prefix = trim((string) ($panel?->prefix ?? ''), '/');
 
-        if ($prefix !== '') {
-            return '/'.$prefix;
+        return svarium_panel_root_path($panel?->name);
+    }
+
+    protected function isDashboardVisible(): bool
+    {
+        $panel = $this->resolveCurrentPanel();
+
+        return svarium_panel_dashboard_visible($panel?->name);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $nodes
+     * @return array<int, array<string, mixed>>
+     */
+    protected function removeDashboardNodes(array $nodes): array
+    {
+        $dashboardUrl = $this->resolveDashboardUrl();
+        $cleaned = [];
+
+        foreach ($nodes as $node) {
+            if (! is_array($node)) {
+                continue;
+            }
+
+            $children = is_array($node['children'] ?? null) ? $node['children'] : [];
+            if ($children !== []) {
+                $node['children'] = $this->removeDashboardNodes($children);
+            }
+
+            if ($this->isDashboardNode($node, $dashboardUrl)) {
+                continue;
+            }
+
+            $cleaned[] = $node;
         }
 
-        return '/';
+        return array_values($cleaned);
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     */
+    protected function isDashboardNode(array $node, string $dashboardUrl): bool
+    {
+        if ((bool) ($node['__is_dashboard'] ?? false)) {
+            return true;
+        }
+
+        $id = trim((string) ($node['id'] ?? ''));
+        if ($id !== '' && str_starts_with($id, 'navigation-static-dashboard:')) {
+            return true;
+        }
+
+        $url = trim((string) ($node['url'] ?? ''));
+        if ($url !== '' && $url === $dashboardUrl) {
+            return true;
+        }
+
+        return false;
     }
 
     protected function resolveCurrentPanel(): ?Panel

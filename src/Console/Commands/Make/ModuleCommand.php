@@ -22,6 +22,7 @@ class ModuleCommand extends CoreCommand
     protected string $menuMethod = '';
     protected string $entryView = 'table';
     protected string $resourceMode = 'crud';
+    protected bool $pageAcceptsPost = false;
     /**
      * @var array{create: bool, preview: bool, edit: bool, duplicate: bool, delete: bool}
      */
@@ -57,6 +58,7 @@ class ModuleCommand extends CoreCommand
         $this->availableLocales = $this->resolveAvailableLocales();
         $this->moduleTranslations = $this->resolveModuleTranslations($name, $this->availableLocales);
         $this->entryView = $this->resolveEntryView();
+        $this->pageAcceptsPost = $this->resolvePageAcceptsPost();
         $this->resourceMode = $this->resolveResourceMode();
         $this->resourceActions = $this->resolveResourceActions($this->resourceMode);
         $this->menuMethod = $this->buildMenuMethod($name, $this->resolveMenuConfig($name));
@@ -65,10 +67,12 @@ class ModuleCommand extends CoreCommand
         $this->createStructure($base);
         $this->createTranslationFiles($base, $this->moduleTranslations, $name);
         $this->createModuleClass($name, $base);
-        $this->createModelClass($name, $base);
-        $this->createResourceClass($name, $base);
-        $this->createTableClass($name, $base);
-        $this->createFormClass($name, $base);
+        if ($this->entryView === 'table') {
+            $this->createModelClass($name, $base);
+            $this->createResourceClass($name, $base);
+            $this->createTableClass($name, $base);
+            $this->createFormClass($name, $base);
+        }
         $this->createEntryOperationClass($name, $base);
         $this->syncLanguageFiles();
 
@@ -365,6 +369,12 @@ class ModuleCommand extends CoreCommand
                 'icon' => 'lucide:users',
                 'order' => 1,
             ]),
+            '{{ModuleResourceUse}}' => $this->entryView === 'table'
+                ? "use App\\Svarium\\Modules\\{$name}\\Panel\\{$name}Resource;\n"
+                : '',
+            '{{ModuleRegisterStatements}}' => $this->entryView === 'table'
+                ? "        \$this->registerResource({$name}Resource::class);\n"
+                : '',
         ]);
     }
 
@@ -463,16 +473,37 @@ class ModuleCommand extends CoreCommand
         return (string) select(
             'Jaki ma być widok wejściowy modułu?',
             [
-                'table' => 'Tabela (domyślny CRUD)',
-                'calendar' => 'Kalendarz (operation + schema)',
-                'page' => 'Pusta strona (Operation + Block/Text)',
+                'table' => 'Tabela w panelu (domyślny CRUD)',
+                'page' => 'Pusta strona',
             ],
             'table'
         );
     }
 
+    protected function resolvePageAcceptsPost(): bool
+    {
+        if ($this->entryView !== 'page') {
+            return false;
+        }
+
+        if (! $this->input->isInteractive()) {
+            return false;
+        }
+
+        return (bool) confirm(
+            'Czy strona ma wysyłać dane POSTEM?',
+            false,
+            'Tak',
+            'Nie'
+        );
+    }
+
     protected function resolveResourceMode(): string
     {
+        if ($this->entryView === 'page') {
+            return 'crud';
+        }
+
         if (! $this->input->isInteractive()) {
             return 'crud';
         }
@@ -1012,10 +1043,12 @@ PHP;
         $icon = trim((string) ($config['icon'] ?? ''));
         $withSubmenu = (bool) ($config['with_submenu'] ?? true);
         $parentMenu = trim((string) ($config['parent_menu'] ?? ''));
-        $isCalendarEntry = $this->entryView === 'calendar';
         $isPageEntry = $this->entryView === 'page';
-        $entryPathSuffix = $isCalendarEntry ? '/calendar' : ($isPageEntry ? '/page' : '');
-        $entryLabel = $isCalendarEntry ? 'Calendar' : ($isPageEntry ? 'Page' : 'List');
+        if ($isPageEntry) {
+            $withSubmenu = false;
+        }
+        $entryPathSuffix = '';
+        $entryLabel = $isPageEntry ? 'Page' : 'List';
 
         $pluralEscaped = str_replace("'", "\\'", $plural);
         $iconEscaped = str_replace("'", "\\'", $icon);
@@ -1075,31 +1108,6 @@ PHP;
 PHP;
         }
 
-        if ($isCalendarEntry) {
-            $listOrder = $order + 1;
-
-            return <<<PHP
-    public function menu(): array
-    {
-        return [
-            MenuItem::make('{$pluralEscaped}')
-                {$iconMethod}
-                ->order({$order}),
-
-            MenuItem::make('{$entryLabelEscaped}')
-                ->url('/'.ltrim(module_route('{$moduleRouteKeyEscaped}'), '/').'{$entryPathSuffixEscaped}')
-                ->path(['{$pluralEscaped}'])
-                ->order({$order}),
-
-            MenuItem::make('List')
-                ->url('/'.ltrim(module_route('{$moduleRouteKeyEscaped}'), '/'))
-                ->path(['{$pluralEscaped}'])
-                ->order({$listOrder}),
-        ];
-    }
-PHP;
-        }
-
         if ($isPageEntry) {
             return <<<PHP
     public function menu(): array
@@ -1107,11 +1115,7 @@ PHP;
         return [
             MenuItem::make('{$pluralEscaped}')
                 {$iconMethod}
-                ->order({$order}),
-
-            MenuItem::make('{$entryLabelEscaped}')
                 ->url('/'.ltrim(module_route('{$moduleRouteKeyEscaped}'), '/').'{$entryPathSuffixEscaped}')
-                ->path(['{$pluralEscaped}'])
                 ->order({$order}),
         ];
     }
@@ -1137,17 +1141,14 @@ PHP;
 
     protected function createEntryOperationClass(string $name, string $base): void
     {
-        if ($this->entryView === 'calendar') {
-            File::put(
-                $base."/Panel/{$name}CalendarOperation.php",
-                $this->renderStub('svarium.module.calendar.operation.php.stub', $name)
-            );
-        }
-
         if ($this->entryView === 'page') {
+            $stub = $this->pageAcceptsPost
+                ? 'svarium.module.page.post.operation.php.stub'
+                : 'svarium.module.page.operation.php.stub';
+
             File::put(
                 $base."/Panel/{$name}PageOperation.php",
-                $this->renderStub('svarium.module.page.operation.php.stub', $name)
+                $this->renderStub($stub, $name)
             );
         }
     }

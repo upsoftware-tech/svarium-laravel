@@ -16,6 +16,7 @@ use Upsoftware\Svarium\Http\ComponentResult;
 use Upsoftware\Svarium\Http\OperationResult;
 use Illuminate\Auth\Middleware\Authenticate as LaravelAuthenticateMiddleware;
 use Upsoftware\Svarium\Layouts\PanelLayout as DefaultPanelLayout;
+use Upsoftware\Svarium\Panel\Operations\DashboardOperation;
 use Upsoftware\Svarium\Security\RecordIdentifier;
 
 class OperationRouter
@@ -159,6 +160,13 @@ class OperationRouter
         $route = app(OperationRegistry::class)
             ->resolve($panelName, $request->method(), $path);
 
+        if (
+            $this->shouldMountDashboardStartAtRoot($panel, $path, $route)
+            && ($mountedRoute = $this->resolveDashboardStartOperationRoute($panel, $request->method())) !== null
+        ) {
+            $route = $mountedRoute;
+        }
+
         if (! $route) {
             abort(404);
         }
@@ -185,6 +193,38 @@ class OperationRouter
         }
 
         $operationClass = $route['operation'];
+        if ($operationClass === DashboardOperation::class && $request->isMethod('GET')) {
+            if ($this->shouldMountDashboardStartAtRoot($panel, $path, $route)) {
+                $mountedRoute = $this->resolveDashboardStartOperationRoute($panel, $request->method());
+                if (is_array($mountedRoute) && isset($mountedRoute['operation'])) {
+                    $route = $mountedRoute;
+                    $context = new PanelContext($panel, $request, (array) ($route['params'] ?? []));
+                    app()->instance(PanelContext::class, $context);
+                    $request->attributes->set('panel', $panelName);
+                    $context->input = new PanelInput($request->all());
+
+                    $bindings = app(BindingRegistry::class);
+
+                    foreach ($context->params as $key => $value) {
+                        if (is_string($value)) {
+                            try {
+                                [, $decodedId] = RecordIdentifier::decode($value);
+                                $value = $decodedId;
+                            } catch (\Throwable $e) {
+                                // ignore
+                            }
+                        }
+
+                        $context->params[$key] = $bindings->resolve($key, $value);
+                    }
+
+                    $operationClass = (string) $route['operation'];
+                }
+            } elseif (($target = $this->resolveDashboardStartRedirectPath($panel)) !== null) {
+                return redirect()->to($target);
+            }
+        }
+
         $operation = app($operationClass);
 
         if (! empty($route['meta']['resource']) && method_exists($operation, 'setResource')) {
@@ -268,13 +308,88 @@ class OperationRouter
 
     protected function panelRootPath(?Panel $panel): string
     {
+        return svarium_panel_root_path($panel?->name);
+    }
+
+    protected function resolveDashboardStartRedirectPath(?Panel $panel): ?string
+    {
         if (! $panel instanceof Panel) {
-            return '/';
+            return null;
         }
 
-        $prefix = trim((string) $panel->prefixName(), '/');
+        $root = svarium_panel_root_path($panel->name);
+        $start = svarium_panel_start_path($panel->name);
 
-        return $prefix !== '' ? '/'.$prefix : '/';
+        if ($start === '' || $start === $root) {
+            return null;
+        }
+
+        return $start;
+    }
+
+    protected function shouldMountDashboardStartAtRoot(?Panel $panel, string $path, ?array $route): bool
+    {
+        if (! $panel instanceof Panel) {
+            return false;
+        }
+
+        if (! svarium_panel_start_at_root($panel->name)) {
+            return false;
+        }
+
+        if (trim($path) !== '') {
+            return false;
+        }
+
+        if ($route === null) {
+            return true;
+        }
+
+        return (string) ($route['operation'] ?? '') === DashboardOperation::class;
+    }
+
+    protected function resolveDashboardStartOperationRoute(?Panel $panel, string $method = 'GET'): ?array
+    {
+        if (! $panel instanceof Panel) {
+            return null;
+        }
+
+        $start = svarium_panel_start_path($panel->name);
+        $root = svarium_panel_root_path($panel->name);
+
+        if ($start === '' || $start === $root) {
+            return null;
+        }
+
+        $startPath = (string) (parse_url($start, PHP_URL_PATH) ?? '');
+        $startPath = trim($startPath, '/');
+
+        $panelPrefix = trim((string) $panel->prefix, '/');
+        if ($panelPrefix !== '' && str_starts_with($startPath, $panelPrefix.'/')) {
+            $startPath = trim(substr($startPath, strlen($panelPrefix) + 1), '/');
+        } elseif ($panelPrefix !== '' && $startPath === $panelPrefix) {
+            $startPath = '';
+        }
+
+        if ($startPath === '') {
+            return null;
+        }
+
+        $normalizedMethod = strtoupper(trim($method));
+        if ($normalizedMethod === 'HEAD') {
+            $normalizedMethod = 'GET';
+        }
+
+        $route = app(OperationRegistry::class)->resolve($panel->name, $normalizedMethod, $startPath);
+        if (! is_array($route)) {
+            return null;
+        }
+
+        if ((string) ($route['operation'] ?? '') === DashboardOperation::class) {
+            return null;
+        }
+
+        return $route;
     }
 
     protected function isPublicAuthRequest(Request $request): bool

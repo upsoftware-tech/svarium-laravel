@@ -450,13 +450,20 @@ abstract class ResourceFormTabDefinition
 
         $cardsGrid = static::normalizeCardsGrid(static::grid($context, $record), 1);
         $cardsGap = static::normalizeCardsGap(static::gap($context, $record), 4);
+        $defaultCardContentWidth = static::resolveWidthContent($context, $record);
 
         $resolved = [];
 
         foreach ($cards as $card) {
             $resolved = [
                 ...$resolved,
-                ...static::normalizeCardDefinitionToNodes($card, $context, $record, $cardsGrid),
+                ...static::normalizeCardDefinitionToNodes(
+                    $card,
+                    $context,
+                    $record,
+                    $cardsGrid,
+                    $defaultCardContentWidth
+                ),
             ];
         }
 
@@ -516,7 +523,8 @@ abstract class ResourceFormTabDefinition
         mixed $card,
         PanelContext $context,
         ?Model $record = null,
-        int $cardsGrid = 1
+        int $cardsGrid = 1,
+        int|string|float|null $defaultContentWidth = null
     ): array {
         if ($card instanceof Component) {
             return [$card];
@@ -527,7 +535,8 @@ abstract class ResourceFormTabDefinition
                 static::invokeWithContext($card, $context, $record),
                 $context,
                 $record,
-                $cardsGrid
+                $cardsGrid,
+                $defaultContentWidth
             );
         }
 
@@ -553,7 +562,7 @@ abstract class ResourceFormTabDefinition
                     gridColumns: $cardsGrid,
                     contentCols: 12,
                     contentPadding: '4',
-                    contentWidth: null
+                    contentWidth: $defaultContentWidth
                 )
             );
         }
@@ -567,7 +576,10 @@ abstract class ResourceFormTabDefinition
         $icon = static::resolveCardTextValue($card['icon'] ?? null, $context, $record);
         $contentCols = static::normalizeCardCols($card['cols'] ?? 12, 12);
         $contentPadding = static::normalizeCardPadding($card['paddingContent'] ?? ($card['padding'] ?? '4'), '4');
-        $contentWidth = static::normalizeCardWidth($card['widthContent'] ?? null, null);
+        $contentWidth = static::normalizeCardWidth(
+            $card['widthContent'] ?? $defaultContentWidth,
+            $defaultContentWidth
+        );
         $colSpan = static::normalizeCardCols(
             $card['colSpan'] ?? $card['colspan'] ?? $card['span'] ?? 1,
             1

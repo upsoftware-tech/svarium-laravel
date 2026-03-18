@@ -534,6 +534,11 @@ abstract class Operation
                         continue;
                     }
 
+                    $name = $component->getName();
+                    if (! is_string($name) || trim($name) === '') {
+                        continue;
+                    }
+
                     $componentRules = $component->getValidationRules();
                     $showWhen = $component->getProp('showWhen');
 
@@ -544,7 +549,11 @@ abstract class Operation
                     }
 
                     if (!empty($componentRules)) {
-                        $rules[$component->getName()] = $componentRules;
+                        $ruleKey = $this->isLanguageFieldComponent($component)
+                            ? $name.'.*'
+                            : $name;
+
+                        $rules[$ruleKey] = $componentRules;
                     }
                 }
 
@@ -581,12 +590,28 @@ abstract class Operation
                         continue;
                     }
 
-                    $attribute =
-                        $component->getValidationAttribute()
-                        ?? $component->getLabel()
-                        ?? $name;
+                    $attribute = $this->resolveValidationAttributeLabel($component, $name);
 
-                    $attributes[$name] = $attribute;
+                    if ($this->isLanguageFieldComponent($component)) {
+                        // Keep both wildcard and base key to avoid Laravel fallback
+                        // to generic attributes (e.g. "name" => "Name") for name.pl.
+                        $attributes[$name] = $attribute;
+                        $attributes[$name.'.*'] = $attribute;
+
+                        $requestLocalizedValues = request()->input($name);
+                        if (is_array($requestLocalizedValues)) {
+                            foreach (array_keys($requestLocalizedValues) as $localeKey) {
+                                $normalizedLocaleKey = trim((string) $localeKey);
+                                if ($normalizedLocaleKey === '') {
+                                    continue;
+                                }
+
+                                $attributes[$name.'.'.$normalizedLocaleKey] = $attribute;
+                            }
+                        }
+                    } else {
+                        $attributes[$name] = $attribute;
+                    }
                 }
 
                 foreach ($this->getComponentChildren($component) as $child) {
@@ -604,6 +629,268 @@ abstract class Operation
         return $attributes;
     }
 
+    protected function resolveValidationAttributeLabel(FieldComponent $component, string $name): string
+    {
+        $explicitAttribute = trim((string) ($component->getValidationAttribute() ?? ''));
+        if ($explicitAttribute !== '') {
+            return $this->translateAttributeToken($explicitAttribute);
+        }
+
+        $explicitLabel = trim((string) ($component->getLabel() ?? ''));
+        if ($explicitLabel !== '') {
+            return $this->translateAttributeToken($explicitLabel);
+        }
+
+        $normalized = trim(str_replace(['.', '_', '-'], ' ', $name));
+        if ($normalized === '') {
+            return $name;
+        }
+
+        $headline = (string) str($normalized)->headline()->trim();
+
+        if ($headline === '') {
+            return $name;
+        }
+
+        $locales = $this->resolveValidationAttributeLocales();
+        $baseName = trim((string) str($name)->before('.')->before('[')->snake());
+
+        if ($baseName !== '') {
+            $validationKeys = array_values(array_unique(array_filter([
+                'validation.attributes.'.$baseName,
+                $baseName,
+            ], static fn ($value) => trim((string) $value) !== '')));
+
+            foreach ($validationKeys as $validationKey) {
+                foreach ($locales as $locale) {
+                    $translated = $locale !== null
+                        ? (string) trans($validationKey, [], $locale)
+                        : (string) __($validationKey);
+
+                    if (
+                        $translated !== $validationKey
+                        && $this->isAcceptableAttributeTranslation($translated, $headline, $locale)
+                    ) {
+                        return $translated;
+                    }
+                }
+            }
+        }
+
+        $headlineLower = trim((string) str($headline)->lower());
+
+        foreach ($locales as $locale) {
+            $translated = $locale !== null
+                ? (string) trans($headline, [], $locale)
+                : (string) __($headline);
+
+            if (
+                $translated !== $headline
+                && $this->isAcceptableAttributeTranslation($translated, $headline, $locale)
+            ) {
+                return $translated;
+            }
+
+            if ($headlineLower !== '' && $headlineLower !== $headline) {
+                $translatedLower = $locale !== null
+                    ? (string) trans($headlineLower, [], $locale)
+                    : (string) __($headlineLower);
+
+                if (
+                    $translatedLower !== $headlineLower
+                    && $this->isAcceptableAttributeTranslation($translatedLower, $headline, $locale)
+                ) {
+                    return $translatedLower;
+                }
+            }
+        }
+
+        $packageKeys = array_values(array_unique(array_filter([
+            "svarium::messages.{$headline}",
+            $headlineLower !== '' ? "svarium::messages.{$headlineLower}" : null,
+            "messages.{$headline}",
+            $headlineLower !== '' ? "messages.{$headlineLower}" : null,
+        ], static fn ($value) => is_string($value) && trim($value) !== '')));
+
+        foreach ($packageKeys as $packageKey) {
+            foreach ($locales as $locale) {
+                $packageTranslated = $locale !== null
+                    ? (string) trans($packageKey, [], $locale)
+                    : (string) __($packageKey);
+
+                if (
+                    $packageTranslated !== $packageKey
+                    && $this->isAcceptableAttributeTranslation($packageTranslated, $headline, $locale)
+                ) {
+                    return $packageTranslated;
+                }
+            }
+        }
+
+        $dictionaryFallback = $this->resolveValidationAttributeDictionaryFallback($name, $locales);
+        if ($dictionaryFallback !== null) {
+            return $dictionaryFallback;
+        }
+
+        return $headline;
+    }
+
+    protected function translateAttributeToken(string $token): string
+    {
+        $normalizedToken = trim($token);
+        if ($normalizedToken === '') {
+            return $token;
+        }
+
+        $locales = $this->resolveValidationAttributeLocales();
+
+        foreach ($locales as $locale) {
+            $translated = $locale !== null
+                ? (string) trans($normalizedToken, [], $locale)
+                : (string) __($normalizedToken);
+
+            if (
+                $translated !== $normalizedToken
+                && $this->isAcceptableAttributeTranslation($translated, $normalizedToken, $locale)
+            ) {
+                return $translated;
+            }
+        }
+
+        // Package/domain fallback for token-like labels, e.g. "Name".
+        $packageKey = "svarium::messages.{$normalizedToken}";
+        foreach ($locales as $locale) {
+            $translated = $locale !== null
+                ? (string) trans($packageKey, [], $locale)
+                : (string) __($packageKey);
+
+            if (
+                $translated !== $packageKey
+                && $this->isAcceptableAttributeTranslation($translated, $normalizedToken, $locale)
+            ) {
+                return $translated;
+            }
+        }
+
+        return $token;
+    }
+
+    /**
+     * @return array<int, string|null>
+     */
+    protected function resolveValidationAttributeLocales(): array
+    {
+        $requested = trim((string) request()->header(
+            'X-Svarium-Locale',
+            request()->query('_locale', (string) request()->input('_locale', ''))
+        ));
+        $appLocale = trim((string) app()->getLocale());
+        $fallbackLocale = trim((string) config('app.fallback_locale', ''));
+        $hasRequested = $requested !== '';
+
+        $candidates = $hasRequested
+            ? [
+                $requested,
+                $this->normalizeLocale($requested),
+                null,
+            ]
+            : [
+                $appLocale,
+                $this->normalizeLocale($appLocale),
+                $fallbackLocale,
+                $this->normalizeLocale($fallbackLocale),
+                null,
+            ];
+
+        $resolved = [];
+        $seen = [];
+
+        foreach ($candidates as $candidate) {
+            if ($candidate === null) {
+                if (! isset($seen['__null__'])) {
+                    $seen['__null__'] = true;
+                    $resolved[] = null;
+                }
+
+                continue;
+            }
+
+            $normalized = trim((string) $candidate);
+            if ($normalized === '' || isset($seen[$normalized])) {
+                continue;
+            }
+
+            $seen[$normalized] = true;
+            $resolved[] = $normalized;
+        }
+
+        return $resolved;
+    }
+
+    protected function normalizeLocale(?string $locale): string
+    {
+        $value = trim((string) $locale);
+        if ($value === '') {
+            return '';
+        }
+
+        $value = str_replace('_', '-', $value);
+        $primary = trim((string) explode('-', $value)[0]);
+
+        return strtolower($primary);
+    }
+
+    protected function isAcceptableAttributeTranslation(string $translation, string $headline, ?string $locale): bool
+    {
+        $value = trim($translation);
+        if ($value === '') {
+            return false;
+        }
+
+        $normalizedLocale = $this->normalizeLocale($locale);
+        if ($normalizedLocale === '' || $normalizedLocale === 'en') {
+            return true;
+        }
+
+        return mb_strtolower($value) !== mb_strtolower(trim($headline));
+    }
+
+    /**
+     * @param array<int, string|null> $locales
+     */
+    protected function resolveValidationAttributeDictionaryFallback(string $name, array $locales): ?string
+    {
+        $baseName = trim((string) str($name)->before('.')->before('[')->snake());
+        if ($baseName === '') {
+            return null;
+        }
+
+        $defaults = [
+            'pl' => [
+                'name' => 'Nazwa',
+            ],
+        ];
+
+        $configured = config('upsoftware.validation.attribute_fallbacks', []);
+        $dictionary = is_array($configured)
+            ? array_replace_recursive($defaults, $configured)
+            : $defaults;
+
+        foreach ($locales as $locale) {
+            $normalizedLocale = $this->normalizeLocale($locale);
+            if ($normalizedLocale === '' || ! isset($dictionary[$normalizedLocale]) || ! is_array($dictionary[$normalizedLocale])) {
+                continue;
+            }
+
+            $label = trim((string) ($dictionary[$normalizedLocale][$baseName] ?? ''));
+            if ($label !== '') {
+                return $label;
+            }
+        }
+
+        return null;
+    }
+
     protected function collectMessages(array $schema): array
     {
         $messages = [];
@@ -617,7 +904,11 @@ abstract class Operation
                     if (!$name) continue;
 
                     foreach ($component->getValidationMessages() as $rule => $text) {
-                        $messages["{$name}.{$rule}"] = $text;
+                        if ($this->isLanguageFieldComponent($component)) {
+                            $messages["{$name}.*.{$rule}"] = $text;
+                        } else {
+                            $messages["{$name}.{$rule}"] = $text;
+                        }
                     }
                 }
 
@@ -674,6 +965,11 @@ abstract class Operation
         $walk($schema);
 
         return $names;
+    }
+
+    protected function isLanguageFieldComponent(FieldComponent $component): bool
+    {
+        return (bool) $component->getProp('language', false);
     }
 
     public function validationAttributes(PanelContext $context, ...$args): array

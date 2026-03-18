@@ -73,12 +73,22 @@ class ResourceCreateOperation extends Operation
                 $tabs,
                 $errorFields
             );
+            if ((! is_string($errorTabKey) || trim($errorTabKey) === '') && $tabs !== []) {
+                $errorTabKey = $tabs[0]->key();
+            }
             $context->params['__form_tab_error_fields'] = $errorFields;
 
             if (is_string($errorTabKey) && trim($errorTabKey) !== '') {
                 $context->request()->merge(['tab' => $errorTabKey]);
                 $context->params['tab'] = $errorTabKey;
             }
+
+            $this->debugFormTabs($context, 'create_validation_error', [
+                'resolved_error_tab_key' => $errorTabKey,
+                'error_fields' => $errorFields,
+                'request_tab_input' => $context->input('tab'),
+                'params_tab' => $context->params['tab'] ?? null,
+            ]);
 
             $this->clearResolvedSchema();
             $result = $this->render($context, ...$args);

@@ -13,6 +13,11 @@ class JwtHandler implements ApiAuthHandler {
     }
 
     public function createToken($user, string $deviceName, array $scopes = []): string {
-        return auth('api')->login($user);
+        $guard = trim((string) config('upsoftware.api.auth.guard', 'api'));
+        if ($guard === '') {
+            $guard = 'api';
+        }
+
+        return auth($guard)->login($user);
     }
 }

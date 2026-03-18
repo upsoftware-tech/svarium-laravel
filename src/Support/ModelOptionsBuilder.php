@@ -55,7 +55,7 @@ class ModelOptionsBuilder implements Arrayable
 
     public function toArray(): array
     {
-        if (! class_exists($this->modelClass)) {
+        if (! $this->safeClassExists($this->modelClass)) {
             return [];
         }
 
@@ -106,6 +106,23 @@ class ModelOptionsBuilder implements Arrayable
         return $items;
     }
 
+    protected function safeClassExists(string $class): bool
+    {
+        set_error_handler(static function (): bool {
+            // Composer autoload can emit include warnings when classmap is stale.
+            // We treat such cases as "class does not exist" and return empty options.
+            return true;
+        });
+
+        try {
+            return class_exists($class);
+        } catch (\Throwable) {
+            return false;
+        } finally {
+            restore_error_handler();
+        }
+    }
+
     protected function applyWithRelations(Builder $query): void
     {
         $relations = [];
@@ -128,4 +145,3 @@ class ModelOptionsBuilder implements Arrayable
         }
     }
 }
-

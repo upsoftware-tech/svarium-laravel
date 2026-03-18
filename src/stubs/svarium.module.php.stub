@@ -3,8 +3,7 @@
 namespace App\Svarium\Modules\{{ModuleName}};
 
 use Upsoftware\Svarium\Menu\MenuItem;
-use App\Svarium\Modules\{{ModuleName}}\Panel\{{ModuleName}}Resource;
-use Upsoftware\Svarium\Modules\Module;
+{{ModuleResourceUse}}use Upsoftware\Svarium\Modules\Module;
 
 class {{ModuleName}}Module extends Module
 {
@@ -15,8 +14,6 @@ class {{ModuleName}}Module extends Module
 
     public function register(): void
     {
-        $this->registerResource({{ModuleName}}Resource::class);
-    }
-
+{{ModuleRegisterStatements}}    }
 {{MenuMethod}}
 }

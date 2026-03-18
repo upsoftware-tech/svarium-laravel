@@ -537,24 +537,41 @@ class OperationRegistry
 
     protected function resolvePanelsForOperation(string $class): array
     {
+        $availablePanels = array_keys(app(PanelRegistry::class)->all());
+
         $legacyPanel = $this->readStaticProperty($class, 'panel');
 
         if (is_string($legacyPanel) && trim($legacyPanel) !== '') {
-            return [trim($legacyPanel)];
+            $legacy = trim($legacyPanel);
+            if ($legacy === '*') {
+                return $availablePanels;
+            }
+
+            if (in_array($legacy, $availablePanels, true)) {
+                return [$legacy];
+            }
         }
 
         if (is_array($legacyPanel)) {
-            $normalizedLegacyPanels = $this->normalizePanels($legacyPanel);
+            $normalizedLegacyPanels = $this->normalizePanels($legacyPanel, $availablePanels);
             if ($normalizedLegacyPanels !== []) {
                 return $normalizedLegacyPanels;
             }
         }
 
         $panels = $this->readStaticProperty($class, 'panels');
-        $normalizedPanels = $this->normalizePanels($panels);
+        if (
+            ! $this->isStaticPropertyDeclaredOnClass($class, 'panels')
+            && is_string($panels)
+            && trim($panels) === 'admin'
+        ) {
+            $panels = null;
+        }
+
+        $normalizedPanels = $this->normalizePanels($panels, $availablePanels);
 
         if (in_array('*', $normalizedPanels, true)) {
-            $panelNames = array_keys(app(PanelRegistry::class)->all());
+            $panelNames = $availablePanels;
 
             if ($panelNames !== []) {
                 return $panelNames;
@@ -571,9 +588,13 @@ class OperationRegistry
     protected function resolveDefaultPanelName(): string
     {
         $panels = app(PanelRegistry::class)->all();
-        $configured = trim((string) config('upsoftware.panel.name', ''));
+        $configured = trim((string) config('upsoftware.panel.name', env('SVARIUM_PANEL_NAME', '')));
 
         if ($panels !== []) {
+            if ($configured !== '' && array_key_exists($configured, $panels)) {
+                return $configured;
+            }
+
             $noPrefixPanels = array_filter(
                 $panels,
                 static fn ($panel): bool => $panel instanceof Panel && $panel->prefix === null
@@ -581,10 +602,6 @@ class OperationRegistry
 
             if (count($noPrefixPanels) === 1) {
                 return (string) array_key_first($noPrefixPanels);
-            }
-
-            if ($configured !== '' && array_key_exists($configured, $panels)) {
-                return $configured;
             }
 
             return (string) array_key_first($panels);
@@ -597,7 +614,7 @@ class OperationRegistry
         return 'admin';
     }
 
-    protected function normalizePanels(mixed $panels): array
+    protected function normalizePanels(mixed $panels, ?array $availablePanels = null): array
     {
         if (is_string($panels)) {
             $panels = [$panels];
@@ -608,6 +625,10 @@ class OperationRegistry
         }
 
         $normalized = [];
+
+        $knownPanels = is_array($availablePanels)
+            ? array_values(array_unique(array_map(static fn ($panel): string => (string) $panel, $availablePanels)))
+            : [];
 
         foreach ($panels as $panel) {
             if (! is_string($panel)) {
@@ -620,10 +641,36 @@ class OperationRegistry
                 continue;
             }
 
+            if ($panel === '*') {
+                $normalized[] = $panel;
+                continue;
+            }
+
+            if ($knownPanels !== [] && ! in_array($panel, $knownPanels, true)) {
+                continue;
+            }
+
             $normalized[] = $panel;
         }
 
         return array_values(array_unique($normalized));
+    }
+
+    protected function isStaticPropertyDeclaredOnClass(string $class, string $property): bool
+    {
+        try {
+            $reflection = new \ReflectionClass($class);
+
+            if (! $reflection->hasProperty($property)) {
+                return false;
+            }
+
+            $declared = $reflection->getProperty($property)->getDeclaringClass()->getName();
+
+            return ltrim($declared, '\\') === ltrim($class, '\\');
+        } catch (\ReflectionException) {
+            return false;
+        }
     }
 
     /**

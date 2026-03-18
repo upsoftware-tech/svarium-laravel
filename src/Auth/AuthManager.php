@@ -10,7 +10,7 @@ class AuthManager
 {
     public function resolveHandler()
     {
-        $config = config('svarium.api.auth');
+        $config = config('upsoftware.api.auth', config('svarium.api.auth', []));
         $driver = $config['driver'] ?? 'sanctum';
 
         return match ($driver) {

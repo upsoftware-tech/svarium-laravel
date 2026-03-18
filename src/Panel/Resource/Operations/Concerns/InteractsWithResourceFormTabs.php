@@ -212,10 +212,9 @@ trait InteractsWithResourceFormTabs
         $errorFields = is_array($context->params['__form_tab_error_fields'] ?? null)
             ? (array) $context->params['__form_tab_error_fields']
             : [];
-        $errorTabKeys = $showValidationErrorIcon
-            ? $this->resolveTabKeysForValidationErrors($context, $tabs, $errorFields, $record)
-            : [];
+        $errorTabKeys = $this->resolveTabKeysForValidationErrors($context, $tabs, $errorFields, $record);
         $errorTabsLookup = array_fill_keys($errorTabKeys, true);
+        $resolvedActiveTab = $this->resolveFirstErrorTab($tabs, $errorTabsLookup) ?? $activeTab;
 
         $tabComponent = Tab::make()
             ->position($position)
@@ -227,20 +226,21 @@ trait InteractsWithResourceFormTabs
             $tabComponent->header($header);
         }
 
-        if ($activeTab instanceof ResourceFormTab) {
-            $tabComponent->defaultOpen($activeTab->key());
+        if ($resolvedActiveTab instanceof ResourceFormTab) {
+            $tabComponent->defaultOpen($resolvedActiveTab->key());
         }
 
         foreach ($tabs as $tab) {
-            $isActive = $activeTab instanceof ResourceFormTab && $activeTab->key() === $tab->key();
+            $isActive = $resolvedActiveTab instanceof ResourceFormTab && $resolvedActiveTab->key() === $tab->key();
             $hasValidationError = isset($errorTabsLookup[$tab->key()]);
 
             if ($tab->shouldNavigateWithRoute()) {
                 $item = $tab->toTabItem($this->resourceTabUrl($context, $tab, $record), [], $isActive);
                 if ($hasValidationError) {
-                    $item->prop('validationError', true);
+                    $item->prop('hasValidationError', true);
 
-                    if ($validationErrorIcon !== '') {
+                    if ($showValidationErrorIcon && $validationErrorIcon !== '') {
+                        $item->prop('validationError', true);
                         $item->prop('validationErrorIcon', $validationErrorIcon);
                     }
                 }
@@ -262,17 +262,24 @@ trait InteractsWithResourceFormTabs
                 $isActive
             );
             if ($hasValidationError) {
-                $item->prop('validationError', true);
+                $item->prop('hasValidationError', true);
 
-                if ($validationErrorIcon !== '') {
+                if ($showValidationErrorIcon && $validationErrorIcon !== '') {
+                    $item->prop('validationError', true);
                     $item->prop('validationErrorIcon', $validationErrorIcon);
                 }
             }
             $tabComponent->child($item);
         }
 
-        if ($activeTab instanceof ResourceFormTab && $activeTab->shouldNavigateWithRoute()) {
-            $tabComponent->slot('content', $this->wrapFormTabContent($activeTab, $context, $activeSchema, $record));
+        if ($resolvedActiveTab instanceof ResourceFormTab && $resolvedActiveTab->shouldNavigateWithRoute()) {
+            $schemaForActive = $resolvedActiveTab === $activeTab
+                ? $activeSchema
+                : ($record instanceof Model
+                    ? $this->resolveRoutedTabSchema($resolvedActiveTab, $context, $record)
+                    : $this->resolveRoutedTabSchema($resolvedActiveTab, $context));
+
+            $tabComponent->slot('content', $this->wrapFormTabContent($resolvedActiveTab, $context, $schemaForActive, $record));
         }
 
         return $tabComponent;
@@ -593,12 +600,40 @@ trait InteractsWithResourceFormTabs
                         continue;
                     }
 
-                    if ($errorField === $fieldName || Str::startsWith($errorField, $fieldName.'.')) {
+                    $normalizedErrorField = $this->normalizeValidationFieldPath($errorField);
+                    $normalizedFieldName = $this->normalizeValidationFieldPath($fieldName);
+
+                    if ($normalizedErrorField === '' || $normalizedFieldName === '') {
+                        continue;
+                    }
+
+                    if (
+                        $normalizedErrorField === $normalizedFieldName
+                        || Str::startsWith($normalizedErrorField, $normalizedFieldName.'.')
+                        || Str::startsWith($normalizedFieldName, $normalizedErrorField.'.')
+                    ) {
+                        $this->debugFormTabs($context, 'matched_tab_for_error', [
+                            'tab_key' => $tab->key(),
+                            'error_field' => $errorField,
+                            'normalized_error_field' => $normalizedErrorField,
+                            'field_name' => $fieldName,
+                            'normalized_field_name' => $normalizedFieldName,
+                        ]);
                         return $tab->key();
                     }
                 }
             }
+
+            $this->debugFormTabs($context, 'tab_fields_checked', [
+                'tab_key' => $tab->key(),
+                'fields' => $fieldNames,
+                'error_fields' => $normalizedErrorFields,
+            ]);
         }
+
+        $this->debugFormTabs($context, 'no_tab_match_for_errors', [
+            'error_fields' => $normalizedErrorFields,
+        ]);
 
         return null;
     }
@@ -843,5 +878,59 @@ trait InteractsWithResourceFormTabs
         }
 
         return $default;
+    }
+
+    protected function debugFormTabs(PanelContext $context, string $stage, array $payload = []): void
+    {
+        if (! (bool) config('app.debug', false)) {
+            return;
+        }
+
+        try {
+            logger()->debug('[svarium][form-tabs]['.$stage.']', [
+                'resource' => static::class,
+                'request_path' => $context->request()->path(),
+                ...$payload,
+            ]);
+        } catch (\Throwable) {
+            // noop
+        }
+    }
+
+    /**
+     * @param array<int, ResourceFormTab> $tabs
+     * @param array<string, bool> $errorTabsLookup
+     */
+    protected function resolveFirstErrorTab(array $tabs, array $errorTabsLookup): ?ResourceFormTab
+    {
+        if ($tabs === [] || $errorTabsLookup === []) {
+            return null;
+        }
+
+        foreach ($tabs as $tab) {
+            if (! $tab instanceof ResourceFormTab) {
+                continue;
+            }
+
+            if (isset($errorTabsLookup[$tab->key()])) {
+                return $tab;
+            }
+        }
+
+        return null;
+    }
+
+    protected function normalizeValidationFieldPath(string $field): string
+    {
+        $normalized = trim($field);
+        if ($normalized === '') {
+            return '';
+        }
+
+        $normalized = (string) preg_replace('/\[(.*?)\]/', '.$1', $normalized);
+        $normalized = str_replace(['..', '.[', '].'], ['.', '.', '.'], $normalized);
+        $normalized = trim($normalized, '.');
+
+        return strtolower($normalized);
     }
 }

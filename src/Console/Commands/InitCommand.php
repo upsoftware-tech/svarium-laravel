@@ -1609,9 +1609,11 @@ PHP;
             '--provider' => "LaravelLang\Config\ServiceProvider",
         ]);
 
-        $this->call('vendor:publish', [
-            '--provider' => "Vinkla\Hashids\HashidsServiceProvider",
-        ]);
+        if (class_exists(\Vinkla\Hashids\HashidsServiceProvider::class)) {
+            $this->call('vendor:publish', [
+                '--provider' => 'Vinkla\\Hashids\\HashidsServiceProvider',
+            ]);
+        }
 
         passthru('php artisan vendor:publish --tag=upsoftware');
         passthru('php artisan vendor:publish --provider="Spatie\Activitylog\ActivitylogServiceProvider" --tag="activitylog-migrations"');

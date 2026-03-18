@@ -39,7 +39,11 @@ abstract class Resource
             return static::$slug;
         }
 
-        return str(class_basename(static::$model))
+        $resourceBaseName = (string) str(class_basename(static::class))
+            ->replaceEnd('Resource', '')
+            ->toString();
+
+        return str($resourceBaseName)
             ->plural()
             ->lower()
             ->toString();

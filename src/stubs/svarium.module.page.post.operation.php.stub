@@ -2,9 +2,12 @@
 
 namespace App\Svarium\Modules\{{ModuleName}}\Panel;
 
+use Upsoftware\Svarium\Enums\ExecutionMode;
+use Upsoftware\Svarium\Http\RedirectResult;
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
 use Upsoftware\Svarium\UI\Components\Block;
+use Upsoftware\Svarium\UI\Components\Form\Input;
 use Upsoftware\Svarium\UI\Components\Text;
 
 class {{ModuleName}}PageOperation extends Operation
@@ -16,7 +19,12 @@ class {{ModuleName}}PageOperation extends Operation
 
     public static function methods(): array
     {
-        return ['GET'];
+        return ['GET', 'POST'];
+    }
+
+    public function execution(): ExecutionMode
+    {
+        return ExecutionMode::FORM;
     }
 
     public function title(): string
@@ -32,6 +40,23 @@ class {{ModuleName}}PageOperation extends Operation
                     ->headline('h2')
                     ->appearance('text-xl font-semibold')
             ),
+
+            Input::make('title')
+                ->label(__('Title'))
+                ->required(),
         ];
+    }
+
+    protected function save(PanelContext $context): RedirectResult
+    {
+        $context->validate([
+            'title' => ['required', 'string', 'max:255'],
+        ]);
+
+        return redirect()->to(panel_href('{{ModuleSlug}}'))
+            ->with('alert_success', [
+                'text' => __('Saved'),
+                'duration' => 2500,
+            ]);
     }
 }

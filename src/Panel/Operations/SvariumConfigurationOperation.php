@@ -498,7 +498,9 @@ class SvariumConfigurationOperation extends Operation
         }
 
         if ($this->toBool($data['run_native_install'] ?? false)) {
-            Artisan::call('native:install');
+            if ($this->artisanCommandExists('native:install')) {
+                Artisan::call('native:install');
+            }
         }
 
         if ($this->toBool($data['run_optimize_clear'] ?? true)) {
@@ -516,6 +518,15 @@ class SvariumConfigurationOperation extends Operation
         return $prefix !== ''
             ? "{$prefix}/svarium/configuration"
             : 'svarium/configuration';
+    }
+
+    protected function artisanCommandExists(string $command): bool
+    {
+        try {
+            return array_key_exists($command, Artisan::all());
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     protected function writeConfig(

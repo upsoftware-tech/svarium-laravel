@@ -436,6 +436,27 @@ if (! function_exists('module_route')) {
         }
 
         if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            $currentPanelName = trim((string) request()?->attributes?->get('panel', ''));
+            if ($currentPanelName !== '') {
+                $currentPanel = $registry->get($currentPanelName);
+                if ($currentPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+                    $resolvedPanel = $currentPanel;
+                }
+            }
+        }
+
+        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            $configuredName = trim((string) config('upsoftware.panel.name', env('SVARIUM_PANEL_NAME', '')));
+
+            if ($configuredName !== '') {
+                $configuredPanel = $registry->get($configuredName);
+                if ($configuredPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
+                    $resolvedPanel = $configuredPanel;
+                }
+            }
+        }
+
+        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
             $noPrefixPanels = array_values(array_filter(
                 $panels,
                 fn ($candidate) => $candidate instanceof \Upsoftware\Svarium\Panel\Panel && $candidate->prefix === null
@@ -443,17 +464,6 @@ if (! function_exists('module_route')) {
 
             if (count($noPrefixPanels) === 1) {
                 $resolvedPanel = $noPrefixPanels[0];
-            }
-        }
-
-        if (! $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
-            $configuredName = trim((string) config('upsoftware.panel.name', ''));
-
-            if ($configuredName !== '') {
-                $configuredPanel = $registry->get($configuredName);
-                if ($configuredPanel instanceof \Upsoftware\Svarium\Panel\Panel) {
-                    $resolvedPanel = $configuredPanel;
-                }
             }
         }
 
@@ -1100,6 +1110,110 @@ if (! function_exists('panel_href')) {
         $fullPath = trim(implode('/', array_filter([$panelBase, $normalizedPath])), '/');
 
         return '/'.$fullPath;
+    }
+}
+
+if (! function_exists('svarium_panel_root_path')) {
+    function svarium_panel_root_path(?string $panel = null): string
+    {
+        $resolvedPanel = svarium_resolve_panel($panel);
+        $prefix = trim((string) ($resolvedPanel?->prefix ?? ''), '/');
+
+        return $prefix !== '' ? '/'.$prefix : '/';
+    }
+}
+
+if (! function_exists('svarium_panel_dashboard_option')) {
+    function svarium_panel_dashboard_option(string $key, ?string $panel = null, mixed $default = null): mixed
+    {
+        $dashboardConfig = config('upsoftware.panel.dashboard', []);
+
+        if (! is_array($dashboardConfig)) {
+            return $default;
+        }
+
+        $rawValue = $dashboardConfig[$key] ?? $default;
+
+        if (! is_array($rawValue)) {
+            return $rawValue;
+        }
+
+        $resolvedPanel = svarium_resolve_panel($panel);
+        $panelName = trim((string) ($resolvedPanel?->name ?? ''));
+
+        if ($panelName !== '' && array_key_exists($panelName, $rawValue)) {
+            return $rawValue[$panelName];
+        }
+
+        if (array_key_exists('default', $rawValue)) {
+            return $rawValue['default'];
+        }
+
+        return $default;
+    }
+}
+
+if (! function_exists('svarium_panel_dashboard_visible')) {
+    function svarium_panel_dashboard_visible(?string $panel = null): bool
+    {
+        return (bool) svarium_panel_dashboard_option('visible', $panel, true);
+    }
+}
+
+if (! function_exists('svarium_panel_start_path')) {
+    function svarium_panel_start_path(?string $panel = null): string
+    {
+        $resolvedPanel = svarium_resolve_panel($panel);
+        $panelName = trim((string) ($resolvedPanel?->name ?? ''));
+        $rootPath = svarium_panel_root_path($panelName !== '' ? $panelName : $panel);
+
+        $start = trim((string) svarium_panel_dashboard_option('start', $panelName !== '' ? $panelName : $panel, ''));
+        if ($start === '') {
+            return $rootPath;
+        }
+
+        if (str_starts_with($start, '/')) {
+            $normalized = '/'.trim($start, '/');
+
+            return $normalized === '//' ? '/' : $normalized;
+        }
+
+        if (str_starts_with($start, 'route:')) {
+            $routeName = trim(substr($start, 6));
+
+            if ($routeName !== '' && \Illuminate\Support\Facades\Route::has($routeName)) {
+                return route($routeName, [], false);
+            }
+
+            return $rootPath;
+        }
+
+        if (str_starts_with($start, 'module:')) {
+            $module = trim(substr($start, 7));
+
+            if ($module === '') {
+                return $rootPath;
+            }
+
+            return '/'.ltrim(module_route($module, null, null, $panelName !== '' ? $panelName : null), '/');
+        }
+
+        if (\Illuminate\Support\Facades\Route::has($start)) {
+            return route($start, [], false);
+        }
+
+        if (str_contains($start, '/')) {
+            return panel_href($start, $panelName !== '' ? $panelName : null);
+        }
+
+        return '/'.ltrim(module_route($start, null, null, $panelName !== '' ? $panelName : null), '/');
+    }
+}
+
+if (! function_exists('svarium_panel_start_at_root')) {
+    function svarium_panel_start_at_root(?string $panel = null): bool
+    {
+        return (bool) svarium_panel_dashboard_option('start_at_root', $panel, false);
     }
 }
 

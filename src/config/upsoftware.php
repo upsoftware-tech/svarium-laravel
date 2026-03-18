@@ -139,6 +139,14 @@ return [
         ],
         'root_layout' => 'CleanLayout',
         'definition_layout_types' => ['AuthLayout'],
+        'dashboard' => [
+            // Show/hide Dashboard (Pulpit) in the main panel menu.
+            'visible' => true,
+            // Start page after entering panel root (examples: null, 'patient', 'module:patient', '/admin/patients').
+            'start' => null,
+            // Render "start" module directly under panel root URL (e.g. /admin or /) without redirect.
+            'start_at_root' => false,
+        ],
         'auth' => [
             // true: register auth routes per panel (e.g. panel.admin.auth.login).
             // false: register one global auth route prefix (legacy mode).
@@ -173,6 +181,16 @@ return [
         // Locale used to resolve translation keys in attributes (for labels defined as __('...')).
         // Frontend then translates this key dynamically with current UI locale.
         'key_locale' => env('SVARIUM_LANG_KEY_LOCALE', 'en'),
+    ],
+    'validation' => [
+        // Hard fallback dictionary for validation attribute labels when runtime translations
+        // are unavailable in current app context.
+        // You can override/extend in your app config.
+        'attribute_fallbacks' => [
+            'pl' => [
+                'name' => 'Nazwa',
+            ],
+        ],
     ],
     'auth' => [
         'register' => [

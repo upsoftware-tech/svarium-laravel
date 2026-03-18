@@ -81,9 +81,13 @@ class ResourceRegistry
     protected function resolvePanelName(): string
     {
         $panels = app(PanelRegistry::class)->all();
-        $configured = trim((string) config('upsoftware.panel.name', ''));
+        $configured = trim((string) config('upsoftware.panel.name', env('SVARIUM_PANEL_NAME', '')));
 
         if ($panels !== []) {
+            if ($configured !== '' && array_key_exists($configured, $panels)) {
+                return $configured;
+            }
+
             $noPrefixPanels = array_filter(
                 $panels,
                 static fn ($panel): bool => $panel instanceof Panel && $panel->prefix === null
@@ -91,10 +95,6 @@ class ResourceRegistry
 
             if (count($noPrefixPanels) === 1) {
                 return (string) array_key_first($noPrefixPanels);
-            }
-
-            if ($configured !== '' && array_key_exists($configured, $panels)) {
-                return $configured;
             }
 
             return array_key_first($panels);
