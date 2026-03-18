@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Support\Facades\Route;
 use Upsoftware\Svarium\Http\Controllers\ApiAuthLoginController;
+use Upsoftware\Svarium\Http\Controllers\ApiAuthOtpSendController;
 
 if (! (bool) config('upsoftware.api.enabled', true)) {
     return;
@@ -19,3 +20,11 @@ Route::post($loginPath, ApiAuthLoginController::class)
     ->withoutMiddleware([ValidateCsrfToken::class])
     ->name('svarium.api.auth.login');
 
+$otpSendPath = trim(implode('/', array_filter([$apiPrefix, 'auth/otp/{userAuth}/send'])), '/');
+if ($otpSendPath === '') {
+    $otpSendPath = 'auth/otp/{userAuth}/send';
+}
+
+Route::post($otpSendPath, ApiAuthOtpSendController::class)
+    ->withoutMiddleware([ValidateCsrfToken::class])
+    ->name('svarium.api.auth.otp.send');

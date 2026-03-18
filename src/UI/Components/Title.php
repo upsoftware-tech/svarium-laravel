@@ -19,6 +19,8 @@ class Title extends Component
 
     public function title(string $title): static
     {
+        $this->prop('title', $title);
+
         if (function_exists('set_title')) {
             set_title($title);
         }

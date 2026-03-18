@@ -100,10 +100,6 @@ class Input extends FieldComponent
             $this->value($nextPosition);
         }
 
-        if (trim((string) $this->getProp('hint', '')) === '') {
-            $this->hint((string) __('Max position: :max', ['max' => $nextPosition]));
-        }
-
         return $this;
     }
 

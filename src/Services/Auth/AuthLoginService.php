@@ -27,6 +27,7 @@ class AuthLoginService
      *   requires_otp: bool,
      *   otp_disabled_by_user: bool,
      *   otp_url: string|null,
+     *   otp_token: string|null,
      *   redirect_url: string|null
      * }
      */
@@ -51,6 +52,7 @@ class AuthLoginService
                 'requires_otp' => false,
                 'otp_disabled_by_user' => $otpDisabledByUser,
                 'otp_url' => null,
+                'otp_token' => null,
                 'redirect_url' => $redirectUrl,
             ];
         }
@@ -67,6 +69,7 @@ class AuthLoginService
                     'type' => 'login',
                     'userAuth' => $userAuth->hash,
                 ]),
+                'otp_token' => $userAuth->hash,
                 'redirect_url' => null,
             ];
         }
@@ -79,6 +82,7 @@ class AuthLoginService
             'requires_otp' => false,
             'otp_disabled_by_user' => $otpDisabledByUser,
             'otp_url' => null,
+            'otp_token' => null,
             'redirect_url' => $redirectUrl,
         ];
     }
@@ -511,6 +515,7 @@ class AuthLoginService
             'requires_otp' => false,
             'otp_disabled_by_user' => false,
             'otp_url' => null,
+            'otp_token' => null,
             'redirect_url' => null,
         ];
     }

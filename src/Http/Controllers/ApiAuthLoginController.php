@@ -40,11 +40,14 @@ class ApiAuthLoginController extends Controller
         }
 
         if (($result['status'] ?? null) === AuthLoginService::STATUS_OTP_REQUIRED) {
+            $otpToken = trim((string) ($result['otp_token'] ?? ''));
+
             return response()->json([
                 'status' => AuthLoginService::STATUS_OTP_REQUIRED,
                 'token' => null,
                 'requires_otp' => true,
-                'otp_url' => $result['otp_url'] ?? null,
+                'otp_token' => $otpToken !== '' ? $otpToken : null,
+                'otp_url' => $otpToken !== '' ? $this->buildApiOtpUrl($otpToken) : null,
                 'otp_methods' => $this->buildOtpVerificationMethods($authLoginService, $result['user'] ?? null),
             ], 200);
         }
@@ -412,5 +415,25 @@ class ApiAuthLoginController extends Controller
                 'description' => __('svarium::messages.Email message to the registered email address'),
             ],
         ];
+    }
+
+    protected function buildApiOtpUrl(string $otpToken): ?string
+    {
+        $normalized = trim($otpToken);
+
+        if ($normalized === '') {
+            return null;
+        }
+
+        try {
+            return route('svarium.api.auth.otp.send', [
+                'userAuth' => $normalized,
+            ]);
+        } catch (Throwable) {
+            $prefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
+            $path = trim(implode('/', array_filter([$prefix, 'auth/otp/'.$normalized.'/send'])), '/');
+
+            return '/'.$path;
+        }
     }
 }

@@ -153,6 +153,53 @@ abstract class Operation
         ];
     }
 
+    protected function resolvedSubmitOptions(PanelContext $context): array
+    {
+        $options = $this->submitOptions();
+
+        if (! is_array($options)) {
+            $options = [];
+        }
+
+        $normalized = [];
+        foreach ($options as $key => $label) {
+            $optionKey = trim((string) $key);
+            if ($optionKey === '') {
+                continue;
+            }
+
+            $normalized[$optionKey] = trim((string) $label);
+        }
+
+        if ($normalized === []) {
+            $normalized = [
+                'save_and_back' => 'Zapisz i wróć',
+            ];
+        }
+
+        $formSubmitLabel = trim((string) ($context->request()->attributes->get(\Upsoftware\Svarium\Panel\Form\Form::REQUEST_SUBMIT_LABEL_KEY, '') ?? ''));
+        if ($formSubmitLabel !== '' && array_key_exists('save_and_back', $normalized)) {
+            $normalized['save_and_back'] = $formSubmitLabel;
+        }
+
+        return $normalized;
+    }
+
+    protected function resolveActiveSubmitAction(array $options): string
+    {
+        $default = session(
+            static::class . '_submit_action',
+            array_key_first($options)
+        );
+
+        $candidate = trim((string) $default);
+        if ($candidate !== '' && array_key_exists($candidate, $options)) {
+            return $candidate;
+        }
+
+        return (string) array_key_first($options);
+    }
+
     public function tableActionDisplay(): ?string
     {
         return $this->tableActionDisplay;
@@ -967,6 +1014,82 @@ abstract class Operation
         return $names;
     }
 
+    protected function collectLanguageFieldNames(array $schema): array
+    {
+        $names = [];
+
+        $walk = function ($components) use (&$names, &$walk): void {
+            foreach ($components as $component) {
+                if ($component instanceof FieldComponent && $this->isLanguageFieldComponent($component)) {
+                    $name = trim((string) $component->getName());
+                    if ($name !== '') {
+                        $names[$name] = $name;
+                    }
+                }
+
+                $children = $this->getComponentChildren($component);
+                if ($children !== []) {
+                    $walk($children);
+                }
+
+                $slots = $this->getComponentSlots($component);
+                if ($slots !== []) {
+                    foreach ($slots as $slot) {
+                        $walk($this->normalizeComponentNodes($slot));
+                    }
+                }
+            }
+        };
+
+        $walk($schema);
+
+        return array_values($names);
+    }
+
+    /**
+     * Normalize language payload for models that do not cast translatable fields.
+     * Prevents Laravel insert grammar from treating associative attributes as
+     * multi-row insert when the first attribute value is an array.
+     */
+    protected function normalizeLanguagePayloadForModel(array $data, array $schema, object $model): array
+    {
+        if ($data === []) {
+            return $data;
+        }
+
+        $languageFields = $this->collectLanguageFieldNames($schema);
+        if ($languageFields === []) {
+            return $data;
+        }
+
+        foreach ($languageFields as $fieldName) {
+            if (! array_key_exists($fieldName, $data) || ! is_array($data[$fieldName])) {
+                continue;
+            }
+
+            $attributeName = trim((string) str($fieldName)->before('.')->before('['));
+            if ($attributeName === '') {
+                continue;
+            }
+
+            if (method_exists($model, 'hasCast') && $model->hasCast($attributeName)) {
+                continue;
+            }
+
+            $mutatorMethod = 'set'.str_replace(' ', '', ucwords(str_replace(['-', '_'], ' ', $attributeName))).'Attribute';
+            if (method_exists($model, $mutatorMethod)) {
+                continue;
+            }
+
+            $encoded = json_encode($data[$fieldName], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (is_string($encoded)) {
+                $data[$fieldName] = $encoded;
+            }
+        }
+
+        return $data;
+    }
+
     protected function isLanguageFieldComponent(FieldComponent $component): bool
     {
         return (bool) $component->getProp('language', false);
@@ -996,6 +1119,11 @@ abstract class Operation
             }
         }
 
+        $requestModel = request()?->attributes->get(\Upsoftware\Svarium\Panel\Form\Form::REQUEST_MODEL_KEY);
+        if (is_object($requestModel) && method_exists($requestModel, 'getKey')) {
+            return $requestModel;
+        }
+
         return null;
     }
 
@@ -1014,7 +1142,16 @@ abstract class Operation
                 if ($component instanceof FieldComponent) {
 
                     $name = $component->getName();
-                    $value = data_get($model, $name);
+                    $path = $this->normalizeHydrationPath($name);
+                    $value = data_get($model, $path);
+
+                    if ($value === null && is_string($path) && trim($path) !== '') {
+                        $value = data_get($model, 'value.'.$path);
+                    }
+
+                    if ($value !== null && $this->isLanguageFieldComponent($component)) {
+                        $value = $this->normalizeHydratedLanguageValue($value);
+                    }
 
                     if ($value !== null) {
                         $component->value($value);
@@ -1036,6 +1173,40 @@ abstract class Operation
         };
 
         $walk($schema);
+    }
+
+    protected function normalizeHydrationPath(?string $name): string
+    {
+        $normalized = trim((string) $name);
+        if ($normalized === '') {
+            return '';
+        }
+
+        return str_replace(['[', ']'], ['.', ''], $normalized);
+    }
+
+    protected function normalizeHydratedLanguageValue(mixed $value): mixed
+    {
+        if (! is_string($value)) {
+            return $value;
+        }
+
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return $value;
+        }
+
+        $decoded = json_decode($trimmed, true);
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded) || $decoded === []) {
+            return $value;
+        }
+
+        // Keep only associative payloads like {"pl":"...", "en":"..."}.
+        if (array_is_list($decoded)) {
+            return $value;
+        }
+
+        return $decoded;
     }
 
     protected function getSchema(PanelContext $context, ...$args): array
@@ -1587,6 +1758,8 @@ abstract class Operation
         $this->hydrateFields($schema, $args, $context);
 
         if ($this->isFormLike()) {
+            $submitOptions = $this->resolvedSubmitOptions($context);
+            $activeSubmitAction = $this->resolveActiveSubmitAction($submitOptions);
 
             $actions = array_values(array_filter(
                 $this->formActions(),
@@ -1596,13 +1769,13 @@ abstract class Operation
             if ($this->hasSubmit()) {
 
                 $actions[] = Button::make(
-                    $this->submitOptions()[$this->defaultSubmitAction()]
+                    (string) ($submitOptions[$activeSubmitAction] ?? $this->submitLabel())
                 )
                     ->type('submit')
                     ->name('_action')
-                    ->value($this->defaultSubmitAction())
-                    ->prop('options', $this->submitOptions())
-                    ->prop('active', $this->defaultSubmitAction());
+                    ->value($activeSubmitAction)
+                    ->prop('options', $submitOptions)
+                    ->prop('active', $activeSubmitAction);
             }
 
             $schema = Form::make()
@@ -1621,7 +1794,18 @@ abstract class Operation
         $result->meta('renderMode', $this->renderMode());
 
         if (method_exists($this, 'title')) {
-            $result->meta('title', $this->call('title', $context, ...$args));
+            $resolvedTitle = $this->call('title', $context, ...$args);
+            $result->meta('title', $resolvedTitle);
+
+            $normalizedTitle = trim((string) $resolvedTitle);
+            if (
+                $normalizedTitle !== ''
+                && function_exists('get_title')
+                && function_exists('set_title')
+                && trim((string) get_title()) === ''
+            ) {
+                set_title($normalizedTitle);
+            }
         }
 
         if (method_exists($this, 'breadcrumbs')) {

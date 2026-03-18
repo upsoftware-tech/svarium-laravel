@@ -37,6 +37,15 @@ class Separator extends Component
         return $this->prop('orientation', $value);
     }
 
+    public function position(string $position): static
+    {
+        if ($position === 'left') {
+            return $this->left(true);
+        } elseif ($position === 'right') {
+            return $this->right(true);
+        }
+    }
+
     public function left(bool $enabled = true): static
     {
         return $this->prop('left', $enabled);

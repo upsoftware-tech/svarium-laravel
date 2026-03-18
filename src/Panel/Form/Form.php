@@ -15,6 +15,9 @@ use Upsoftware\Svarium\UI\Components\Form\Select;
 
 class Form
 {
+    public const REQUEST_SUBMIT_LABEL_KEY = '_svarium_form_submit_label';
+    public const REQUEST_MODEL_KEY = '_svarium_form_model';
+
     public static function make(string $formClass, ?Model $record = null): array
     {
         if (! class_exists($formClass)) {
@@ -24,6 +27,9 @@ class Form
         if (! method_exists($formClass, 'make')) {
             throw new \InvalidArgumentException("Form config class [{$formClass}] must define static make().");
         }
+
+        self::storeResolvedSubmitLabelOnRequest($formClass, $record);
+        self::storeResolvedModelOnRequest($record);
 
         try {
             $schema = $formClass::make($record);
@@ -74,6 +80,57 @@ class Form
         }
 
         return $schema;
+    }
+
+    protected static function storeResolvedSubmitLabelOnRequest(string $formClass, ?Model $record = null): void
+    {
+        $request = request();
+        if (! $request) {
+            return;
+        }
+
+        $resolved = self::resolveSubmitLabel($formClass, $record);
+
+        if ($resolved === null || trim($resolved) === '') {
+            $request->attributes->remove(self::REQUEST_SUBMIT_LABEL_KEY);
+            return;
+        }
+
+        $request->attributes->set(self::REQUEST_SUBMIT_LABEL_KEY, $resolved);
+    }
+
+    protected static function storeResolvedModelOnRequest(?Model $record = null): void
+    {
+        $request = request();
+        if (! $request) {
+            return;
+        }
+
+        if (! $record instanceof Model) {
+            $request->attributes->remove(self::REQUEST_MODEL_KEY);
+            return;
+        }
+
+        $request->attributes->set(self::REQUEST_MODEL_KEY, $record);
+    }
+
+    protected static function resolveSubmitLabel(string $formClass, ?Model $record = null): ?string
+    {
+        $fromMethod = self::resolveOptionalString(
+            self::invokeStaticMethod($formClass, 'submitLabel', $record)
+        );
+        if ($fromMethod !== null) {
+            return $fromMethod;
+        }
+
+        $fromProperty = self::resolveOptionalString(
+            self::readStaticProperty($formClass, 'submitLabel')
+        );
+        if ($fromProperty !== null) {
+            return __($fromProperty);
+        }
+
+        return null;
     }
 
     protected static function usesCardWrapper(string $formClass, ?Model $record = null): bool

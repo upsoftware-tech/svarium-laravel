@@ -28,6 +28,11 @@ class RadioGroup extends FieldComponent
         return $this->prop('defaultValue', $value);
     }
 
+    public function inline(bool $enabled = true): static
+    {
+        return $this->prop('inline', $enabled);
+    }
+
     public function template(Component|array|string|Closure $template): static
     {
         $this->itemTemplate = $template;

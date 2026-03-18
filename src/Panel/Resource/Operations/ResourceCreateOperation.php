@@ -197,6 +197,7 @@ class ResourceCreateOperation extends Operation
             $resource->beforeSave($record, $data);
         }
 
+        $data = $this->normalizeLanguagePayloadForModel($data, $schema, $record);
         $record->fill($data)->save();
 
         if (method_exists($resource, 'afterSave')) {
