@@ -32,8 +32,11 @@ class ApiAuthLoginController extends Controller
         if (($result['status'] ?? null) === AuthLoginService::STATUS_INVALID) {
             return response()->json([
                 'status' => 'invalid',
-                'message' => 'Nieprawidłowe dane logowania',
-            ], 401);
+                'message' => __('The given data was invalid.'),
+                'errors' => [
+                    'email' => [__('Nieprawidłowe dane logowania')],
+                ],
+            ], 422);
         }
 
         if (($result['status'] ?? null) === AuthLoginService::STATUS_OTP_REQUIRED) {
@@ -353,4 +356,3 @@ class ApiAuthLoginController extends Controller
         return null;
     }
 }
-
