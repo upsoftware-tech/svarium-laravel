@@ -40,12 +40,28 @@ class AreaResolver
 
             if (
                 $panel->prefix === null
-                && $operationRegistry->resolve($panel->name, $method, $path) !== null
+                && (
+                    $operationRegistry->resolve($panel->name, $method, $path) !== null
+                    || $this->shouldTreatAsRootMountedStart($panel, $path)
+                )
             ) {
                 return new Area('panel', $panel->name, null);
             }
         }
 
         return new Area('web');
+    }
+
+    protected function shouldTreatAsRootMountedStart(mixed $panel, string $path): bool
+    {
+        if (! $panel instanceof \Upsoftware\Svarium\Panel\Panel) {
+            return false;
+        }
+
+        if (trim($path) !== '') {
+            return false;
+        }
+
+        return svarium_panel_start_at_root($panel->name);
     }
 }

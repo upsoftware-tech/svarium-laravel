@@ -161,6 +161,14 @@ class OperationRouter
             ->resolve($panelName, $request->method(), $path);
 
         if (
+            $request->isMethod('GET')
+            && $this->shouldRedirectStartPathToRoot($panel, $path)
+            && ($root = $this->panelRootPath($panel)) !== ''
+        ) {
+            return redirect()->to($root);
+        }
+
+        if (
             $this->shouldMountDashboardStartAtRoot($panel, $path, $route)
             && ($mountedRoute = $this->resolveDashboardStartOperationRoute($panel, $request->method())) !== null
         ) {
@@ -193,36 +201,12 @@ class OperationRouter
         }
 
         $operationClass = $route['operation'];
-        if ($operationClass === DashboardOperation::class && $request->isMethod('GET')) {
-            if ($this->shouldMountDashboardStartAtRoot($panel, $path, $route)) {
-                $mountedRoute = $this->resolveDashboardStartOperationRoute($panel, $request->method());
-                if (is_array($mountedRoute) && isset($mountedRoute['operation'])) {
-                    $route = $mountedRoute;
-                    $context = new PanelContext($panel, $request, (array) ($route['params'] ?? []));
-                    app()->instance(PanelContext::class, $context);
-                    $request->attributes->set('panel', $panelName);
-                    $context->input = new PanelInput($request->all());
-
-                    $bindings = app(BindingRegistry::class);
-
-                    foreach ($context->params as $key => $value) {
-                        if (is_string($value)) {
-                            try {
-                                [, $decodedId] = RecordIdentifier::decode($value);
-                                $value = $decodedId;
-                            } catch (\Throwable $e) {
-                                // ignore
-                            }
-                        }
-
-                        $context->params[$key] = $bindings->resolve($key, $value);
-                    }
-
-                    $operationClass = (string) $route['operation'];
-                }
-            } elseif (($target = $this->resolveDashboardStartRedirectPath($panel)) !== null) {
-                return redirect()->to($target);
-            }
+        if (
+            $operationClass === DashboardOperation::class
+            && $request->isMethod('GET')
+            && ($target = $this->resolveDashboardStartRedirectPath($panel)) !== null
+        ) {
+            return redirect()->to($target);
         }
 
         $operation = app($operationClass);
@@ -317,6 +301,10 @@ class OperationRouter
             return null;
         }
 
+        if (svarium_panel_start_at_root($panel->name)) {
+            return null;
+        }
+
         $root = svarium_panel_root_path($panel->name);
         $start = svarium_panel_start_path($panel->name);
 
@@ -390,6 +378,36 @@ class OperationRouter
         }
 
         return $route;
+    }
+
+    protected function shouldRedirectStartPathToRoot(?Panel $panel, string $path): bool
+    {
+        if (! $panel instanceof Panel) {
+            return false;
+        }
+
+        if (! svarium_panel_start_at_root($panel->name)) {
+            return false;
+        }
+
+        $start = svarium_panel_start_path($panel->name);
+        $root = svarium_panel_root_path($panel->name);
+
+        if ($start === '' || $start === $root) {
+            return false;
+        }
+
+        $startPath = (string) (parse_url($start, PHP_URL_PATH) ?? '');
+        $startPath = trim($startPath, '/');
+
+        $panelPrefix = trim((string) $panel->prefix, '/');
+        if ($panelPrefix !== '' && str_starts_with($startPath, $panelPrefix.'/')) {
+            $startPath = trim(substr($startPath, strlen($panelPrefix) + 1), '/');
+        } elseif ($panelPrefix !== '' && $startPath === $panelPrefix) {
+            $startPath = '';
+        }
+
+        return $startPath !== '' && trim($path, '/') === $startPath;
     }
 
     protected function isPublicAuthRequest(Request $request): bool

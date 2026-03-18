@@ -285,6 +285,15 @@ class SvariumServiceProvider extends ServiceProvider
             ->namespace('Upsoftware\Svarium\Http\Controllers')
             ->group(__DIR__.'/../routes/web.php');
 
+        $apiMiddleware = array_values(array_filter(array_map(
+            static fn (mixed $item): string => trim((string) $item),
+            (array) config('upsoftware.middleware.api', ['api'])
+        ), static fn (string $value): bool => $value !== ''));
+
+        Route::middleware($apiMiddleware)
+            ->namespace('Upsoftware\Svarium\Http\Controllers')
+            ->group(__DIR__.'/../routes/api-auth.php');
+
         /*
         |-----------------------------
         | Catch-all router Svarium (must be last)
