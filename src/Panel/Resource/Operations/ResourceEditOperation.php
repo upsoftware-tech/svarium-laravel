@@ -3,8 +3,10 @@
 namespace Upsoftware\Svarium\Panel\Resource\Operations;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Upsoftware\Svarium\Enums\ExecutionMode;
+use Upsoftware\Svarium\Http\JsonResult;
 use Upsoftware\Svarium\Http\OperationResult;
 use Upsoftware\Svarium\Http\RedirectResult;
 use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
@@ -42,6 +44,65 @@ class ResourceEditOperation extends Operation
     public function authorize(PanelContext $context): bool
     {
         return (bool) $this->resource()->canEdit($context);
+    }
+
+    public function apiRun(PanelContext $context, ...$args): mixed
+    {
+        $record = null;
+
+        foreach ($args as $arg) {
+            if ($arg instanceof Model) {
+                $record = $arg;
+                break;
+            }
+        }
+
+        if (! $record instanceof Model) {
+            return JsonResult::make([
+                'status' => 'not_found',
+                'message' => __('Record not found.'),
+            ], 404);
+        }
+
+        $method = strtoupper($context->request()->method());
+
+        if ($method === 'GET') {
+            return JsonResult::make([
+                'status' => 'ok',
+                'data' => $record->toArray(),
+            ]);
+        }
+
+        if (! in_array($method, ['PUT', 'PATCH', 'POST'], true)) {
+            return null;
+        }
+
+        $schema = $this->getSchema($context, $record);
+        $schema = $this->filterByOperation($schema, $context);
+        [$messages, $attributes, $rules] = $this->resolveFormValidationPayload($context, $schema, $record);
+
+        $context->validated = validator($context->request()->all(), $rules, $messages, $attributes)->validate();
+
+        $fieldNames = $this->collectFieldNames($schema);
+        $data = collect($context->all())->only($fieldNames)->toArray();
+
+        $resource = $this->resource();
+
+        if (method_exists($resource, 'beforeSave')) {
+            $resource->beforeSave($record, $data);
+        }
+
+        $data = $this->normalizeLanguagePayloadForModel($data, $schema, $record);
+        $record->fill($data)->save();
+
+        if (method_exists($resource, 'afterSave')) {
+            $resource->afterSave($record);
+        }
+
+        return JsonResult::make([
+            'status' => 'updated',
+            'data' => $record->fresh()?->toArray() ?? $record->toArray(),
+        ]);
     }
 
     protected function formActions(): array
@@ -91,6 +152,8 @@ class ResourceEditOperation extends Operation
                 if (is_string($errorTabKey) && trim($errorTabKey) !== '') {
                     $context->request()->merge(['tab' => $errorTabKey]);
                     $context->params['tab'] = $errorTabKey;
+                    $context->params['__form_tab_error_tab'] = $errorTabKey;
+                    $context->params['__form_tab_error_nonce'] = (string) Str::uuid();
                 }
 
                 $this->debugFormTabs($context, 'edit_validation_error', [

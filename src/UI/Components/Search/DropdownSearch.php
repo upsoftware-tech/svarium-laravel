@@ -42,6 +42,10 @@ class DropdownSearch extends Search
 
     protected string $counterPosition = 'right';
 
+    protected ?string $triggerIcon = 'lucide:plus';
+
+    protected bool $showTriggerIcon = true;
+
     protected $mapCallback = null;
 
     protected ?string $relationName = null;
@@ -241,6 +245,26 @@ class DropdownSearch extends Search
     public function counterPosution(string $position = 'right'): static
     {
         return $this->counterPosition($position);
+    }
+
+    public function triggerIcon(?string $icon = 'lucide:plus'): static
+    {
+        $normalized = trim((string) ($icon ?? ''));
+        $this->triggerIcon = $normalized !== '' ? $normalized : null;
+
+        return $this;
+    }
+
+    public function showTriggerIcon(bool $enabled = true): static
+    {
+        $this->showTriggerIcon = $enabled;
+
+        return $this;
+    }
+
+    public function hideTriggerIcon(bool $hidden = true): static
+    {
+        return $this->showTriggerIcon(! $hidden);
     }
 
     /*
@@ -470,6 +494,8 @@ class DropdownSearch extends Search
         $props['iconPosition'] = $this->iconPosition;
         $props['counter'] = $this->counter;
         $props['counterPosition'] = $this->counterPosition;
+        $props['triggerIcon'] = $this->triggerIcon;
+        $props['showTriggerIcon'] = $this->showTriggerIcon;
 
         return array_merge($parent, ['props' => $props]);
     }

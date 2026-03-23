@@ -16,6 +16,7 @@ use Upsoftware\Svarium\UI\Components\Form\Input;
 class {{ModuleName}}Resource extends Resource
 {
     protected static string $model = {{ModuleName}}::class;
+{{ResourceApiProperty}}
 
     public function access(): array
     {

@@ -135,7 +135,26 @@ class Form
 
     protected static function usesCardWrapper(string $formClass, ?Model $record = null): bool
     {
+        $view = self::resolveViewMode($formClass, $record);
+        if ($view !== null) {
+            return $view === 'card';
+        }
+
         return self::resolveCardEnabled($formClass, $record);
+    }
+
+    protected static function resolveViewMode(string $formClass, ?Model $record = null): ?string
+    {
+        $fromMethod = self::normalizeViewMode(
+            self::invokeStaticMethod($formClass, 'view', $record)
+        );
+        if ($fromMethod !== null) {
+            return $fromMethod;
+        }
+
+        return self::normalizeViewMode(
+            self::readStaticProperty($formClass, 'view')
+        );
     }
 
     protected static function wrapInCard(
@@ -578,6 +597,26 @@ class Form
         }
 
         return null;
+    }
+
+    protected static function normalizeViewMode(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if ($normalized === 'normal') {
+            return 'default';
+        }
+
+        return in_array($normalized, ['default', 'card', 'cards', 'tabs'], true)
+            ? $normalized
+            : null;
     }
 
     protected static function applyDefaultFieldColSpanToNode(mixed $node, string|int $fieldColSpan): mixed

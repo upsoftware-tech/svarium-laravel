@@ -2,8 +2,10 @@
 
 namespace Upsoftware\Svarium\Panel\Resource\Operations;
 
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Upsoftware\Svarium\Enums\ExecutionMode;
+use Upsoftware\Svarium\Http\JsonResult;
 use Upsoftware\Svarium\Http\OperationResult;
 use Upsoftware\Svarium\Http\RedirectResult;
 use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
@@ -44,6 +46,42 @@ class ResourceCreateOperation extends Operation
         return (bool) $this->resource()->canCreate($context);
     }
 
+    public function apiRun(PanelContext $context, ...$args): mixed
+    {
+        if (strtoupper($context->request()->method()) !== 'POST') {
+            return null;
+        }
+
+        $schema = $this->getSchema($context, ...$args);
+        $schema = $this->filterByOperation($schema, $context);
+
+        [$messages, $attributes, $rules] = $this->resolveFormValidationPayload($context, $schema);
+        $context->validated = validator($context->request()->all(), $rules, $messages, $attributes)->validate();
+
+        $resource = $this->resource();
+        $modelClass = $resource::model();
+
+        $fieldNames = $this->collectFieldNames($schema);
+        $data = collect($context->all())->only($fieldNames)->toArray();
+        $record = new $modelClass;
+
+        if (method_exists($resource, 'beforeSave')) {
+            $resource->beforeSave($record, $data);
+        }
+
+        $data = $this->normalizeLanguagePayloadForModel($data, $schema, $record);
+        $record->fill($data)->save();
+
+        if (method_exists($resource, 'afterSave')) {
+            $resource->afterSave($record);
+        }
+
+        return JsonResult::make([
+            'status' => 'created',
+            'data' => $record->fresh()?->toArray() ?? $record->toArray(),
+        ], 201);
+    }
+
     protected function formActions(): array
     {
         /** @var PanelContext $context */
@@ -81,6 +119,8 @@ class ResourceCreateOperation extends Operation
             if (is_string($errorTabKey) && trim($errorTabKey) !== '') {
                 $context->request()->merge(['tab' => $errorTabKey]);
                 $context->params['tab'] = $errorTabKey;
+                $context->params['__form_tab_error_tab'] = $errorTabKey;
+                $context->params['__form_tab_error_nonce'] = (string) Str::uuid();
             }
 
             $this->debugFormTabs($context, 'create_validation_error', [

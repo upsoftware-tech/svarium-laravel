@@ -11,6 +11,119 @@ class Select extends FieldComponent
 {
     use HasVariant;
 
+    public function dependsOn(
+        string $field,
+        ?string $optionField = null,
+        bool $clearOnChange = true,
+        bool $showWhenEmpty = false,
+    ): static {
+        return $this->appendDependency(
+            $field,
+            $optionField,
+            $clearOnChange,
+            $showWhenEmpty,
+            false
+        );
+    }
+
+    public function dependsOnOptional(
+        string $field,
+        ?string $optionField = null,
+        bool $clearOnChange = true,
+        bool $includeNull = false,
+    ): static {
+        return $this->appendDependency(
+            $field,
+            $optionField,
+            $clearOnChange,
+            true,
+            $includeNull
+        );
+    }
+
+    protected function appendDependency(
+        string $field,
+        ?string $optionField,
+        bool $clearOnChange,
+        bool $showWhenEmpty,
+        bool $includeNull,
+    ): static {
+        $field = trim($field);
+        if ($field === '') {
+            return $this;
+        }
+
+        $resolvedOptionField = trim((string) ($optionField ?? ''));
+        if ($resolvedOptionField === '') {
+            $resolvedOptionField = $field;
+        }
+
+        $dependency = [
+            'field' => $field,
+            'optionField' => $resolvedOptionField,
+            'clearOnChange' => $clearOnChange,
+            'showWhenEmpty' => $showWhenEmpty,
+            'includeNull' => $includeNull,
+        ];
+
+        $existing = $this->getProp('dependsOn');
+        $dependencies = [];
+
+        if (is_string($existing) && trim($existing) !== '') {
+            $dependencies[] = [
+                'field' => trim($existing),
+                'optionField' => trim($existing),
+                'clearOnChange' => true,
+                'showWhenEmpty' => false,
+                'includeNull' => false,
+            ];
+        } elseif (is_array($existing)) {
+            if (array_is_list($existing)) {
+                foreach ($existing as $item) {
+                    if (! is_array($item)) {
+                        continue;
+                    }
+
+                    $existingField = trim((string) ($item['field'] ?? ''));
+                    if ($existingField === '') {
+                        continue;
+                    }
+
+                    $dependencies[] = [
+                        'field' => $existingField,
+                        'optionField' => trim((string) ($item['optionField'] ?? $existingField)),
+                        'clearOnChange' => isset($item['clearOnChange']) ? (bool) $item['clearOnChange'] : true,
+                        'showWhenEmpty' => isset($item['showWhenEmpty']) ? (bool) $item['showWhenEmpty'] : false,
+                        'includeNull' => isset($item['includeNull']) ? (bool) $item['includeNull'] : false,
+                    ];
+                }
+            } else {
+                $existingField = trim((string) ($existing['field'] ?? ''));
+                if ($existingField !== '') {
+                    $dependencies[] = [
+                        'field' => $existingField,
+                        'optionField' => trim((string) ($existing['optionField'] ?? $existingField)),
+                        'clearOnChange' => isset($existing['clearOnChange']) ? (bool) $existing['clearOnChange'] : true,
+                        'showWhenEmpty' => isset($existing['showWhenEmpty']) ? (bool) $existing['showWhenEmpty'] : false,
+                        'includeNull' => isset($existing['includeNull']) ? (bool) $existing['includeNull'] : false,
+                    ];
+                }
+            }
+        }
+
+        $dependencies[] = $dependency;
+        $dependencies = array_values($dependencies);
+
+        $this->prop('dependsOn', count($dependencies) === 1 ? $dependencies[0] : $dependencies);
+
+        if (is_array($this->getProp('optionsModel'))) {
+            $this->prop('optionsRemote', true);
+            $this->prop('options', []);
+        }
+
+        return $this;
+    }
+
     public function multiple(bool $enabled = true): static
     {
         return $this->prop('multiple', $enabled);
@@ -32,9 +145,12 @@ class Select extends FieldComponent
         string|array|null $orderBy = null
     ): static {
         $builder = new ModelOptionsBuilder($modelClass, $value, $label);
+        $orders = [];
 
         if (is_string($orderBy) && trim($orderBy) !== '') {
-            $builder->orderBy(trim($orderBy));
+            $column = trim($orderBy);
+            $builder->orderBy($column);
+            $orders[] = ['column' => $column, 'direction' => 'asc'];
         }
 
         if (is_array($orderBy)) {
@@ -44,12 +160,18 @@ class Select extends FieldComponent
 
                 if ($column !== '') {
                     $builder->orderBy($column, $direction);
+                    $orders[] = [
+                        'column' => $column,
+                        'direction' => strtolower(trim($direction)) === 'desc' ? 'desc' : 'asc',
+                    ];
                 }
             } else {
                 foreach ($orderBy as $column => $direction) {
                     if (is_int($column)) {
                         if (is_string($direction) && trim($direction) !== '') {
-                            $builder->orderBy(trim($direction));
+                            $normalized = trim($direction);
+                            $builder->orderBy($normalized);
+                            $orders[] = ['column' => $normalized, 'direction' => 'asc'];
                         }
                         continue;
                     }
@@ -59,12 +181,44 @@ class Select extends FieldComponent
                         continue;
                     }
 
-                    $builder->orderBy($normalizedColumn, (string) $direction);
+                    $normalizedDirection = strtolower(trim((string) $direction)) === 'desc' ? 'desc' : 'asc';
+                    $builder->orderBy($normalizedColumn, $normalizedDirection);
+                    $orders[] = [
+                        'column' => $normalizedColumn,
+                        'direction' => $normalizedDirection,
+                    ];
                 }
             }
         }
 
+        $this->prop('optionsModel', [
+            'model' => $modelClass,
+            'value' => trim($value) !== '' ? $value : 'id',
+            'label' => trim($label) !== '' ? $label : 'name',
+            'orders' => $orders,
+            'endpoint' => $this->resolveModelOptionsEndpoint(),
+            'limit' => (int) config('upsoftware.form.select_options.limit', 200),
+        ]);
+
+        $useRemote = (bool) $this->getProp('optionsRemote', false) || is_array($this->getProp('dependsOn'));
+        $this->prop('optionsRemote', $useRemote);
+
+        if ($useRemote) {
+            return $this->prop('options', []);
+        }
+
         return $this->options($builder);
+    }
+
+    public function optionsRemote(bool $enabled = true): static
+    {
+        $this->prop('optionsRemote', $enabled);
+
+        if ($enabled && is_array($this->getProp('optionsModel'))) {
+            $this->prop('options', []);
+        }
+
+        return $this;
     }
 
     public function placeholder(string $placeholder): static
@@ -75,6 +229,11 @@ class Select extends FieldComponent
     public function clear(bool $enabled = true): static
     {
         return $this->prop('clear', $enabled);
+    }
+
+    public function searchable(bool $enabled = true): static
+    {
+        return $this->prop('searchable', $enabled);
     }
 
     public function languageSelector(bool $enabled = true): static
@@ -154,5 +313,18 @@ class Select extends FieldComponent
         }
 
         return array_values($normalized);
+    }
+
+    protected function resolveModelOptionsEndpoint(): string
+    {
+        try {
+            if (\Illuminate\Support\Facades\Route::has('svarium.form.select-options.model')) {
+                return route('svarium.form.select-options.model');
+            }
+        } catch (\Throwable) {
+            // Ignore and return fallback path.
+        }
+
+        return '/svarium/form/options/model';
     }
 }

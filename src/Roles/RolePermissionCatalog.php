@@ -8,6 +8,7 @@ use Throwable;
 use Upsoftware\Svarium\Panel\OperationRegistry;
 use Upsoftware\Svarium\Panel\Resource;
 use Upsoftware\Svarium\Panel\ResourceRegistry;
+use Upsoftware\Svarium\Panel\Table\TableBuilder;
 
 class RolePermissionCatalog
 {
@@ -163,9 +164,30 @@ class RolePermissionCatalog
                     'group_label' => $groupLabel,
                 ];
             }
+
+            if ($this->resourceSupportsDndSort($resource)) {
+                $definitions[] = [
+                    'name' => $this->resourcePermissionName($resourceClass, 'sort'),
+                    'label' => __('Sort order'),
+                    'description' => $groupLabel,
+                    'group_key' => $groupKey,
+                    'group_label' => $groupLabel,
+                ];
+            }
         }
 
         return $definitions;
+    }
+
+    protected function resourceSupportsDndSort(Resource $resource): bool
+    {
+        try {
+            $table = $resource->table();
+        } catch (Throwable) {
+            return false;
+        }
+
+        return $table instanceof TableBuilder && $table->hasDnd();
     }
 
     protected function operationDefinitions(): array

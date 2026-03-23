@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\UI\Components\Table;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 use ReflectionMethod;
 use Upsoftware\Svarium\Panel\FieldAttributesRegistry;
 use Upsoftware\Svarium\UI\Appearance;
@@ -13,7 +14,10 @@ use Upsoftware\Svarium\UI\Concerns\Props\HasState;
 
 class Column extends Component
 {
-    use HasDefault, HasState, HasPlaceholder;
+    use HasDefault {
+        default as private defaultDisplayValue;
+    }
+    use HasState, HasPlaceholder;
 
     protected string $key = '';
 
@@ -58,6 +62,8 @@ class Column extends Component
     protected ?string $valueDisplayFormat = null;
 
     protected ?string $footerDefinition = null;
+
+    protected bool $language = false;
 
     public static function make(array|string|null $name = null, string ...$concatKeys): static
     {
@@ -111,6 +117,10 @@ class Column extends Component
             ? $this->resolveConcatState($row)
             : $this->resolveRawState($row);
 
+        if ($this->language) {
+            $value = $this->resolveLanguageValue($row, $value);
+        }
+
         $value = $this->applyValueFormatting($value);
         $value = $this->applyDefault($value);
         $value = $this->applyPlaceholder($value);
@@ -123,6 +133,83 @@ class Column extends Component
         $this->filterLabel = $label;
 
         return $this->prop('label', $label);
+    }
+
+    public function default($value): static
+    {
+        $this->defaultDisplayValue($value);
+
+        return $this->apiDefault($value);
+    }
+
+    public function apiDefault(mixed $value): static
+    {
+        return $this->prop('apiDefault', $value);
+    }
+
+    public function example(mixed $value): static
+    {
+        return $this->apiExample($value);
+    }
+
+    public function apiExample(mixed $value): static
+    {
+        return $this->prop('apiExample', $value);
+    }
+
+    public function apiFormat(string $format): static
+    {
+        return $this->prop('apiFormat', trim($format));
+    }
+
+    public function schemaFormat(string $format): static
+    {
+        return $this->apiFormat($format);
+    }
+
+    public function apiMinimum(int|float $value): static
+    {
+        return $this->prop('apiMinimum', $value);
+    }
+
+    public function apiMaximum(int|float $value): static
+    {
+        return $this->prop('apiMaximum', $value);
+    }
+
+    public function apiMinLength(int $value): static
+    {
+        return $this->prop('apiMinLength', max(0, $value));
+    }
+
+    public function apiMaxLength(int $value): static
+    {
+        return $this->prop('apiMaxLength', max(0, $value));
+    }
+
+    public function apiEnum(array $values): static
+    {
+        return $this->prop('apiEnum', array_values($values));
+    }
+
+    public function apiOptions(array $options): static
+    {
+        return $this->prop('apiOptions', $options);
+    }
+
+    public function options(array $options): static
+    {
+        return $this->apiOptions($options);
+    }
+
+    public function possibleOptions(array $options): static
+    {
+        return $this->apiOptions($options);
+    }
+
+    public function description(string $description): static
+    {
+        return $this->prop('description', $description);
     }
 
     public function action(string|Action $action): static
@@ -206,6 +293,11 @@ class Column extends Component
     public function getKey(): string
     {
         return $this->resolveKey();
+    }
+
+    public function getWidth(): mixed
+    {
+        return $this->props['width'] ?? null;
     }
 
     public function getConcatKeys(): array
@@ -490,6 +582,20 @@ class Column extends Component
         return $this;
     }
 
+    public function language(bool $enabled = true): static
+    {
+        $this->language = $enabled;
+
+        return $this;
+    }
+
+    public function icon(bool $enabled = true): static
+    {
+        $this->valueDisplayType = $enabled ? 'icon' : null;
+
+        return $this;
+    }
+
     public function boolean(): static
     {
         return $this->bool();
@@ -721,6 +827,57 @@ class Column extends Component
     public function getValueDisplayType(): ?string
     {
         return $this->valueDisplayType;
+    }
+
+    public function isLanguage(): bool
+    {
+        return $this->language;
+    }
+
+    public function resolveLanguageTranslations(array|object $row): array
+    {
+        if (is_object($row)) {
+            $row = $row->toArray();
+        }
+
+        $value = ! empty($this->concatKeys)
+            ? $this->resolveConcatState($row)
+            : $this->resolveRawState($row);
+
+        $candidate = $this->normalizeLanguageCandidate($value);
+
+        if ($candidate === null && str_contains($this->key, '.')) {
+            $basePath = trim((string) Str::before($this->key, '.'));
+
+            if ($basePath !== '') {
+                $baseValue = data_get($row, $basePath);
+                $candidate = $this->normalizeLanguageCandidate($baseValue);
+            }
+        }
+
+        return $candidate ?? [];
+    }
+
+    public function resolveLanguageValueForLocale(array|object $row, string $locale): ?string
+    {
+        $localeKey = strtolower(trim($locale));
+        if ($localeKey === '') {
+            return null;
+        }
+
+        $translations = $this->resolveLanguageTranslations($row);
+        if ($translations === [] || ! array_key_exists($localeKey, $translations)) {
+            return null;
+        }
+
+        $value = $translations[$localeKey];
+        if (! is_scalar($value) && ! $value instanceof \Stringable) {
+            return null;
+        }
+
+        $normalized = trim((string) $value);
+
+        return $normalized !== '' ? $normalized : null;
     }
 
     protected function parseDateValue(mixed $value): ?Carbon
@@ -994,7 +1151,96 @@ class Column extends Component
             'filterable' => $this->filterEnabled,
             'filter' => $this->toFilterDefinition(),
             'footer' => $this->footerDefinition,
+            'language' => $this->language,
         ];
+    }
+
+    protected function resolveLanguageValue(array $row, mixed $resolvedValue): mixed
+    {
+        $candidate = $this->normalizeLanguageCandidate($resolvedValue);
+
+        if ($candidate === null && str_contains($this->key, '.')) {
+            $basePath = trim((string) Str::before($this->key, '.'));
+
+            if ($basePath !== '') {
+                $baseValue = data_get($row, $basePath);
+                $candidate = $this->normalizeLanguageCandidate($baseValue);
+            }
+        }
+
+        if ($candidate === null) {
+            return $resolvedValue;
+        }
+
+        $preferredLocale = $this->resolveRequestedTableLocale($candidate);
+
+        if ($preferredLocale !== null && array_key_exists($preferredLocale, $candidate)) {
+            $value = $candidate[$preferredLocale];
+            if (is_scalar($value) || $value instanceof \Stringable) {
+                return (string) $value;
+            }
+        }
+
+        $appLocale = strtolower(trim((string) app()->getLocale()));
+        if ($appLocale !== '' && array_key_exists($appLocale, $candidate)) {
+            $value = $candidate[$appLocale];
+            if (is_scalar($value) || $value instanceof \Stringable) {
+                return (string) $value;
+            }
+        }
+
+        foreach ($candidate as $value) {
+            if (is_scalar($value) || $value instanceof \Stringable) {
+                $normalized = trim((string) $value);
+                if ($normalized !== '') {
+                    return $normalized;
+                }
+            }
+        }
+
+        return $resolvedValue;
+    }
+
+    protected function normalizeLanguageCandidate(mixed $value): ?array
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            if (is_array($decoded) && ! array_is_list($decoded)) {
+                $value = $decoded;
+            }
+        }
+
+        if (! is_array($value) || array_is_list($value)) {
+            return null;
+        }
+
+        $normalized = [];
+        foreach ($value as $locale => $translation) {
+            $key = strtolower(trim((string) $locale));
+            if ($key === '') {
+                continue;
+            }
+
+            $normalized[$key] = $translation;
+        }
+
+        return $normalized !== [] ? $normalized : null;
+    }
+
+    protected function resolveRequestedTableLocale(array $candidate): ?string
+    {
+        $requestedRaw = strtolower(trim((string) request()->query('table_locale', '')));
+        $requested = trim((string) Str::before($requestedRaw, ','));
+        if ($requested !== '' && array_key_exists($requested, $candidate)) {
+            return $requested;
+        }
+
+        $requestedFallback = strtolower(trim((string) request()->query('locale', '')));
+        if ($requestedFallback !== '' && array_key_exists($requestedFallback, $candidate)) {
+            return $requestedFallback;
+        }
+
+        return null;
     }
 
     protected function applyRegisteredAttributes(string $name): void

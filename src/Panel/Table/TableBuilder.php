@@ -7,10 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Upsoftware\Svarium\Enums\TableActionDisplay;
 use Upsoftware\Svarium\UI\Component;
 use Upsoftware\Svarium\UI\Components\Button;
+use Upsoftware\Svarium\UI\Components\Block;
 use Upsoftware\Svarium\UI\Components\Checkbox;
 use Upsoftware\Svarium\UI\Components\ColumnVisibility;
 use Upsoftware\Svarium\UI\Components\Drawer;
@@ -130,6 +132,9 @@ class TableBuilder
     protected bool $searchAppearanceDefined = false;
 
     protected array $tabs = [];
+    protected bool $showTabsOnEmpty = false;
+    protected bool $showCreateOnEmpty = false;
+    protected bool $showAllTab = true;
 
     protected $searchbar;
     protected bool $searchbarConfigured = false;
@@ -152,6 +157,7 @@ class TableBuilder
 
     protected ?bool $condensed = null;
     protected ?bool $bordered = null;
+    protected ?string $dndField = null;
 
     protected string $filterInputSize = 'default';
 
@@ -312,6 +318,30 @@ class TableBuilder
         if (is_array($tableConfig) && array_key_exists('selectable', $tableConfig)) {
             $this->selectable($this->toBoolean($tableConfig['selectable'], true));
         }
+
+        if (is_array($tableConfig) && array_key_exists('dnd', $tableConfig) && is_string($tableConfig['dnd'])) {
+            $this->dnd($tableConfig['dnd']);
+        }
+    }
+
+    public function dnd(?string $field): static
+    {
+        $normalized = trim((string) $field);
+        $this->dndField = $normalized !== '' ? $normalized : null;
+
+        return $this;
+    }
+
+    public function disableDnd(): static
+    {
+        $this->dndField = null;
+
+        return $this;
+    }
+
+    public function hasDnd(): bool
+    {
+        return $this->resolveDndField() !== null;
     }
 
     public function bulk(bool|string $mode = true): static
@@ -375,6 +405,42 @@ class TableBuilder
     public function tabs(array $tabs): static
     {
         $this->tabs = $tabs;
+
+        return $this;
+    }
+
+    public function showTabsOnEmpty(bool $enabled = true): static
+    {
+        $this->showTabsOnEmpty = $enabled;
+
+        return $this;
+    }
+
+    public function showCreateOnEmpty(bool $enabled = true): static
+    {
+        $this->showCreateOnEmpty = $enabled;
+
+        return $this;
+    }
+
+    public function emptyTopbar(bool $showTabs = true, bool $showCreate = true): static
+    {
+        $this->showTabsOnEmpty = $showTabs;
+        $this->showCreateOnEmpty = $showCreate;
+
+        return $this;
+    }
+
+    public function showAllTab(bool $enabled = true): static
+    {
+        $this->showAllTab = $enabled;
+
+        return $this;
+    }
+
+    public function hideAllTab(bool $enabled = true): static
+    {
+        $this->showAllTab = ! $enabled;
 
         return $this;
     }
@@ -2899,7 +2965,9 @@ class TableBuilder
             return $value !== $allTabValue;
         }));
 
-        array_unshift($items, TabItem::make(__('All'))->prop('value', $allTabValue));
+        if ($this->showAllTab) {
+            array_unshift($items, TabItem::make(__('All'))->prop('value', $allTabValue));
+        }
 
         $allowedValues = [];
         foreach ($items as $item) {
@@ -3555,6 +3623,226 @@ class TableBuilder
         return $directives;
     }
 
+    protected function resolveActiveSortDirectivesForRendering(): array
+    {
+        $sort = trim((string) request()->query('sort', ''));
+
+        if ($sort === '') {
+            return [];
+        }
+
+        $sortableMap = $this->resolveSortableColumnsMap();
+        $multiSortableMap = $this->resolveMultiSortableColumnsMap($sortableMap);
+        $directives = $this->parseSortDirectives($sort);
+
+        return $this->sanitizeSortDirectives($directives, $multiSortableMap);
+    }
+
+    protected function resolveDndField(): ?string
+    {
+        $field = trim((string) ($this->dndField ?? ''));
+
+        return $field !== '' ? $field : null;
+    }
+
+    protected function isDndActive(): bool
+    {
+        return $this->resolveActiveDndDirection() !== null;
+    }
+
+    protected function resolveActiveDndDirection(): ?string
+    {
+        $field = $this->resolveDndField();
+        if ($field === null) {
+            return null;
+        }
+
+        $directives = $this->resolveActiveSortDirectivesForRendering();
+        if ($directives === []) {
+            return null;
+        }
+
+        $firstField = trim((string) ($directives[0]['field'] ?? ''));
+        $firstDirection = strtolower(trim((string) ($directives[0]['direction'] ?? 'asc')));
+
+        if ($firstField === '' || $firstField !== $field) {
+            return null;
+        }
+
+        $sortableMap = $this->resolveSortableColumnsMap();
+        $sortableDefinition = $sortableMap[$field] ?? null;
+        if (! is_array($sortableDefinition) || ! ((bool) ($sortableDefinition['enabled'] ?? false))) {
+            return null;
+        }
+
+        return in_array($firstDirection, ['asc', 'desc'], true) ? $firstDirection : 'asc';
+    }
+
+    protected function resolveDndConfig(): array
+    {
+        $direction = $this->resolveActiveDndDirection();
+
+        return [
+            'enabled' => $direction !== null,
+            'field' => $this->resolveDndField(),
+            'direction' => $direction ?? 'asc',
+        ];
+    }
+
+    protected function normalizeDndOrderedIds(array|string $orderedIds): array
+    {
+        $raw = $orderedIds;
+
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $raw = $decoded;
+            } else {
+                $raw = array_map('trim', explode(',', $raw));
+            }
+        }
+
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($raw as $id) {
+            $value = trim((string) $id);
+            if ($value === '' || in_array($value, $normalized, true)) {
+                continue;
+            }
+
+            $normalized[] = $value;
+        }
+
+        return $normalized;
+    }
+
+    public function reorderByDnd(array|string $orderedIds): bool
+    {
+        $field = $this->resolveDndField();
+        $direction = $this->resolveActiveDndDirection();
+        if ($field === null || $direction === null) {
+            return false;
+        }
+
+        $query = $this->query;
+        if (! $query instanceof EloquentBuilder) {
+            return false;
+        }
+
+        $model = $query->getModel();
+        if (! $model instanceof Model) {
+            return false;
+        }
+
+        $ordered = $this->normalizeDndOrderedIds($orderedIds);
+        if ($ordered === []) {
+            return false;
+        }
+
+        $keyName = $model->getKeyName();
+        $scopeQuery = $this->newDndScopeQuery();
+        if (! $scopeQuery instanceof EloquentBuilder) {
+            return false;
+        }
+
+        $scopeForCurrentPage = clone $scopeQuery;
+        $sort = trim((string) request()->query('sort', ''));
+        if ($sort !== '') {
+            $this->applySort($scopeForCurrentPage, $sort);
+        } else {
+            $this->applyDefaultSort($scopeForCurrentPage);
+        }
+
+        $scopeForCurrentPageIds = clone $scopeForCurrentPage;
+        $page = max(1, (int) request()->query('page', 1));
+        $rowsPerPage = $this->resolveRowsPerPage(request()->query('rowsPerPage', request()->query('perPage')));
+        if ($rowsPerPage > 0) {
+            $scopeForCurrentPageIds->forPage($page, $rowsPerPage);
+        }
+
+        $currentPageIds = $scopeForCurrentPageIds->get()->map(function ($record): string {
+            if ($record instanceof Model) {
+                return trim((string) $record->getKey());
+            }
+
+            return trim((string) data_get($record, 'id'));
+        })->filter(static fn (string $value): bool => $value !== '')->values()->all();
+
+        if ($currentPageIds === []) {
+            return false;
+        }
+
+        $pageLookup = array_fill_keys($currentPageIds, true);
+        $existingIds = array_values(array_filter(
+            $ordered,
+            static fn (string $value): bool => isset($pageLookup[$value])
+        ));
+
+        if ($existingIds === []) {
+            return false;
+        }
+
+        $totalRows = max(1, (int) (clone $scopeQuery)->toBase()->getCountForPagination());
+        $startPosition = 1;
+
+        if ($direction === 'desc') {
+            $startPosition = $rowsPerPage > 0
+                ? max(1, $totalRows - (($page - 1) * $rowsPerPage))
+                : $totalRows;
+        } else {
+            $startPosition = $rowsPerPage > 0
+                ? (($page - 1) * $rowsPerPage) + 1
+                : 1;
+        }
+
+        DB::transaction(function () use ($model, $keyName, $field, $existingIds, $startPosition, $direction): void {
+            foreach ($existingIds as $index => $id) {
+                $position = $direction === 'desc'
+                    ? ($startPosition - $index)
+                    : ($startPosition + $index);
+
+                $model->newQuery()
+                    ->where($keyName, $id)
+                    ->update([$field => max(1, (int) $position)]);
+            }
+        });
+
+        return true;
+    }
+
+    protected function newDndScopeQuery(): ?EloquentBuilder
+    {
+        $query = $this->query;
+        if (! $query instanceof EloquentBuilder) {
+            return null;
+        }
+
+        $scope = clone $query;
+        $request = request();
+
+        $requestedView = trim((string) $request->query('view', ''));
+        if ($requestedView !== '') {
+            $this->applySavedView($scope, $requestedView, ! $request->filled('sort'));
+        }
+
+        $search = $request->query('q');
+        if (! is_string($search) || trim($search) === '') {
+            $search = $request->query('search');
+        }
+
+        if (is_string($search) && trim($search) !== '') {
+            $this->applySearch($scope, $search);
+        }
+
+        $this->applyDropdownSearchFilters($scope, $request);
+
+        return $scope;
+    }
+
     protected function resolveSortableDefaults(): array
     {
         if ($this->sortableConfigured) {
@@ -4120,25 +4408,55 @@ class TableBuilder
     {
         $sortableMap = $this->resolveSortableColumnsMap();
         $multiSortableMap = $this->resolveMultiSortableColumnsMap($sortableMap);
+        $languageExpansionLocales = $this->resolveLanguageColumnExpansionLocales();
+        $languageLabels = $this->resolveTableLanguageLabelsByLocale();
+        $languageIcons = $this->resolveTableLanguageIconsByLocale();
+        $serializedColumns = [];
 
-        return array_map(function ($column) use ($sortableMap, $multiSortableMap) {
-
+        foreach ($this->columnObjects as $column) {
             if ($column instanceof Column) {
-                $serialized = $column->toArray();
-                $key = trim((string) ($serialized['key'] ?? ''));
-                $sortable = $key !== '' ? ($sortableMap[$key] ?? null) : null;
+                $baseSerialized = $column->toArray();
+                $baseKey = trim((string) ($baseSerialized['key'] ?? ''));
+                $sortable = $baseKey !== '' ? ($sortableMap[$baseKey] ?? null) : null;
 
                 if (is_array($sortable)) {
-                    $serialized['sortable'] = (bool) ($sortable['enabled'] ?? false);
-                    $serialized['sortColumns'] = is_array($sortable['columns'] ?? null) ? $sortable['columns'] : [];
+                    $baseSerialized['sortable'] = (bool) ($sortable['enabled'] ?? false);
+                    $baseSerialized['sortColumns'] = is_array($sortable['columns'] ?? null) ? $sortable['columns'] : [];
                 }
 
-                $multiSortable = $key !== '' ? ($multiSortableMap[$key] ?? null) : null;
+                $multiSortable = $baseKey !== '' ? ($multiSortableMap[$baseKey] ?? null) : null;
                 if (is_array($multiSortable)) {
-                    $serialized['multiSortable'] = (bool) ($multiSortable['enabled'] ?? false);
+                    $baseSerialized['multiSortable'] = (bool) ($multiSortable['enabled'] ?? false);
                 }
 
-                return $serialized;
+                if ($column->isLanguage() && count($languageExpansionLocales) > 1) {
+                    foreach ($languageExpansionLocales as $locale) {
+                        $localeCode = strtolower(trim((string) $locale));
+                        if ($localeCode === '') {
+                            continue;
+                        }
+
+                        $expanded = $baseSerialized;
+                        $expanded['key'] = ($baseKey !== '' ? $baseKey : 'column').'__'.$localeCode;
+                        $expanded['label'] = $this->buildExpandedLanguageColumnLabel(
+                            (string) ($baseSerialized['label'] ?? $baseKey),
+                            $localeCode,
+                            $languageLabels,
+                            $languageIcons
+                        );
+                        $expanded['icon'] = $languageIcons[$localeCode] ?? null;
+                        $expanded['sortable'] = false;
+                        $expanded['multiSortable'] = false;
+                        $expanded['sortColumns'] = [];
+                        $expanded['languageLocale'] = $localeCode;
+                        $serializedColumns[] = $expanded;
+                    }
+
+                    continue;
+                }
+
+                $serializedColumns[] = $baseSerialized;
+                continue;
             }
 
             if (is_array($column)) {
@@ -4163,11 +4481,14 @@ class TableBuilder
                     $serialized['multiSortable'] = (bool) ($multiSortable['enabled'] ?? false);
                 }
 
-                return $serialized;
+                $serializedColumns[] = $serialized;
+                continue;
             }
 
             throw new \InvalidArgumentException('Invalid column definition.');
-        }, $this->columnObjects);
+        }
+
+        return $serializedColumns;
     }
 
     protected function resolveBulkMode(): ?string
@@ -4254,6 +4575,31 @@ class TableBuilder
             ]);
     }
 
+    protected function buildDndHeaderCell(): TableHead
+    {
+        return TableHead::make()->appearance($this->dndColumnAppearance());
+    }
+
+    protected function buildDndCell(): TableCell
+    {
+        return TableCell::make()
+            ->appearance($this->dndColumnAppearance())
+            ->children([
+                Button::make()
+                    ->variant('ghost')
+                    ->size('icon-sm')
+                    ->prop('type', 'button')
+                    ->prop('data-table-dnd-handle', '1')
+                    ->prop('data-column-select-ignore', 'always')
+                    ->icon(
+                        Icon::make('lucide:grip-vertical')
+                            ->appearance([
+                                'class' => 'h-4 w-4 cursor-grab active:cursor-grabbing text-slate-400',
+                            ])
+                    ),
+            ]);
+    }
+
     protected function selectionColumnAppearance(): array
     {
         return [
@@ -4266,6 +4612,14 @@ class TableBuilder
         return [
             'width' => '24px',
             'class' => 'cursor-pointer select-none text-center text-slate-400',
+        ];
+    }
+
+    protected function dndColumnAppearance(): array
+    {
+        return [
+            'style' => 'width:49px;min-width:49px;max-width:49px;',
+            'class' => 'text-center select-none',
         ];
     }
 
@@ -4356,11 +4710,19 @@ class TableBuilder
     protected function buildHeader(bool $hasActions, ?string $bulkMode, ?string $numberingMode): TableHeader
     {
         $heads = [];
+        $dndEnabled = $this->isDndActive();
         $sortableMap = $this->resolveSortableColumnsMap();
         $multiSortableMap = $this->resolveMultiSortableColumnsMap($sortableMap);
         $multiSortingEnabled = $this->hasEnabledMultiSortableColumns($multiSortableMap);
+        $languageExpansionLocales = $this->resolveLanguageColumnExpansionLocales();
+        $languageLabels = $this->resolveTableLanguageLabelsByLocale();
+        $languageIcons = $this->resolveTableLanguageIconsByLocale();
         $globalHeaderAppearance = $this->headerAppearanceProps['appearance'] ?? [];
         $globalHeaderAppearance = is_array($globalHeaderAppearance) ? $globalHeaderAppearance : [];
+
+        if ($dndEnabled) {
+            $heads[] = $this->buildDndHeaderCell();
+        }
 
         if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
             $heads[] = $this->buildRowMultiSelectHeaderCell();
@@ -4375,6 +4737,44 @@ class TableBuilder
         }
 
         foreach ($this->columnObjects as $column) {
+            if ($column instanceof Column && $column->isLanguage() && count($languageExpansionLocales) > 1) {
+                $baseHeadProps = $column->toHeaderProps();
+                $baseKey = trim((string) ($baseHeadProps['key'] ?? $column->getKey()));
+                $baseLabel = (string) ($baseHeadProps['label'] ?? ucfirst($baseKey));
+
+                foreach ($languageExpansionLocales as $locale) {
+                    $localeCode = strtolower(trim((string) $locale));
+                    if ($localeCode === '') {
+                        continue;
+                    }
+
+                    $headProps = $baseHeadProps;
+                    $headProps['key'] = ($baseKey !== '' ? $baseKey : 'column').'__'.$localeCode;
+                    $headProps['sortKey'] = $baseKey !== '' ? $baseKey : $headProps['key'];
+                    $headProps['label'] = $this->buildExpandedLanguageColumnLabel($baseLabel, $localeCode, $languageLabels, $languageIcons);
+                    $headProps['icon'] = $languageIcons[$localeCode] ?? null;
+                    $headProps['sortable'] = false;
+                    $headProps['sortColumns'] = [];
+                    $headProps['multiSortable'] = false;
+                    $headProps['multiSortingEnabled'] = $multiSortingEnabled;
+                    $headProps['languageLocale'] = $localeCode;
+
+                    if (! empty($globalHeaderAppearance)) {
+                        $columnHeaderAppearance = $headProps['appearance'] ?? [];
+                        $columnHeaderAppearance = is_array($columnHeaderAppearance) ? $columnHeaderAppearance : [];
+
+                        $headProps['appearance'] = [
+                            ...$globalHeaderAppearance,
+                            ...$columnHeaderAppearance,
+                        ];
+                    }
+
+                    $heads[] = TableHead::make()->props($headProps);
+                }
+
+                continue;
+            }
+
             if ($column instanceof Column) {
                 $headProps = $column->toHeaderProps();
             } elseif (is_array($column)) {
@@ -4450,6 +4850,12 @@ class TableBuilder
         if ($this->shouldRenderInlineFilters()) {
             $filterHeads = [];
 
+            if ($dndEnabled) {
+                $filterHeads[] = TableHead::make()
+                    ->appearance($this->dndColumnAppearance())
+                    ->prop('class', 'py-2');
+            }
+
             if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
                 $filterHeads[] = TableHead::make()
                     ->appearance($this->rowMultiSelectColumnAppearance())
@@ -4467,6 +4873,19 @@ class TableBuilder
             }
 
             foreach ($this->columnObjects as $column) {
+                if ($column instanceof Column && $column->isLanguage() && count($languageExpansionLocales) > 1) {
+                    foreach ($languageExpansionLocales as $locale) {
+                        $localeCode = strtolower(trim((string) $locale));
+                        if ($localeCode === '') {
+                            continue;
+                        }
+
+                        $filterHeads[] = TableHead::make()->prop('class', 'py-2');
+                    }
+
+                    continue;
+                }
+
                 if (! $column instanceof Column) {
                     $filterHeads[] = TableHead::make()->prop('class', 'py-2');
                     continue;
@@ -4530,7 +4949,11 @@ class TableBuilder
 
     protected function resolveBodyColspan(?string $bulkMode, ?string $numberingMode, bool $hasActions): int
     {
-        $columnsCount = count($this->columnObjects);
+        $columnsCount = $this->resolveRenderableColumnsCount();
+
+        if ($this->isDndActive()) {
+            $columnsCount++;
+        }
 
         if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
             $columnsCount++;
@@ -4564,8 +4987,19 @@ class TableBuilder
     {
         $data = $model->toArray();
         $data['_model'] = get_class($model);
+        $rowKey = trim((string) $model->getKey());
+        if ($rowKey === '') {
+            $rowKey = (string) ($data['id'] ?? $data['uuid'] ?? uniqid('row_', true));
+        }
+        $tableLanguage = $this->resolveTableLanguageSelector();
+        $languageExpansionLocales = $this->resolveLanguageColumnExpansionLocales();
+        $dndEnabled = $this->isDndActive();
 
         $cells = [];
+
+        if ($dndEnabled) {
+            $cells[] = $this->buildDndCell();
+        }
 
         if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
             $cells[] = $this->buildRowMultiSelectCell($data);
@@ -4580,14 +5014,33 @@ class TableBuilder
         }
 
         foreach ($this->columnObjects as $column) {
-            $cells[] = $this->buildCell($column, $data);
+            if ($column instanceof Column && $column->isLanguage() && count($languageExpansionLocales) > 1) {
+                foreach ($languageExpansionLocales as $locale) {
+                    $localeCode = strtolower(trim((string) $locale));
+                    if ($localeCode === '') {
+                        continue;
+                    }
+
+                    $cells[] = $this->buildCell($column, $data, $localeCode, $tableLanguage);
+                }
+
+                continue;
+            }
+
+            if (! $column instanceof Column) {
+                continue;
+            }
+
+            $cells[] = $this->buildCell($column, $data, null, $tableLanguage);
         }
 
         if (! empty($resolvedActions)) {
             $cells[] = $this->buildActionsCell($data, $resolvedActions);
         }
 
-        return TableRow::make()->children($cells);
+        return TableRow::make()
+            ->prop('data-row-key', $rowKey)
+            ->children($cells);
     }
 
     protected function buildActionsCell(array $row, array $resolvedActions): TableCell
@@ -4634,17 +5087,42 @@ class TableBuilder
             ->children($components);
     }
 
-    protected function buildCell(Column $column, array $row): TableCell
+    protected function buildCell(Column $column, array $row, ?string $languageLocale = null, ?array $tableLanguage = null): TableCell
     {
-        $value = $column->resolveState($row);
+        if ($tableLanguage === null) {
+            $tableLanguage = $this->resolveTableLanguageSelector();
+        }
+
+        $stackLocales = $this->resolveLanguageStackLocales($column, $tableLanguage, $languageLocale);
+
+        if ($stackLocales !== []) {
+            return $this->buildStackedLanguageCell($column, $row, $stackLocales, $tableLanguage);
+        }
+
+        if ($column->isLanguage() && is_string($languageLocale) && trim($languageLocale) !== '') {
+            $localizedValue = $column->resolveLanguageValueForLocale($row, $languageLocale);
+            $value = $localizedValue !== null ? $localizedValue : $column->resolveState($row);
+        } else {
+            $value = $column->resolveState($row);
+        }
         $displayValue = $this->normalizeCellValue($value);
         $isPlaceholder = $column->wasPlaceholderApplied();
 
         $cell = TableCell::make();
         $bodyAppearance = $column->getBodyAppearance();
+        $dndField = $this->resolveDndField();
+        $columnWidth = $column->getWidth();
 
         if (is_array($bodyAppearance) && ! empty($bodyAppearance)) {
             $cell->appearance($bodyAppearance);
+        }
+
+        if ($columnWidth !== null && $columnWidth !== '') {
+            $cell->prop('width', $columnWidth);
+        }
+
+        if ($dndField !== null && $column->getKey() === $dndField) {
+            $cell->prop('data-table-dnd-position-cell', '1');
         }
 
         if ($isPlaceholder) {
@@ -4676,8 +5154,97 @@ class TableBuilder
             }
         }
 
+        if ($column->getValueDisplayType() === 'icon') {
+            $icon = $this->buildIconCellValue($value, $displayValue, $isPlaceholder);
+
+            if ($icon !== null) {
+                return $cell->children([$icon]);
+            }
+        }
+
         return $cell->children([
             Text::make($displayValue),
+        ]);
+    }
+
+    protected function resolveLanguageStackLocales(Column $column, ?array $tableLanguage, ?string $languageLocale): array
+    {
+        if (! $column->isLanguage()) {
+            return [];
+        }
+
+        if ($languageLocale !== null && trim($languageLocale) !== '') {
+            return [];
+        }
+
+        if (! is_array($tableLanguage)) {
+            return [];
+        }
+
+        $isMulti = $this->toBoolean($tableLanguage['multi'] ?? false, false);
+        $layout = strtolower(trim((string) ($tableLanguage['layout'] ?? 'stack')));
+        if (! $isMulti || $layout !== 'stack') {
+            return [];
+        }
+
+        $values = is_array($tableLanguage['values'] ?? null) ? $tableLanguage['values'] : [];
+        $locales = [];
+
+        foreach ($values as $value) {
+            $locale = strtolower(trim((string) $value));
+            if ($locale === '' || in_array($locale, $locales, true)) {
+                continue;
+            }
+
+            $locales[] = $locale;
+        }
+
+        return count($locales) > 1 ? $locales : [];
+    }
+
+    protected function buildStackedLanguageCell(Column $column, array $row, array $locales, ?array $tableLanguage = null): TableCell
+    {
+        $cell = TableCell::make();
+        $bodyAppearance = $column->getBodyAppearance();
+
+        if (is_array($bodyAppearance) && ! empty($bodyAppearance)) {
+            $cell->appearance($bodyAppearance);
+        }
+
+        $labels = $this->resolveTableLanguageLabelsByLocale($tableLanguage);
+        $icons = $this->resolveTableLanguageIconsByLocale($tableLanguage);
+        $lines = [];
+
+        foreach ($locales as $locale) {
+            $value = $column->resolveLanguageValueForLocale($row, $locale);
+            if ($value === null || trim($value) === '') {
+                continue;
+            }
+
+            $localeLabel = $labels[$locale] ?? strtoupper($locale);
+            $localeIcon = $icons[$locale] ?? null;
+
+            if (is_string($localeIcon) && trim($localeIcon) !== '') {
+                $lines[] = Block::make()
+                    ->appearance('flex items-center gap-2')
+                    ->children([
+                        Icon::make($localeIcon)->appearance('size-4'),
+                        Text::make($value)->appearance('text-sm'),
+                    ]);
+                continue;
+            }
+
+            $lines[] = Text::make("{$localeLabel}: {$value}")->appearance('text-sm');
+        }
+
+        if ($lines === []) {
+            return $cell->children([Text::make('')]);
+        }
+
+        return $cell->children([
+            Block::make()
+                ->appearance('grid gap-1')
+                ->children($lines),
         ]);
     }
 
@@ -4737,6 +5304,27 @@ class TableBuilder
         }
 
         return null;
+    }
+
+    protected function buildIconCellValue(mixed $value, string $displayValue, bool $isPlaceholder): ?Icon
+    {
+        if ($isPlaceholder) {
+            return null;
+        }
+
+        $candidate = '';
+
+        if (is_string($value)) {
+            $candidate = trim($value);
+        } elseif ($displayValue !== '') {
+            $candidate = trim($displayValue);
+        }
+
+        if ($candidate === '') {
+            return null;
+        }
+
+        return Icon::make($candidate);
     }
 
     protected function normalizeCellValue(mixed $value): string
@@ -5425,6 +6013,12 @@ class TableBuilder
         }
 
         $cells = [];
+        $dndEnabled = $this->isDndActive();
+        $languageExpansionLocales = $this->resolveLanguageColumnExpansionLocales();
+
+        if ($dndEnabled) {
+            $cells[] = TableCell::make()->appearance($this->dndColumnAppearance());
+        }
 
         if ($this->shouldRenderRowMultiSelectColumn($bulkMode)) {
             $cells[] = TableCell::make()->appearance($this->rowMultiSelectColumnAppearance());
@@ -5441,6 +6035,19 @@ class TableBuilder
         foreach ($this->columnObjects as $column) {
             if (! $column instanceof Column) {
                 $cells[] = TableCell::make();
+                continue;
+            }
+
+            if ($column->isLanguage() && count($languageExpansionLocales) > 1) {
+                foreach ($languageExpansionLocales as $locale) {
+                    $localeCode = strtolower(trim((string) $locale));
+                    if ($localeCode === '') {
+                        continue;
+                    }
+
+                    $cells[] = TableCell::make();
+                }
+
                 continue;
             }
 
@@ -5466,6 +6073,23 @@ class TableBuilder
         return TableFooter::make()->children([
             TableRow::make()->children($cells),
         ]);
+    }
+
+    protected function resolveRenderableColumnsCount(): int
+    {
+        $count = 0;
+        $languageExpansionLocales = $this->resolveLanguageColumnExpansionLocales();
+
+        foreach ($this->columnObjects as $column) {
+            if ($column instanceof Column && $column->isLanguage() && count($languageExpansionLocales) > 1) {
+                $count += count($languageExpansionLocales);
+                continue;
+            }
+
+            $count++;
+        }
+
+        return max(1, $count);
     }
 
     public function build(LengthAwarePaginator $paginator): Table
@@ -5512,6 +6136,10 @@ class TableBuilder
                 'icon' => 'lucide:inbox',
             ])
             ->prop('emptyCreateAction', $emptyCreateAction)
+            ->prop('emptyTopbar', [
+                'showTabs' => $this->showTabsOnEmpty,
+                'showCreate' => $this->showCreateOnEmpty,
+            ])
             ->prop('columns', $this->serializeColumns())
             ->children($tableChildren)
             ->actions($resolvedActions)
@@ -5537,6 +6165,8 @@ class TableBuilder
             ->prop('exported', $this->exported)
             ->prop('exportUrl', $this->exportUrl)
             ->prop('imported', $this->imported)
+            ->prop('dnd', $this->resolveDndConfig())
+            ->prop('tableLanguage', $this->resolveTableLanguageSelector())
             ->prop('multiSortingEnabled', $multiSortingEnabled)
             ->prop('rowSelectionColumn', $this->shouldRenderRowMultiSelectColumn($bulkMode))
             ->prop('hasActions', $hasActions)
@@ -5572,6 +6202,244 @@ class TableBuilder
         }
 
         return $table;
+    }
+
+    protected function resolveTableLanguageSelector(): ?array
+    {
+        if (! $this->hasLanguageColumns()) {
+            return null;
+        }
+
+        $rawLocales = [];
+        if (function_exists('locales')) {
+            try {
+                $rawLocales = (array) locales();
+            } catch (\Throwable) {
+                $rawLocales = [];
+            }
+        }
+        $options = [];
+
+        foreach ($rawLocales as $locale) {
+            if (! is_array($locale)) {
+                continue;
+            }
+
+            $value = strtolower(trim((string) ($locale['value'] ?? '')));
+            if ($value === '') {
+                continue;
+            }
+
+            $label = trim((string) ($locale['label'] ?? strtoupper($value)));
+            if ($label === '') {
+                $label = strtoupper($value);
+            }
+
+            $icon = null;
+            $localeIcon = $locale['icon'] ?? null;
+            if (is_array($localeIcon)) {
+                $iconValue = trim((string) ($localeIcon['value'] ?? ''));
+                if ($iconValue !== '') {
+                    $icon = $iconValue;
+                }
+            } elseif (is_string($localeIcon)) {
+                $iconValue = trim($localeIcon);
+                if ($iconValue !== '') {
+                    $icon = $iconValue;
+                }
+            }
+
+            $options[] = [
+                'value' => $value,
+                'label' => $label,
+                'icon' => $icon,
+            ];
+        }
+
+        if ($options === []) {
+            $fallback = strtolower(trim((string) app()->getLocale()));
+            if ($fallback !== '') {
+                $options[] = [
+                    'value' => $fallback,
+                    'label' => strtoupper($fallback),
+                ];
+            }
+        }
+
+        if ($options === []) {
+            return null;
+        }
+
+        $allowed = array_values(array_unique(array_map(
+            static fn (array $option): string => (string) ($option['value'] ?? ''),
+            $options
+        )));
+
+        $requestedRaw = strtolower(trim((string) request()->query('table_locale', '')));
+        $requestedValues = array_values(array_filter(array_map(
+            static fn (string $value): string => strtolower(trim($value)),
+            explode(',', $requestedRaw)
+        ), static fn (string $value): bool => $value !== ''));
+        $requestedValues = array_values(array_unique(array_filter(
+            $requestedValues,
+            static fn (string $value) => in_array($value, $allowed, true)
+        )));
+
+        $appLocale = strtolower(trim((string) app()->getLocale()));
+        $selected = $requestedValues !== []
+            ? $requestedValues
+            : [(in_array($appLocale, $allowed, true) ? $appLocale : ($allowed[0] ?? null))];
+        $selected = array_values(array_filter($selected, static fn ($item): bool => is_string($item) && trim($item) !== ''));
+
+        if ($selected === []) {
+            return null;
+        }
+
+        $multi = $this->toBoolean(request()->query('table_locale_multi'), false) || count($selected) > 1;
+        if (! $multi && count($selected) > 1) {
+            $selected = [$selected[0]];
+        }
+
+        $layout = strtolower(trim((string) request()->query('table_locale_layout', 'stack')));
+        if (! in_array($layout, ['stack', 'columns'], true)) {
+            $layout = 'stack';
+        }
+
+        return [
+            'enabled' => true,
+            'queryParam' => 'table_locale',
+            'multiQueryParam' => 'table_locale_multi',
+            'layoutQueryParam' => 'table_locale_layout',
+            'label' => __('Language'),
+            'value' => $selected[0] ?? null,
+            'values' => $selected,
+            'multi' => $multi,
+            'layout' => $layout,
+            'supportsMulti' => true,
+            'supportsLayout' => true,
+            'options' => $options,
+        ];
+    }
+
+    protected function resolveTableLanguageLabelsByLocale(?array $languageConfig = null): array
+    {
+        $languageConfig ??= $this->resolveTableLanguageSelector();
+        if (! is_array($languageConfig)) {
+            return [];
+        }
+
+        $options = is_array($languageConfig['options'] ?? null) ? $languageConfig['options'] : [];
+        $map = [];
+
+        foreach ($options as $option) {
+            if (! is_array($option)) {
+                continue;
+            }
+
+            $value = strtolower(trim((string) ($option['value'] ?? '')));
+            if ($value === '') {
+                continue;
+            }
+
+            $label = trim((string) ($option['label'] ?? strtoupper($value)));
+            $map[$value] = $label !== '' ? $label : strtoupper($value);
+        }
+
+        return $map;
+    }
+
+    protected function resolveTableLanguageIconsByLocale(?array $languageConfig = null): array
+    {
+        $languageConfig ??= $this->resolveTableLanguageSelector();
+        if (! is_array($languageConfig)) {
+            return [];
+        }
+
+        $options = is_array($languageConfig['options'] ?? null) ? $languageConfig['options'] : [];
+        $map = [];
+
+        foreach ($options as $option) {
+            if (! is_array($option)) {
+                continue;
+            }
+
+            $value = strtolower(trim((string) ($option['value'] ?? '')));
+            if ($value === '') {
+                continue;
+            }
+
+            $icon = trim((string) ($option['icon'] ?? ''));
+            if ($icon === '') {
+                continue;
+            }
+
+            $map[$value] = $icon;
+        }
+
+        return $map;
+    }
+
+    protected function resolveLanguageColumnExpansionLocales(?array $languageConfig = null): array
+    {
+        $languageConfig ??= $this->resolveTableLanguageSelector();
+        if (! is_array($languageConfig)) {
+            return [];
+        }
+
+        $multi = $this->toBoolean($languageConfig['multi'] ?? false, false);
+        $layout = strtolower(trim((string) ($languageConfig['layout'] ?? 'stack')));
+        if (! $multi || $layout !== 'columns') {
+            return [];
+        }
+
+        $values = is_array($languageConfig['values'] ?? null) ? $languageConfig['values'] : [];
+        $locales = [];
+
+        foreach ($values as $value) {
+            $locale = strtolower(trim((string) $value));
+            if ($locale === '' || in_array($locale, $locales, true)) {
+                continue;
+            }
+
+            $locales[] = $locale;
+        }
+
+        return count($locales) > 1 ? $locales : [];
+    }
+
+    protected function buildExpandedLanguageColumnLabel(
+        string $baseLabel,
+        string $locale,
+        array $languageLabels,
+        array $languageIcons = []
+    ): string
+    {
+        $normalizedBase = trim($baseLabel);
+        $localeCode = strtolower(trim($locale));
+        $localeLabel = $languageLabels[$localeCode] ?? strtoupper($localeCode);
+        $hasIcon = is_string($languageIcons[$localeCode] ?? null)
+            && trim((string) ($languageIcons[$localeCode] ?? '')) !== '';
+
+        if ($normalizedBase === '') {
+            return $localeLabel;
+        }
+
+        if ($hasIcon) {
+            return $normalizedBase;
+        }
+
+        return $normalizedBase.' ('.$localeLabel.')';
+    }
+
+    protected function hasLanguageColumns(): bool
+    {
+        foreach ($this->columnObjects as $column) {
+            if ($column instanceof Column && $column->isLanguage()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     protected function resolveTableIdentifier(): string

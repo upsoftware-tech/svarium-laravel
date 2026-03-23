@@ -1,12 +1,15 @@
 # Komponent `Repeater`
 
-`Repeater` służy do dodawania wielu pozycji jednego pola formularza i budowania powtarzalnych bloków danych.
+`Repeater` służy do budowania list powtarzalnych elementów formularza.
 
-Obsługuje 3 tryby:
+## Tryby renderowania
 
-- `table` - szablon renderowany w tabeli.
-- `key` - szybki tryb klucz/wartość (`Atrybut` / `Wartość`).
-- dowolny własny tryb - render bez tabeli i bez nagłówków (pełna swoboda layoutu).
+- `table` - wiersze w tabeli.
+- `key` - szybki tryb klucz/wartość.
+- `accordion` - elementy w akordeonie.
+- `grid` - elementy w siatce.
+- `flex` - elementy w układzie flex.
+- `custom` (lub dowolny inny) - pełna swoboda bez nagłówków tabeli.
 
 ## Podstawowe użycie
 
@@ -22,77 +25,135 @@ Repeater::make('technical')
     ]);
 ```
 
+## Modal dodawania/edycji
+
+```php
+Repeater::make('rooms_data')
+    ->mode('grid')
+    ->modal([
+        Input::make('name')->label(__('Name')),
+    ])
+    ->modalMaxWidth(1100)
+    ->template([
+        Input::make('name')->from('name'),
+    ]);
+```
+
+- `->modal(true)` - włącza modal z domyślnym template.
+- `->modal([...])` / `->modal(SomeForm::class)` - własny schema modala.
+- `->modalTemplate(...)` - jawny template modala.
+- `->modalMaxWidth(1100)` - maksymalna szerokość modala (px lub CSS string, np. `'72rem'`).
+- `->modalWidth(...)` - alias dla `modalMaxWidth`.
+
 ## API
 
-### `->showLabels(bool $enabled = true)`
-
-Włącza lub wyłącza nagłówki tabeli dla `mode('table')` i `mode('key')`.
+### Limity i stan pusty
 
 ```php
-->showLabels(false)
-```
-
-### `->max(int $count)`
-
-Skrót do `->maxItems(...)`. Ogranicza maksymalną liczbę wierszy.
-
-```php
-->max(10)
-```
-
-### `->empty(string $text)`
-
-Ustawia tekst pustego stanu, gdy repeater nie ma pozycji.
-
-```php
+->minItems(0)
+->maxItems(10)
+->max(10) // alias maxItems
 ->empty(__('Brak pozycji'))
 ```
 
-### `->searchable(bool $enabled = true)`
-
-Włącza wyszukiwarkę w repeaterze.
-
-Ważne:
-
-- działa tylko dla `mode('table')` i `mode('key')`,
-- dla pozostałych trybów wyszukiwarka nie jest renderowana.
+### Wyszukiwarka
 
 ```php
 ->searchable()
 ```
 
-## Tryb `key` (klucz/wartość)
+Wyszukiwarka działa dla `table`, `key`, `accordion`.
 
-Dla `mode('key')` domyślne etykiety to:
-
-- `Atrybut`
-- `Wartość`
+### Tabela i etykiety
 
 ```php
-Repeater::make('additional_configuration')
-    ->mode('key')
-    ->searchable()
-    ->max(10)
-    ->empty(__('Brak pozycji'));
+->showLabels(false)
+->labels(__('Atrybut'), __('Wartość'))
+->label(__('Kolumna 1'), __('Kolumna 2'), __('Kolumna 3')) // dla mode table
+->simple(true)
 ```
+
+### Separator
+
+```php
+->separator(true)
+->separatorTemplate()
+->separatorPosition('bottom') // top|bottom|both
+```
+
+### Styl karty elementu (tryby niestabelaryczne)
+
+```php
+->border('none')
+->padding(0)
+```
+
+To steruje stylem wrappera elementu repeatera (karty pojedynczego rekordu).
+
+### Akcje Edit/Delete
+
+```php
+->editLabel(__('Edytuj'))
+->editIcon('lucide:pencil')
+->editAppearance('text-sky-600 hover:text-sky-700')
+
+->deleteLabel(__('Usuń'))
+->deleteIcon('lucide:trash')
+->deleteAppearance('text-red-600 hover:text-red-700')
+```
+
+Wyłączenie labela:
+
+```php
+->editLabel(false)
+->deleteLabel(false)
+```
+
+Obsługiwane są też wartości `'none'` i pusty string.
+
+### Styl wrappera grupy akcji
+
+```php
+->actionAppearance('mt-2 rounded-md border border-slate-200 bg-slate-50 p-2 gap-2')
+```
+
+Styluje box otaczający przyciski akcji (Edit/Delete).
+
+### Styl stanu pustego
+
+```php
+->emptyAppearance('rounded-md border border-dashed border-red-200 bg-red-50 text-red-700 p-4')
+```
+
+## Aliasy kompatybilności
+
+Ze względu na zgodność wsteczną działają też aliasy z literówką:
+
+- `->editApperance(...)`
+- `->deleteApperance(...)`
+- `->actionApperance(...)`
+- `->emptyApperance(...)`
 
 ## Przykład pełny
 
 ```php
-Repeater::make('additional_configuration')
-    ->mode('table')
-    ->showLabels(false)
-    ->searchable()
-    ->max(10)
-    ->empty(__('Brak pozycji'))
+Repeater::make('rooms_data')
+    ->mode('grid')
+    ->cols(3)
+    ->modal([
+        Input::make('name')->label(__('Name')),
+        Input::make('area')->label(__('Area')),
+    ])
     ->template([
-        Input::make('key')->label(__('Atrybut')),
-        Input::make('value')->label(__('Wartość')),
-    ]);
+        Input::make('name')->from('name'),
+    ])
+    ->empty(__('No rooms added'))
+    ->emptyAppearance('rounded-md border border-dashed border-border p-4')
+    ->border('none')
+    ->padding(0)
+    ->editLabel(false)
+    ->deleteLabel(false)
+    ->editIcon('lucide:pencil')
+    ->deleteIcon('lucide:trash-2')
+    ->actionAppearance('mt-2 rounded-md border border-slate-200 bg-slate-50 p-2');
 ```
-
-## Uwagi
-
-- `->max(0)` oznacza brak limitu (jak w `maxItems`).
-- `->empty(...)` to alias na wewnętrzne ustawienie pustego stanu.
-- W trybach innych niż `table` i `key` repeater renderuje pozycje bez struktury tabeli.

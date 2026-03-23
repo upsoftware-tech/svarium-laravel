@@ -75,6 +75,9 @@ Przykład:
 - `auth.middleware` – lista middleware dla API.
 - `auth.custom_handler` – opcjonalny własny handler.
 
+Uwaga: `config('upsoftware.api.*')` ustawia globalne zachowanie API, ale endpointy CRUD dla modułów są włączane na poziomie resource (`Resource::api()`).
+Szczegóły: [CRUD API dla `Resource` + ReDoc/OpenAPI](./resource-api.md).
+
 ### `api.docs` (ReDoc + OpenAPI)
 
 - `api.docs.enabled` – włącza endpointy dokumentacji.
@@ -87,6 +90,33 @@ Przykład:
 - `api.docs.title` – opcjonalny tytuł dokumentacji.
 - `api.docs.version` – opcjonalna wersja API w OpenAPI.
 - `api.docs.server_url` – opcjonalny `servers[0].url` w spec.
+- `api.docs.tag_groups` – opcjonalne grupowanie tagów dla ReDoc (`x-tagGroups`), np.:
+
+```php
+'api' => [
+    'docs' => [
+        'tag_groups' => [
+            ['name' => 'MSIG API V2', 'tags' => ['Ogłoszenia', 'Pacjenci']],
+        ],
+    ],
+],
+```
+
+- `api.docs.tag_groups_include_ungrouped` – gdy `true`, tagi bez jawnej grupy trafiają do grupy fallback (domyślnie `false`).
+- `api.docs.ungrouped_tag_group_name` – nazwa grupy fallback dla nieprzypisanych tagów (domyślnie `Other`).
+
+Przykład: bez etykiety fallback dla nieprzypisanych tagów + jedna grupa „Ustawienia”:
+
+```php
+'api' => [
+    'docs' => [
+        'tag_groups_include_ungrouped' => false,
+        'tag_groups' => [
+            ['name' => 'Ustawienia', 'tags' => ['System mailbox', 'System mail templates']],
+        ],
+    ],
+],
+```
 
 Przykład:
 

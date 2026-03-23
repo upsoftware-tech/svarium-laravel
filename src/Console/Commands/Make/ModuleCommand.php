@@ -16,13 +16,14 @@ use Upsoftware\Svarium\Services\NavigationService;
 
 class ModuleCommand extends CoreCommand
 {
-    protected $signature = 'svarium:make.module {name?}';
+    protected $signature = 'svarium:make.module {name?} {--api : Enable API in generated Resource (sets protected static bool $api = true)}';
     protected $description = 'Create a new Svarium module';
     protected $descriptionKey = 'make.module';
     protected string $menuMethod = '';
     protected string $entryView = 'table';
     protected string $resourceMode = 'crud';
     protected bool $pageAcceptsPost = false;
+    protected bool $enableApi = false;
     /**
      * @var array{create: bool, preview: bool, edit: bool, duplicate: bool, delete: bool}
      */
@@ -61,6 +62,7 @@ class ModuleCommand extends CoreCommand
         $this->pageAcceptsPost = $this->resolvePageAcceptsPost();
         $this->resourceMode = $this->resolveResourceMode();
         $this->resourceActions = $this->resolveResourceActions($this->resourceMode);
+        $this->enableApi = $this->resolveEnableApi();
         $this->menuMethod = $this->buildMenuMethod($name, $this->resolveMenuConfig($name));
         $base = svarium_path("Modules/{$name}");
 
@@ -70,6 +72,7 @@ class ModuleCommand extends CoreCommand
         if ($this->entryView === 'table') {
             $this->createModelClass($name, $base);
             $this->createResourceClass($name, $base);
+            $this->createResourceOperations($name, $base);
             $this->createTableClass($name, $base);
             $this->createFormClass($name, $base);
         }
@@ -343,6 +346,61 @@ class ModuleCommand extends CoreCommand
         File::put($base."/Forms/{$name}Form.php", $this->renderStub('svarium.module.form.php.stub', $name));
     }
 
+    protected function createResourceOperations(string $name, string $base): void
+    {
+        $operationsDirectory = $base.'/Panel/Operations';
+        File::makeDirectory($operationsDirectory, 0755, true, true);
+
+        $namespace = "App\\Svarium\\Modules\\{$name}\\Panel\\Operations";
+            $definitions = [
+            ['key' => 'list', 'class' => "{$name}ListOperation", 'base' => 'ResourceListOperation', 'enabled' => true],
+            ['key' => 'create', 'class' => "{$name}CreateOperation", 'base' => 'ResourceCreateOperation', 'enabled' => $this->resourceActionEnabled('create')],
+            ['key' => 'preview', 'class' => "{$name}PreviewOperation", 'base' => 'ResourcePreviewOperation', 'enabled' => $this->resourceActionEnabled('preview')],
+            ['key' => 'edit', 'class' => "{$name}EditOperation", 'base' => 'ResourceEditOperation', 'enabled' => $this->resourceActionEnabled('edit')],
+            ['key' => 'duplicate', 'class' => "{$name}DuplicateOperation", 'base' => 'ResourceDuplicateOperation', 'enabled' => $this->resourceActionEnabled('duplicate')],
+            ['key' => 'delete', 'class' => "{$name}DeleteOperation", 'base' => 'ResourceDeleteOperation', 'enabled' => $this->resourceActionEnabled('delete')],
+        ];
+
+        foreach ($definitions as $definition) {
+            if (! (bool) ($definition['enabled'] ?? false)) {
+                continue;
+            }
+
+            $className = (string) ($definition['class'] ?? '');
+            $baseClassName = (string) ($definition['base'] ?? '');
+
+            if ($className === '' || $baseClassName === '') {
+                continue;
+            }
+
+                $targetPath = $operationsDirectory."/{$className}.php";
+
+                File::put(
+                    $targetPath,
+                    $this->renderOperationStub($namespace, $className, $baseClassName)
+                );
+            }
+        }
+
+    protected function renderOperationStub(
+        string $namespace,
+        string $className,
+        string $baseOperationClass
+    ): string {
+        return <<<PHP
+<?php
+
+namespace {$namespace};
+
+use Upsoftware\\Svarium\\Panel\\Resource\\Operations\\{$baseOperationClass};
+
+class {$className} extends {$baseOperationClass}
+{
+}
+
+PHP;
+    }
+
     protected function renderStub(string $stubFile, string $name): string
     {
         $path = $this->stubPath($stubFile);
@@ -363,6 +421,7 @@ class ModuleCommand extends CoreCommand
             '{{TableDefaultActionsMode}}' => $this->buildTableDefaultActionsMode(),
             '{{TableHeaderCreateAction}}' => $this->buildTableHeaderCreateAction(),
             '{{TableRowActions}}' => $this->buildTableRowActions(),
+            '{{ResourceApiProperty}}' => $this->enableApi ? "\n    protected static bool \$api = true;\n" : '',
             '{{MenuMethod}}' => $this->menuMethod !== '' ? $this->menuMethod : $this->buildMenuMethod($name, [
                 'enabled' => true,
                 'with_submenu' => true,
@@ -516,6 +575,23 @@ class ModuleCommand extends CoreCommand
             ],
             'crud'
         );
+    }
+
+    protected function resolveEnableApi(): bool
+    {
+        if ($this->entryView !== 'table') {
+            return false;
+        }
+
+        if ((bool) $this->option('api')) {
+            return true;
+        }
+
+        if (! $this->input->isInteractive()) {
+            return false;
+        }
+
+        return (bool) confirm('Czy włączyć API w module (Resource::$api = true)?', false, 'Tak', 'Nie');
     }
 
     /**

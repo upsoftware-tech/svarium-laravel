@@ -134,6 +134,48 @@ Debug pokazuje m.in.:
 
 To ułatwia diagnozę sytuacji, gdy pole sterujące zmienia wartość, ale komponent nadal się nie pokazuje.
 
+## Select zależny od innego pola
+
+Dla scenariusza `country_id -> region_id` użyj `dependsOn(...)` na drugim polu.
+
+Jeśli pole korzysta z `optionsModel(...)`, to przy `dependsOn(...)` Select automatycznie przełącza się w tryb server-side (endpoint formularzowy), więc nie ładuje całej tabeli do przeglądarki.
+
+```php
+use App\Models\Country;
+use App\Models\Region;
+use Upsoftware\Svarium\UI\Components\Form\Select;
+
+Select::make('country_id')
+    ->optionsModel(Country::class, 'id', 'name')
+    ->label(__('Country'))
+    ->required();
+
+Select::make('region_id')
+    ->label(__('Region'))
+    ->optionsModel(Region::class, 'id', 'name')
+    ->dependsOn('country_id', 'country_id') // pole formularza, kolumna w tabeli regionów
+    ->searchable()
+    ->required();
+```
+
+Domyślnie:
+
+- gdy `country_id` jest puste, lista `region_id` jest pusta,
+- po zmianie kraju aktualnie wybrany region jest czyszczony, jeśli nie pasuje do nowego kraju.
+- Select dociąga tylko rekordy potrzebne dla aktualnego filtra (backend), a nie wszystkie.
+
+Konfiguracja endpointu:
+
+```php
+'form' => [
+    'select_options' => [
+        'path' => 'svarium/form/options/model',
+        'middleware' => ['auth'],
+        'limit' => 200,
+    ],
+],
+```
+
 ## Przykład pełny
 
 ```php

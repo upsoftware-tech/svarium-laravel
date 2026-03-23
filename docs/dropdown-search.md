@@ -33,6 +33,9 @@ DropdownSearch::make(?string $name = '')
     ->iconPosition(string $position = 'left') // left|right|end
     ->counter(bool $enabled = true)
     ->counterPosition(string $position = 'right') // left|right|end
+    ->triggerIcon(?string $icon = 'lucide:plus')
+    ->showTriggerIcon(bool $enabled = true)
+    ->hideTriggerIcon(bool $hidden = true)
     ->counterPosution(string $position = 'right'); // alias (literówka, kompatybilność)
 ```
 
@@ -127,6 +130,24 @@ Przykłady:
 
 - parametr 1: placeholder
 - parametr 2: minimalna liczba opcji, od której pokazuje się pole wyszukiwania
+
+## Ikona triggera
+
+Domyślnie przycisk ma ikonę `lucide:plus`.
+
+Wyłączenie:
+
+```php
+->showTriggerIcon(false)
+// lub:
+->hideTriggerIcon()
+```
+
+Zmiana ikony:
+
+```php
+->triggerIcon('lucide:filter')
+```
 
 ## Kompletny przykład
 

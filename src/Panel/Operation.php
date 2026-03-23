@@ -96,6 +96,24 @@ abstract class Operation
     }
 
     /**
+     * Optional OpenAPI summary override used by `svarium:api.docs`.
+     * Applies to this operation class when route-level docs are not provided.
+     */
+    public static function apiSummary(): ?string
+    {
+        return null;
+    }
+
+    /**
+     * Optional OpenAPI description override used by `svarium:api.docs`.
+     * Applies to this operation class when route-level docs are not provided.
+     */
+    public static function apiDescription(): ?string
+    {
+        return null;
+    }
+
+    /**
      * Optional dedicated API handler.
      *
      * Return one of:

@@ -40,6 +40,21 @@ return [
             'version' => null,
             // Optional explicit server URL in OpenAPI.
             'server_url' => null,
+            // Optional static ReDoc tag groups (x-tagGroups).
+            // Example:
+            // [
+            //   ['name' => 'MSIG API V2', 'tags' => ['Ogłoszenia', 'Pacjenci']],
+            // ]
+            'tag_groups' => [],
+            // Keep tags without explicit group visible in ReDoc under fallback group.
+            'tag_groups_include_ungrouped' => false,
+            // Fallback group name for ungrouped tags.
+            'ungrouped_tag_group_name' => 'Other',
+            // ReDoc rendering options (passed to Redoc.init).
+            'redoc' => [
+                // Show field-level "Example" for object schemas (request/response bodies).
+                'showObjectSchemaExamples' => true,
+            ],
         ],
     ],
     'table' => [
@@ -79,6 +94,14 @@ return [
             'label' => false,
             'position' => 'left',
         ],
+        'select_options' => [
+            // Endpoint used by Select::optionsModel() in remote mode (dependsOn / large dictionaries).
+            'path' => 'svarium/form/options/model',
+            // Middleware for endpoint above.
+            'middleware' => ['auth'],
+            // Max number of options returned in one request.
+            'limit' => 200,
+        ],
     ],
     'resource' => [
         // Layout wrapper used to render form tab content in Resource create/edit screens.
@@ -88,7 +111,10 @@ return [
                 'position' => 'left',
                 'variant' => 'simple',
                 'title' => true,
-                'card' => true,
+                // null|default|card|cards|tabs
+                'view' => null,
+                // Backward compatibility fallback for old projects.
+                'card' => false,
                 'validation_error_icon' => [
                     'enabled' => false,
                     'icon' => 'lucide:circle-alert',
@@ -175,6 +201,17 @@ return [
             'auth/reset/*',
             'auth/register',
             'auth/register/*',
+        ],
+    ],
+    'navigation' => [
+        'per_role' => [
+            // Auto-select navigation by active role when navigation_id is not provided explicitly.
+            // Map keys: role_key, name_locale, translated role name, id or id:{role_id}.
+            'enabled' => true,
+            'map' => [
+                // 'superadmin' => 'main_menu',
+                // 'id:2' => 'accounting_menu',
+            ],
         ],
     ],
     'lang' => [
@@ -479,6 +516,10 @@ return [
             'menu_enabled' => true,
             // Navigation key consumed by SidebarUser component.
             'menu_navigation_id' => 'sidebar_user',
+            // Enable role switcher in user dropdown.
+            'roles_enabled' => true,
+            // Show role switch debug payload in SidebarUser dropdown (session + panel + role ids).
+            'debug_role' => false,
         ],
     ],
     'modules' => [
@@ -496,6 +537,7 @@ return [
             'system_mail_templates' => true,
             'languages' => true,
             'translation' => true,
+            'menu_manager' => true,
             'subscriptions' => true,
         ],
         'placements' => [
@@ -563,6 +605,14 @@ return [
                 'path_ids' => ['system'],
                 'order' => 70,
                 'icon' => '',
+                'group_icon' => 'lucide:sliders',
+            ],
+            'menu_manager' => [
+                'target' => 'main_menu',
+                'path' => ['System setting'],
+                'path_ids' => ['system'],
+                'order' => 75,
+                'icon' => 'lucide:menu-square',
                 'group_icon' => 'lucide:sliders',
             ],
             'subscriptions' => [

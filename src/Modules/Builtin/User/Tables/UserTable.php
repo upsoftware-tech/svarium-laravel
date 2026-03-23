@@ -58,6 +58,7 @@ class UserTable
         if (method_exists(static::newModel(), 'roles')) {
             $columns[] = Column::make('roles')
                 ->label(svarium_label('modules.role.plural', __('Roles')))
+                ->action('edit')
                 ->state(static function (array $row): string {
                     $roles = data_get($row, 'roles', []);
 

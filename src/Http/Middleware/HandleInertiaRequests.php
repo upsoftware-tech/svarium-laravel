@@ -6,7 +6,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Database\Eloquent\Model;
 use Inertia\Middleware;
-use Inertia\Inertia;
 use Throwable;
 use Upsoftware\Svarium\Models\Navigation;
 use Upsoftware\Svarium\Models\Setting;
@@ -23,8 +22,9 @@ class HandleInertiaRequests extends Middleware
             : null;
 
         return array_merge(parent::share($request), [
+            'csrf_token' => fn () => csrf_token(),
             'locale' => session()->has('locale') ? session()->get('locale') : app()->getLocale(),
-            'locales' => Inertia::once(fn () => locales()),
+            'locales' => fn () => locales(),
             'debug' => [
                 'form' => (bool) config('upsoftware.debug.form', false),
             ],

@@ -15,6 +15,31 @@ abstract class Resource
     protected static string $model;
     protected static ?string $slug = null;
 
+    /**
+     * Enable automatic CRUD API registration for this resource.
+     *
+     * Supported values:
+     * - false (default): API disabled for this resource.
+     * - true: register standard CRUD endpoints under "{api.prefix}/{slug}".
+     * - array:
+     *   [
+     *     'enabled' => true,
+     *     'uri' => 'custom-endpoint',
+     *     'prefix' => true, // prepend upsoftware.api.prefix
+     *     'middleware' => ['auth:sanctum'], // optional override
+     *     'only' => ['index', 'show'], // optional
+     *     'except' => ['delete'], // optional
+     *   ]
+     *
+     * Alternative hard switch in resource class:
+     * - protected static bool $api = true;  // force enable with defaults
+     * - protected static bool $api = false; // force disable (overrides api())
+     */
+    public static function api(): bool|array
+    {
+        return false;
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Metadata
@@ -203,6 +228,11 @@ abstract class Resource
         return $this->canList($context);
     }
 
+    public function canSort(PanelContext $context): bool
+    {
+        return $this->canList($context);
+    }
+
     public function import(PanelContext $context, array $files, TableBuilder $builder): mixed
     {
         /** @var ResourceImportService $importer */
@@ -308,7 +338,8 @@ abstract class Resource
                 'position' => 'left',
                 'variant' => 'simple',
                 'title' => true,
-                'card' => true,
+                'view' => null,
+                'card' => false,
                 'defaults' => [],
                 'validation_error_icon' => [
                     'enabled' => false,
@@ -347,6 +378,7 @@ abstract class Resource
             || array_key_exists('variant', $config)
             || array_key_exists('title', $config)
             || array_key_exists('card', $config)
+            || array_key_exists('view', $config)
         ) {
             $config['tab'] = array_filter([
                 'position' => $config['position'] ?? ($context instanceof PanelContext
@@ -354,10 +386,11 @@ abstract class Resource
                     : 'top'),
                 'variant' => $config['variant'] ?? 'default',
                 'title' => $config['title'] ?? true,
-                'card' => $config['card'] ?? true,
+                'view' => $config['view'] ?? null,
+                'card' => $config['card'] ?? false,
             ], static fn ($value) => $value !== null);
 
-            unset($config['position'], $config['variant'], $config['title'], $config['card']);
+            unset($config['position'], $config['variant'], $config['title'], $config['view'], $config['card']);
         }
 
         if (! isset($config['tab']) || ! is_array($config['tab'])) {

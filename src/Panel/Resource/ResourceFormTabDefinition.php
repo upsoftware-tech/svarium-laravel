@@ -16,6 +16,7 @@ abstract class ResourceFormTabDefinition
 {
     protected static string $key = '';
     protected static ?string $label = null;
+    protected static ?string $view = null;
     protected static ?string $title = null;
     protected static ?string $subtitle = null;
     protected static ?string $icon = null;
@@ -61,9 +62,14 @@ abstract class ResourceFormTabDefinition
             $tab->default();
         }
 
+        $view = static::resolveView($context, $record);
+        if ($view !== null) {
+            $tab->view($view);
+        }
+
         $schema = static::schema($context, $record);
         $cards = static::resolveCards($context, $record);
-        if ($cards !== []) {
+        if ($cards !== [] && ($view === null || $view === 'cards')) {
             $schema = static::mergeCardsIntoSchema($schema, $cards);
         }
 
@@ -92,9 +98,11 @@ abstract class ResourceFormTabDefinition
 
         $tab->visible(static::visible($context, $record));
 
-        $card = static::resolveCard($context, $record);
-        if ($card !== null) {
-            $tab->card($card);
+        if ($view === null) {
+            $card = static::resolveCard($context, $record);
+            if ($card !== null) {
+                $tab->card($card);
+            }
         }
 
         $widthContent = static::resolveWidthContent($context, $record);
@@ -228,6 +236,16 @@ abstract class ResourceFormTabDefinition
         return static::$card;
     }
 
+    protected static function resolveView(PanelContext $context, ?Model $record = null): ?string
+    {
+        $view = static::normalizeView(static::view($context, $record));
+        if ($view !== null) {
+            return $view;
+        }
+
+        return static::normalizeView(static::$view);
+    }
+
     protected static function resolveWidthContent(PanelContext $context, ?Model $record = null): string|int|float|null
     {
         $width = static::widthContent($context, $record);
@@ -322,6 +340,11 @@ abstract class ResourceFormTabDefinition
     protected static function label(PanelContext $context, ?Model $record = null): ?string
     {
         return static::$label;
+    }
+
+    protected static function view(PanelContext $context, ?Model $record = null): ?string
+    {
+        return static::$view;
     }
 
     protected static function title(PanelContext $context, ?Model $record = null): ?string
@@ -873,6 +896,26 @@ abstract class ResourceFormTabDefinition
         }
 
         return $default;
+    }
+
+    protected static function normalizeView(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if ($normalized === 'normal') {
+            return 'default';
+        }
+
+        return in_array($normalized, ['default', 'card', 'cards', 'tabs'], true)
+            ? $normalized
+            : null;
     }
 
     protected static function resolveFieldColSpan(

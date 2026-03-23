@@ -26,10 +26,12 @@ Ten dokument opisuje wszystkie komendy Artisan rejestrowane przez paczkę `svari
 | `svarium:permission.sync` | Synchronizuje permissiony Svarium z zasobów i operation. |
 | `svarium:role.module` | Przypisuje/odbiera wszystkie permissiony wskazanego modułu do roli. |
 | `svarium:user.add` | Dodaje użytkownika, przypisuje rolę i tenanty. |
+| `svarium:user.reset` | Resetuje hasło użytkownika po ID lub e-mailu (z opcją losowego hasła). |
 | `svarium:user.access` | Przypisuje/odbiera użytkownikowi role lub bezpośrednie uprawnienia. |
 | `svarium:diagnose.database.connection` | Diagnozuje połączenie DB dla wybranego modelu (`upsoftware.models`). |
 | `svarium:auth.socials.install` | Konfigurator logowania social (Google/Facebook/Apple itd.). |
 | `svarium:make.resource` | Generator zasobu (resource). |
+| `svarium:make.model` | Generator modelu (globalnie lub w module), opcjonalnie z migracją i stubami CRUD operation. |
 | `svarium:make.module` | Generator modułu. |
 | `svarium:make.notification` | Generator Notification (globalnie lub w module). |
 | `svarium:make.layout` | Generator klasy layoutu. |
@@ -262,6 +264,9 @@ php artisan svarium:route:list --json
 ### `svarium:api.docs`
 
 Generuje specyfikację OpenAPI na podstawie aktualnie zarejestrowanych tras API i zapisuje ją do pliku konfigurowanego w `upsoftware.api.docs.storage_path`.
+
+Aby do specyfikacji trafiły automatyczne endpointy CRUD z resource, włącz API w klasie resource przez `public static function api(): bool|array`.
+Szczegóły: [CRUD API dla `Resource` + ReDoc/OpenAPI](./resource-api.md).
 
 Po wygenerowaniu komenda pokazuje:
 
@@ -649,6 +654,43 @@ php artisan svarium:user.add --email="anna@example.com" --role=1 --tenant=tenant
 php artisan svarium:user.add --email="user@example.com" --password="haslo1234"
 ```
 
+### `svarium:user.reset`
+
+Resetuje hasło istniejącego użytkownika wskazanego przez:
+
+- `ID` użytkownika, albo
+- adres `email`.
+
+Flow interaktywny (bez flag):
+
+1. `Wpisz adres e-mail lub ID użytkownika`
+2. `Wpisz nowe hasło lub zostaw puste jako losowe`
+
+Zasady:
+
+- hasło ręczne musi mieć minimum 8 znaków,
+- jeśli hasło zostanie pozostawione puste, komenda wygeneruje losowe hasło i pokaże je w konsoli,
+- przy zapisie hasła aktualizowany jest także `remember_token` (jeśli kolumna istnieje).
+
+Składnia:
+
+```bash
+php artisan svarium:user.reset {--user=} {--password=} {--random-password}
+```
+
+Przykłady:
+
+```bash
+# interaktywnie
+php artisan svarium:user.reset
+
+# reset po ID z hasłem podanym jawnie
+php artisan svarium:user.reset --user=1 --password="NoweHaslo123"
+
+# reset po e-mail z hasłem losowym
+php artisan svarium:user.reset --user="jan@example.com" --random-password
+```
+
 ### `svarium:user.access`
 
 Przypisuje albo odbiera użytkownikowi:
@@ -746,14 +788,65 @@ Przykład:
 php artisan svarium:make.resource Pages
 ```
 
-### `svarium:make.module`
+### `svarium:make.model`
 
-Generator modułu (module/resource/model/table/form/operation/translations/menu).
+Tworzy model:
+- globalnie w `app/Models`, albo
+- w module `app/Svarium/Modules/{Module}/Models`.
+
+Dodatkowo może:
+- utworzyć migrację (`--migration`),
+- wygenerować stubs CRUD operation w module (`--operations`):
+  - `{Model}ListOperation`
+  - `{Model}CreateOperation`
+  - `{Model}EditOperation`
+  - `{Model}DeleteOperation`
+  - lokalizacja: `app/Svarium/Modules/{Module}/Panel/Operations`
+- włączyć API w module (`--api`) przez dopisanie:
+  - `protected static bool $api = true;`
+  - w pliku: `app/Svarium/Modules/{Module}/Panel/{Module}Resource.php`
 
 Składnia:
 
 ```bash
-php artisan svarium:make.module {name?}
+php artisan svarium:make.model {name?} {--module=} {--migration} {--operations} {--api}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:make.model Country
+php artisan svarium:make.model Country --module=Location --migration
+php artisan svarium:make.model Country --module=Location --migration --operations
+php artisan svarium:make.model Country --module=Location --api
+```
+
+### `svarium:make.module`
+
+Generator modułu (module/resource/model/table/form/operation/translations/menu).
+
+Dla modułu z widokiem tabeli komenda pyta interaktywnie:
+
+- `Czy włączyć API w module (Resource::$api = true)?`
+
+Możesz też wymusić to flagą CLI `--api` (bez pytania).
+
+Dodatkowo generator tworzy klasy `Operations` w:
+
+- `app/Svarium/Modules/{Module}/Panel/Operations`
+
+Zakres tworzonych klas zależy od trybu zasobu:
+
+- pełny CRUD: `List`, `Create`, `Preview`, `Edit`, `Duplicate`, `Delete`
+- tryb wybranych akcji: zawsze `List` + tylko zaznaczone akcje
+
+Każda klasa dziedziczy po bazowej klasie z paczki `Upsoftware\\Svarium\\Panel\\Resource\\Operations\\*`
+i ma podpięty `setResource({Module}Resource::class)`.
+
+Składnia:
+
+```bash
+php artisan svarium:make.module {name?} {--api}
 ```
 
 Przykłady:
@@ -761,6 +854,7 @@ Przykłady:
 ```bash
 php artisan svarium:make.module Patient
 php artisan svarium:make.module
+php artisan svarium:make.module Patient --api
 ```
 
 ### `svarium:make.notification`

@@ -51,6 +51,100 @@ abstract class FieldComponent extends Component
         return $this;
     }
 
+    public function default(mixed $value): static
+    {
+        $this->value($value);
+
+        return $this->apiDefault($value);
+    }
+
+    public function apiDefault(mixed $value): static
+    {
+        return $this->prop('apiDefault', $value);
+    }
+
+    public function example(mixed $value): static
+    {
+        return $this->apiExample($value);
+    }
+
+    public function apiExample(mixed $value): static
+    {
+        return $this->prop('apiExample', $value);
+    }
+
+    public function apiFormat(string $format): static
+    {
+        $normalized = trim($format);
+
+        return $this->prop('apiFormat', $normalized);
+    }
+
+    public function schemaFormat(string $format): static
+    {
+        return $this->apiFormat($format);
+    }
+
+    public function apiMinimum(int|float $value): static
+    {
+        return $this->prop('apiMinimum', $value);
+    }
+
+    public function apiMaximum(int|float $value): static
+    {
+        return $this->prop('apiMaximum', $value);
+    }
+
+    public function apiMinLength(int $value): static
+    {
+        return $this->prop('apiMinLength', max(0, $value));
+    }
+
+    public function apiMaxLength(int $value): static
+    {
+        return $this->prop('apiMaxLength', max(0, $value));
+    }
+
+    public function apiMinItems(int $value): static
+    {
+        return $this->prop('apiMinItems', max(0, $value));
+    }
+
+    public function apiMaxItems(int $value): static
+    {
+        return $this->prop('apiMaxItems', max(0, $value));
+    }
+
+    public function apiPattern(string $pattern): static
+    {
+        return $this->prop('apiPattern', trim($pattern));
+    }
+
+    public function apiEnum(array $values): static
+    {
+        return $this->prop('apiEnum', array_values($values));
+    }
+
+    public function apiOptions(array $options): static
+    {
+        return $this->prop('apiOptions', $options);
+    }
+
+    public function options(array $options): static
+    {
+        return $this->apiOptions($options);
+    }
+
+    public function possibleOptions(array $options): static
+    {
+        return $this->apiOptions($options);
+    }
+
+    public function description(string $description): static
+    {
+        return $this->prop('description', $description);
+    }
+
     public function label(string $label): static
     {
         $this->label = $label;

@@ -2,10 +2,24 @@
 
 namespace Upsoftware\Svarium\Services\Api;
 
+use Illuminate\Http\Request;
 use Illuminate\Routing\Route as LaravelRoute;
+use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use RuntimeException;
+use Upsoftware\Svarium\Panel\OperationRegistry;
+use Upsoftware\Svarium\Panel\Panel;
+use Upsoftware\Svarium\Panel\PanelContext;
+use Upsoftware\Svarium\Panel\Resource;
+use Upsoftware\Svarium\Panel\Resource\Operations\ResourceCreateOperation;
+use Upsoftware\Svarium\Panel\Resource\Operations\ResourceDeleteOperation;
+use Upsoftware\Svarium\Panel\Resource\Operations\ResourceEditOperation;
+use Upsoftware\Svarium\Panel\Resource\Operations\ResourceListOperation;
+use Upsoftware\Svarium\Panel\Resource\ResourceFormTab;
+use Upsoftware\Svarium\UI\Component;
+use Upsoftware\Svarium\UI\Components\FieldComponent;
+use Upsoftware\Svarium\UI\Components\Table\Column;
 
 class OpenApiGenerator
 {
@@ -45,7 +59,9 @@ class OpenApiGenerator
         }
         unset($operations);
 
-        return [
+        $tagGroups = $this->resolveTagGroups($paths);
+
+        $spec = [
             'openapi' => '3.0.3',
             'info' => [
                 'title' => $this->title(),
@@ -66,6 +82,12 @@ class OpenApiGenerator
                 ],
             ],
         ];
+
+        if ($tagGroups !== []) {
+            $spec['x-tagGroups'] = $tagGroups;
+        }
+
+        return $spec;
     }
 
     public function generateAndStore(?string $targetPath = null, bool $pretty = true): string
@@ -132,24 +154,40 @@ class OpenApiGenerator
      */
     protected function buildOperation(LaravelRoute $route, string $method, string $path, string $prefix): array
     {
+        $resolvedDefinition = $this->resolveSvariumApiDefinition($method, $path);
+        $resolvedMeta = is_array($resolvedDefinition['meta'] ?? null) ? $resolvedDefinition['meta'] : [];
+        $operationClass = is_string($resolvedDefinition['operation'] ?? null)
+            ? (string) $resolvedDefinition['operation']
+            : (string) ($resolvedMeta['operation'] ?? '');
+        $operationDocs = is_array($resolvedMeta['api_docs'] ?? null) ? $resolvedMeta['api_docs'] : [];
+        $operationClassDocs = $this->resolveOperationClassDocs($operationClass);
+
         $parameters = $this->pathParameters($path);
+        $parameters = array_merge($parameters, $this->resourceQueryParameters($resolvedMeta, $operationClass));
+        $parameters = $this->applyOperationParameterDocs($parameters, $operationDocs);
         $middleware = array_values(array_filter(array_map('strval', $route->gatherMiddleware())));
         $requiresAuth = $this->requiresAuth($middleware);
-        $tag = $this->tagForPath($path, $prefix);
+        $tag = $this->tagForPath($path, $prefix, $resolvedMeta);
 
-        $responses = [
-            '200' => [
-                'description' => 'Success',
-            ],
-        ];
+        $responses = $this->resourceResponses($resolvedMeta, $operationClass);
+        if ($responses === []) {
+            $responses = [
+                '200' => [
+                    'description' => 'Success',
+                ],
+            ];
+        }
 
         if ($requiresAuth) {
             $responses['401'] = ['description' => 'Unauthorized'];
             $responses['403'] = ['description' => 'Forbidden'];
         }
 
-        return [
-            'summary' => $this->summary($route, $method, $path),
+        $responses = $this->applyOperationResponseDocs($responses, $operationDocs);
+        $responses = $this->ensureResponseContent($responses, $resolvedMeta, $operationClass);
+
+        $operation = [
+            'summary' => $this->summary($route, $method, $path, $resolvedMeta),
             'operationId' => $this->operationId($route, $method, $path),
             'tags' => [$tag],
             'parameters' => $parameters,
@@ -161,6 +199,1502 @@ class OpenApiGenerator
                 'middleware' => $middleware,
             ],
         ];
+
+        $operationDescription = trim((string) ($operationClassDocs['description'] ?? ''));
+        if ($operationDescription !== '') {
+            $operation['description'] = $operationDescription;
+        }
+
+        $operationSummary = trim((string) ($operationClassDocs['summary'] ?? ''));
+        if ($operationSummary !== '') {
+            $operation['summary'] = $operationSummary;
+        }
+
+        // Explicit docs from Resource::api()['docs'] have highest priority.
+        $operationDescription = trim((string) ($operationDocs['description'] ?? ''));
+        if ($operationDescription !== '') {
+            $operation['description'] = $operationDescription;
+        }
+
+        $operationSummary = trim((string) ($operationDocs['summary'] ?? ''));
+        if ($operationSummary !== '') {
+            $operation['summary'] = $operationSummary;
+        }
+
+        $requestBody = $this->resourceRequestBody($resolvedMeta, $operationClass);
+        if (is_array($requestBody) && $requestBody !== []) {
+            $operation['requestBody'] = $requestBody;
+        }
+
+        if ($resolvedMeta !== []) {
+            $operation['x-svarium'] = [
+                'operation' => $operationClass !== '' ? $operationClass : null,
+                'resource' => $resolvedMeta['resource'] ?? null,
+                'resource_operation' => $resolvedMeta['api_resource_operation'] ?? null,
+                'group' => $resolvedMeta['api_group'] ?? null,
+            ];
+        }
+
+        return $operation;
+    }
+
+    /**
+     * @return array{summary: string, description: string}
+     */
+    protected function resolveOperationClassDocs(string $operationClass): array
+    {
+        if ($operationClass === '' || ! class_exists($operationClass)) {
+            return ['summary' => '', 'description' => ''];
+        }
+
+        $summary = '';
+        $description = '';
+
+        if (method_exists($operationClass, 'apiSummary')) {
+            try {
+                $summary = trim((string) $operationClass::apiSummary());
+            } catch (\Throwable) {
+                $summary = '';
+            }
+        }
+
+        if (method_exists($operationClass, 'apiDescription')) {
+            try {
+                $description = trim((string) $operationClass::apiDescription());
+            } catch (\Throwable) {
+                $description = '';
+            }
+        }
+
+        return [
+            'summary' => $summary,
+            'description' => $description,
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $parameters
+     * @param array<string, mixed> $operationDocs
+     * @return array<int, array<string, mixed>>
+     */
+    protected function applyOperationParameterDocs(array $parameters, array $operationDocs): array
+    {
+        $docs = is_array($operationDocs['parameters'] ?? null) ? $operationDocs['parameters'] : [];
+        if ($docs === []) {
+            return $parameters;
+        }
+
+        $mapped = [];
+        foreach ($parameters as $index => $parameter) {
+            $name = trim((string) ($parameter['name'] ?? ''));
+            if ($name !== '') {
+                $mapped[$name] = $index;
+            }
+        }
+
+        foreach ($docs as $key => $value) {
+            $paramName = is_string($key) ? trim($key) : '';
+            if ($paramName === '') {
+                continue;
+            }
+
+            $paramDoc = $this->normalizeOperationParameterDoc($value, $paramName);
+            if ($paramDoc === []) {
+                continue;
+            }
+
+            $targetIndex = $mapped[$paramName] ?? null;
+            if (! is_int($targetIndex)) {
+                $parameters[] = [
+                    'name' => $paramName,
+                    'in' => trim((string) ($paramDoc['in'] ?? 'query')) ?: 'query',
+                    'required' => (bool) ($paramDoc['required'] ?? false),
+                    'schema' => is_array($paramDoc['schema'] ?? null)
+                        ? $paramDoc['schema']
+                        : ['type' => trim((string) ($paramDoc['type'] ?? 'string')) ?: 'string'],
+                ];
+
+                $targetIndex = array_key_last($parameters);
+                if (! is_int($targetIndex)) {
+                    continue;
+                }
+            }
+
+            $description = trim((string) ($paramDoc['description'] ?? ''));
+            if ($description !== '') {
+                $parameters[$targetIndex]['description'] = $description;
+            }
+
+            if (array_key_exists('required', $paramDoc)) {
+                $parameters[$targetIndex]['required'] = (bool) $paramDoc['required'];
+            }
+
+            $schema = is_array($parameters[$targetIndex]['schema'] ?? null)
+                ? $parameters[$targetIndex]['schema']
+                : [];
+
+            if (is_array($paramDoc['schema'] ?? null)) {
+                $schema = array_merge($schema, (array) $paramDoc['schema']);
+            }
+
+            foreach (['type', 'format', 'default', 'example', 'enum', 'minimum', 'maximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern', 'x-enumDescriptions'] as $schemaKey) {
+                if (array_key_exists($schemaKey, $paramDoc)) {
+                    $schema[$schemaKey] = $paramDoc[$schemaKey];
+                }
+            }
+
+            if (is_array($paramDoc['options'] ?? null)) {
+                $normalizedOptions = $this->normalizeOpenApiEnumDefinitions((array) $paramDoc['options']);
+
+                if (($normalizedOptions['enum'] ?? []) !== []) {
+                    $schema['enum'] = $normalizedOptions['enum'];
+                }
+
+                if (($normalizedOptions['descriptions'] ?? []) !== []) {
+                    $schema['x-enumDescriptions'] = $normalizedOptions['descriptions'];
+                }
+            }
+
+            if (is_array($paramDoc['enumDescriptions'] ?? null)) {
+                $schema['x-enumDescriptions'] = (array) $paramDoc['enumDescriptions'];
+            }
+
+            if ($schema !== []) {
+                $parameters[$targetIndex]['schema'] = $schema;
+            }
+
+            if (array_key_exists('example', $paramDoc) && ! array_key_exists('example', $parameters[$targetIndex])) {
+                $parameters[$targetIndex]['example'] = $paramDoc['example'];
+            }
+
+            // ReDoc usually renders parameter-level "example" more reliably than schema-level example.
+            if (
+                ! array_key_exists('example', $parameters[$targetIndex])
+                && is_array($parameters[$targetIndex]['schema'] ?? null)
+                && array_key_exists('example', $parameters[$targetIndex]['schema'])
+            ) {
+                $parameters[$targetIndex]['example'] = $parameters[$targetIndex]['schema']['example'];
+            }
+
+            if (
+                array_key_exists('example', $parameters[$targetIndex])
+                && ! array_key_exists('examples', $parameters[$targetIndex])
+            ) {
+                $parameters[$targetIndex]['examples'] = [
+                    $paramName => [
+                        'value' => $parameters[$targetIndex]['example'],
+                    ],
+                ];
+            }
+        }
+
+        return $parameters;
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $responses
+     * @param array<string, mixed> $operationDocs
+     * @return array<string, array<string, mixed>>
+     */
+    protected function applyOperationResponseDocs(array $responses, array $operationDocs): array
+    {
+        $docs = is_array($operationDocs['responses'] ?? null) ? $operationDocs['responses'] : [];
+        if ($docs === []) {
+            return $responses;
+        }
+
+        foreach ($docs as $status => $doc) {
+            $statusKey = trim((string) $status);
+            if ($statusKey === '') {
+                continue;
+            }
+
+            $normalized = $this->normalizeOperationResponseDoc($doc);
+            if ($normalized === []) {
+                continue;
+            }
+
+            $current = is_array($responses[$statusKey] ?? null) ? $responses[$statusKey] : [];
+
+            if (array_key_exists('description', $normalized)) {
+                $current['description'] = (string) $normalized['description'];
+            }
+
+            if (is_array($normalized['content'] ?? null)) {
+                $existingContent = is_array($current['content'] ?? null) ? $current['content'] : [];
+                $current['content'] = array_replace_recursive($existingContent, (array) $normalized['content']);
+            }
+
+            foreach (['headers', 'links'] as $key) {
+                if (is_array($normalized[$key] ?? null)) {
+                    $existing = is_array($current[$key] ?? null) ? $current[$key] : [];
+                    $current[$key] = array_replace_recursive($existing, (array) $normalized[$key]);
+                }
+            }
+
+            $responses[$statusKey] = $current;
+        }
+
+        return $responses;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function normalizeOperationResponseDoc(mixed $value): array
+    {
+        if (is_string($value)) {
+            $description = trim($value);
+
+            return $description !== '' ? ['description' => $description] : [];
+        }
+
+        if (is_array($value)) {
+            return $value;
+        }
+
+        return [];
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $responses
+     * @param array<string, mixed> $meta
+     * @return array<string, array<string, mixed>>
+     */
+    protected function ensureResponseContent(array $responses, array $meta, string $operationClass): array
+    {
+        $resourceOperation = strtolower(trim((string) ($meta['api_resource_operation'] ?? '')));
+        $resourceClass = is_string($meta['resource'] ?? null) ? trim((string) $meta['resource']) : '';
+
+        foreach ($responses as $status => $response) {
+            $statusCode = trim((string) $status);
+            if (! preg_match('/^2\d\d$/', $statusCode)) {
+                continue;
+            }
+
+            if (! is_array($response)) {
+                $response = ['description' => 'Success'];
+            }
+
+            if (is_array($response['content'] ?? null) && $response['content'] !== []) {
+                $responses[$statusCode] = $response;
+                continue;
+            }
+
+            if ($resourceClass !== '') {
+                $response['content'] = $this->resourceResponseContent($resourceClass, $resourceOperation, $operationClass);
+            } else {
+                $response['content'] = [
+                    'application/json' => [
+                        'schema' => [
+                            'type' => 'object',
+                            'properties' => [
+                                'status' => ['type' => 'string', 'example' => 'ok'],
+                            ],
+                        ],
+                        'example' => [
+                            'status' => 'ok',
+                        ],
+                    ],
+                ];
+            }
+
+            $responses[$statusCode] = $response;
+        }
+
+        return $responses;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function resourceResponseContent(string $resourceClass, string $resourceOperation, string $operationClass): array
+    {
+        $item = $this->resourceItemSchemaAndExample($resourceClass);
+        $itemSchema = is_array($item['schema'] ?? null) ? $item['schema'] : ['type' => 'object'];
+        $itemExample = is_array($item['example'] ?? null) ? $item['example'] : [];
+
+        if ($operationClass === ResourceListOperation::class || $resourceOperation === 'index') {
+            return [
+                'application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'array',
+                                'items' => $itemSchema,
+                            ],
+                            'meta' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'page' => ['type' => 'integer', 'example' => 1],
+                                    'per_page' => ['type' => 'integer', 'example' => 20],
+                                    'total' => ['type' => 'integer', 'example' => 1],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'example' => [
+                        'data' => [$itemExample],
+                        'meta' => [
+                            'page' => 1,
+                            'per_page' => 20,
+                            'total' => 1,
+                        ],
+                    ],
+                ],
+            ];
+        }
+
+        if ($operationClass === ResourceDeleteOperation::class || $resourceOperation === 'delete') {
+            return [
+                'application/json' => [
+                    'schema' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'status' => ['type' => 'string', 'example' => 'deleted'],
+                        ],
+                    ],
+                    'example' => [
+                        'status' => 'deleted',
+                    ],
+                ],
+            ];
+        }
+
+        return [
+            'application/json' => [
+                'schema' => $itemSchema,
+                'example' => $itemExample,
+            ],
+        ];
+    }
+
+    /**
+     * @return array{schema: array<string, mixed>, example: array<string, mixed>}
+     */
+    protected function resourceItemSchemaAndExample(string $resourceClass): array
+    {
+        $fields = $this->resolveResourceFieldDefinitions($resourceClass, 'update');
+        if ($fields === []) {
+            $fields = $this->resolveResourceFieldDefinitions($resourceClass, 'create');
+        }
+
+        $properties = [
+            'id' => [
+                'type' => 'integer',
+                'example' => 1,
+            ],
+        ];
+
+        $required = ['id'];
+        $example = ['id' => 1];
+
+        foreach ($fields as $field) {
+            $name = trim((string) ($field['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+
+            $schema = $this->openApiSchemaForField($field);
+            $properties[$name] = $schema;
+
+            if (($field['required'] ?? false) === true && ($field['nullable'] ?? false) !== true) {
+                $required[] = $name;
+            }
+
+            $example[$name] = $this->exampleForSchema($schema);
+        }
+
+        $schema = [
+            'type' => 'object',
+            'properties' => $properties,
+            'required' => array_values(array_unique($required)),
+        ];
+
+        return [
+            'schema' => $schema,
+            'example' => $example,
+        ];
+    }
+
+    protected function exampleForSchema(array $schema): mixed
+    {
+        if (array_key_exists('example', $schema)) {
+            return $schema['example'];
+        }
+
+        if (array_key_exists('default', $schema)) {
+            return $schema['default'];
+        }
+
+        if (is_array($schema['enum'] ?? null) && $schema['enum'] !== []) {
+            return array_values((array) $schema['enum'])[0];
+        }
+
+        $type = strtolower(trim((string) ($schema['type'] ?? 'string')));
+
+        return match ($type) {
+            'integer' => 1,
+            'number' => 1.0,
+            'boolean' => true,
+            'array' => [],
+            'object' => [],
+            default => 'example',
+        };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function normalizeOperationParameterDoc(mixed $value, string $parameterName): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if ($value instanceof FieldComponent || $value instanceof Column) {
+            $serialized = $value->toArray();
+            $props = is_array($serialized['props'] ?? null) ? (array) $serialized['props'] : [];
+            $schema = $this->openApiSchemaFromComponentProps($props);
+
+            $description = trim((string) ($props['hint'] ?? $props['description'] ?? $value->getLabel() ?? ''));
+
+            $doc = [];
+            if ($description !== '') {
+                $doc['description'] = $description;
+            }
+
+            if ($schema !== []) {
+                $doc['schema'] = $schema;
+            }
+
+            if (array_key_exists('example', $schema)) {
+                $doc['example'] = $schema['example'];
+            }
+
+            if ($value instanceof FieldComponent && $value->hasRequiredRule()) {
+                $doc['required'] = true;
+            }
+
+            $name = trim((string) ($props['name'] ?? ''));
+            if ($name !== '' && $parameterName === '') {
+                $doc['name'] = $name;
+            }
+
+            return $doc;
+        }
+
+        $description = trim((string) $value);
+
+        return $description !== '' ? ['description' => $description] : [];
+    }
+
+    /**
+     * @param array<string, mixed> $props
+     * @return array<string, mixed>
+     */
+    protected function openApiSchemaFromComponentProps(array $props): array
+    {
+        $schema = [];
+
+        $type = trim((string) ($props['type'] ?? ''));
+        if ($type !== '') {
+            $schema['type'] = $type;
+        }
+
+        $format = trim((string) ($props['apiFormat'] ?? ''));
+        if ($format !== '') {
+            $schema['format'] = $format;
+        }
+
+        $map = [
+            'apiDefault' => 'default',
+            'apiExample' => 'example',
+            'default' => 'default',
+            'example' => 'example',
+            'apiMinimum' => 'minimum',
+            'apiMaximum' => 'maximum',
+            'apiMinLength' => 'minLength',
+            'apiMaxLength' => 'maxLength',
+            'apiMinItems' => 'minItems',
+            'apiMaxItems' => 'maxItems',
+            'apiPattern' => 'pattern',
+        ];
+
+        foreach ($map as $source => $target) {
+            if (array_key_exists($source, $props)) {
+                $schema[$target] = $props[$source];
+            }
+        }
+
+        if (is_array($props['apiEnum'] ?? null)) {
+            $schema['enum'] = array_values((array) $props['apiEnum']);
+        }
+
+        if (is_array($props['apiOptions'] ?? null)) {
+            $normalized = $this->normalizeOpenApiEnumDefinitions((array) $props['apiOptions']);
+            if (($normalized['enum'] ?? []) !== []) {
+                $schema['enum'] = $normalized['enum'];
+            }
+
+            if (($normalized['descriptions'] ?? []) !== []) {
+                $schema['x-enumDescriptions'] = $normalized['descriptions'];
+            }
+        }
+
+        if (is_array($props['options'] ?? null) && ! isset($schema['enum'])) {
+            $normalized = $this->normalizeOpenApiEnumDefinitions((array) $props['options']);
+            if (($normalized['enum'] ?? []) !== []) {
+                $schema['enum'] = $normalized['enum'];
+            }
+
+            if (($normalized['descriptions'] ?? []) !== []) {
+                $schema['x-enumDescriptions'] = $normalized['descriptions'];
+            }
+        }
+
+        return $schema;
+    }
+
+    /**
+     * @param array<int|string, mixed> $options
+     * @return array{enum: array<int, mixed>, descriptions: array<string, string>}
+     */
+    protected function normalizeOpenApiEnumDefinitions(array $options): array
+    {
+        $enum = [];
+        $seen = [];
+        $descriptions = [];
+
+        $append = function (mixed $value, ?string $description = null) use (&$enum, &$seen, &$descriptions): void {
+            if (! is_scalar($value) && $value !== null) {
+                return;
+            }
+
+            $key = json_encode($value);
+            if (! is_string($key)) {
+                return;
+            }
+
+            if (! isset($seen[$key])) {
+                $seen[$key] = true;
+                $enum[] = $value;
+            }
+
+            $description = trim((string) $description);
+            if ($description !== '') {
+                $descriptions[(string) $value] = $description;
+            }
+        };
+
+        $walk = function (array $items) use (&$walk, $append): void {
+            $isList = array_is_list($items);
+
+            foreach ($items as $optionValue => $option) {
+                if (is_array($option) && is_array($option['items'] ?? null)) {
+                    $walk((array) $option['items']);
+                    continue;
+                }
+
+                if (is_array($option)) {
+                    $resolvedValue = $option['value'] ?? $option['id'] ?? $option['key'] ?? null;
+                    if ($resolvedValue === null) {
+                        continue;
+                    }
+
+                    $description = $option['description'] ?? $option['label'] ?? $option['name'] ?? null;
+                    $append($resolvedValue, is_scalar($description) ? (string) $description : null);
+                    continue;
+                }
+
+                if (is_scalar($option) || $option === null) {
+                    if (! $isList) {
+                        $append($optionValue, is_scalar($option) ? (string) $option : null);
+                    } else {
+                        $append($option, null);
+                    }
+                }
+            }
+        };
+
+        $walk($options);
+
+        return [
+            'enum' => array_values($enum),
+            'descriptions' => $descriptions,
+        ];
+    }
+
+    /**
+     * @param array<string, array<string, array<string, mixed>>> $paths
+     * @return array<int, array{name: string, tags: array<int, string>}>
+     */
+    protected function resolveTagGroups(array $paths): array
+    {
+        $groups = [];
+        $allTags = [];
+
+        foreach ($paths as $operations) {
+            foreach ($operations as $operation) {
+                if (! is_array($operation)) {
+                    continue;
+                }
+
+                $tag = trim((string) (($operation['tags'][0] ?? '')));
+                if ($tag !== '') {
+                    $allTags[$tag] = true;
+                }
+            }
+        }
+
+        $configured = config('upsoftware.api.docs.tag_groups', []);
+        if (is_array($configured)) {
+            foreach ($configured as $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+
+                $name = trim((string) ($entry['name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+
+                $tags = [];
+                foreach ((array) ($entry['tags'] ?? []) as $tag) {
+                    $normalizedTag = trim((string) $tag);
+                    if ($normalizedTag !== '') {
+                        $tags[] = $normalizedTag;
+                    }
+                }
+
+                if ($tags === []) {
+                    continue;
+                }
+
+                if (! isset($groups[$name])) {
+                    $groups[$name] = [];
+                }
+
+                foreach ($tags as $tag) {
+                    if (! in_array($tag, $groups[$name], true)) {
+                        $groups[$name][] = $tag;
+                    }
+                }
+            }
+        }
+
+        foreach ($paths as $operations) {
+            foreach ($operations as $operation) {
+                if (! is_array($operation)) {
+                    continue;
+                }
+
+                $tag = trim((string) (($operation['tags'][0] ?? '')));
+                $group = trim((string) (($operation['x-svarium']['group'] ?? '')));
+
+                if ($tag === '' || $group === '') {
+                    continue;
+                }
+
+                if (! isset($groups[$group])) {
+                    $groups[$group] = [];
+                }
+
+                if (! in_array($tag, $groups[$group], true)) {
+                    $groups[$group][] = $tag;
+                }
+            }
+        }
+
+        $includeUngrouped = (bool) config('upsoftware.api.docs.tag_groups_include_ungrouped', true);
+        if ($includeUngrouped && $allTags !== []) {
+            $groupedTags = [];
+            foreach ($groups as $groupTags) {
+                foreach ((array) $groupTags as $tag) {
+                    $normalizedTag = trim((string) $tag);
+                    if ($normalizedTag !== '') {
+                        $groupedTags[$normalizedTag] = true;
+                    }
+                }
+            }
+
+            $ungroupedTags = [];
+            foreach (array_keys($allTags) as $tag) {
+                if (! isset($groupedTags[$tag])) {
+                    $ungroupedTags[] = $tag;
+                }
+            }
+
+            if ($ungroupedTags !== []) {
+                $ungroupedGroupName = trim((string) config('upsoftware.api.docs.ungrouped_tag_group_name', 'Other'));
+                if ($ungroupedGroupName === '') {
+                    $ungroupedGroupName = 'Other';
+                }
+
+                if (! isset($groups[$ungroupedGroupName])) {
+                    $groups[$ungroupedGroupName] = [];
+                }
+
+                foreach ($ungroupedTags as $tag) {
+                    if (! in_array($tag, $groups[$ungroupedGroupName], true)) {
+                        $groups[$ungroupedGroupName][] = $tag;
+                    }
+                }
+            }
+        }
+
+        $result = [];
+        foreach ($groups as $name => $tags) {
+            if (! is_string($name) || trim($name) === '' || ! is_array($tags) || $tags === []) {
+                continue;
+            }
+
+            $result[] = [
+                'name' => $name,
+                'tags' => array_values(array_unique(array_filter(array_map(
+                    static fn (mixed $tag): string => trim((string) $tag),
+                    $tags
+                ), static fn (string $tag): bool => $tag !== ''))),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function resolveSvariumApiDefinition(string $method, string $path): array
+    {
+        $uri = trim($path, '/');
+
+        if ($uri === '') {
+            return [];
+        }
+
+        try {
+            $resolved = app(OperationRegistry::class)->resolve('__api', strtoupper($method), $uri);
+
+            return is_array($resolved) ? $resolved : [];
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    protected function resourceQueryParameters(array $meta, string $operationClass): array
+    {
+        if (! is_string($meta['resource'] ?? null) || $meta['resource'] === '') {
+            return [];
+        }
+
+        $resourceOperation = strtolower(trim((string) ($meta['api_resource_operation'] ?? '')));
+
+        if ($operationClass !== ResourceListOperation::class && $resourceOperation !== 'index') {
+            return [];
+        }
+
+        return [
+            [
+                'name' => 'q',
+                'in' => 'query',
+                'required' => false,
+                'schema' => ['type' => 'string'],
+                'description' => 'Search phrase.',
+            ],
+            [
+                'name' => 'sort',
+                'in' => 'query',
+                'required' => false,
+                'schema' => ['type' => 'string'],
+                'description' => 'Sort directives, e.g. name,-created_at.',
+            ],
+            [
+                'name' => 'view',
+                'in' => 'query',
+                'required' => false,
+                'schema' => ['type' => 'string'],
+                'description' => 'Saved table view key.',
+            ],
+            [
+                'name' => 'per_page',
+                'in' => 'query',
+                'required' => false,
+                'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 500],
+                'description' => 'Items per page.',
+            ],
+            [
+                'name' => 'page',
+                'in' => 'query',
+                'required' => false,
+                'schema' => ['type' => 'integer', 'minimum' => 1],
+                'description' => 'Page number.',
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    protected function resourceRequestBody(array $meta, string $operationClass): ?array
+    {
+        $resourceClass = is_string($meta['resource'] ?? null) ? trim((string) $meta['resource']) : '';
+        if ($resourceClass === '') {
+            return null;
+        }
+
+        $resourceOperation = strtolower(trim((string) ($meta['api_resource_operation'] ?? '')));
+        $isCreate = $operationClass === ResourceCreateOperation::class || $resourceOperation === 'store';
+        $isUpdate = $operationClass === ResourceEditOperation::class || $resourceOperation === 'update';
+
+        if (! $isCreate && ! $isUpdate) {
+            return null;
+        }
+
+        $fields = $this->resolveResourceFieldDefinitions($resourceClass, $isCreate ? 'create' : 'update');
+        if ($fields === []) {
+            return null;
+        }
+
+        $properties = [];
+        $required = [];
+        $payloadExample = [];
+        $hasExplicitExample = false;
+
+        foreach ($fields as $field) {
+            $name = trim((string) ($field['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+
+            $schema = $this->openApiSchemaForField($field);
+            $properties[$name] = $schema;
+
+            if (array_key_exists('example', $schema)) {
+                $payloadExample[$name] = $schema['example'];
+                $hasExplicitExample = true;
+            } elseif (array_key_exists('default', $schema)) {
+                $payloadExample[$name] = $schema['default'];
+            }
+
+            if (($field['required'] ?? false) === true && ($field['nullable'] ?? false) !== true) {
+                $required[] = $name;
+            }
+        }
+
+        if ($properties === []) {
+            return null;
+        }
+
+        $requestSchema = [
+            'type' => 'object',
+            'properties' => $properties,
+        ];
+
+        if ($required !== []) {
+            $requestSchema['required'] = array_values(array_unique($required));
+        }
+
+        $content = [
+            'schema' => $requestSchema,
+        ];
+
+        // Redocly prioritizes media-type example over schema property examples.
+        // Keep property-level examples visible by emitting media example only
+        // when there are no explicit field examples.
+        if ($payloadExample !== [] && ! $hasExplicitExample) {
+            $content['example'] = $payloadExample;
+        }
+
+        return [
+            'required' => $isCreate,
+            'content' => [
+                'application/json' => $content,
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    protected function resolveResourceFieldDefinitions(string $resourceClass, string $mode): array
+    {
+        if (! class_exists($resourceClass) || ! is_subclass_of($resourceClass, Resource::class)) {
+            return [];
+        }
+
+        $resource = app($resourceClass);
+
+        if (! $resource instanceof Resource) {
+            return [];
+        }
+
+        $panel = Panel::make('api')->noPrefix();
+        $request = Request::create('/', 'GET');
+        $context = new PanelContext($panel, $request, []);
+
+        $record = null;
+        if ($mode === 'update') {
+            $modelClass = $resource::model();
+            if (is_string($modelClass) && class_exists($modelClass)) {
+                try {
+                    $instance = new $modelClass;
+                    if ($instance instanceof EloquentModel) {
+                        $record = $instance;
+                    }
+                } catch (\Throwable) {
+                    $record = null;
+                }
+            }
+        }
+
+        $schema = [];
+
+        if ($mode === 'create' && method_exists($resource, 'createForm')) {
+            $schema = (array) $resource->createForm();
+        } elseif ($mode === 'update' && method_exists($resource, 'editForm') && $record instanceof EloquentModel) {
+            $schema = (array) $resource->editForm($record);
+        }
+
+        if ($schema === []) {
+            $schema = (array) $resource->form($record instanceof EloquentModel ? $record : null);
+        }
+
+        $components = [];
+        foreach ($schema as $node) {
+            $components[] = $node;
+        }
+
+        $tabs = [];
+        if ($mode === 'create') {
+            $tabs = (array) $resource->createTabs($context);
+        } elseif ($record instanceof EloquentModel) {
+            $tabs = (array) $resource->editTabs($context, $record);
+        }
+
+        foreach ($tabs as $tab) {
+            if (! $tab instanceof ResourceFormTab) {
+                continue;
+            }
+
+            $tabSchema = $tab->resolveSchema($context, $record instanceof EloquentModel ? $record : null);
+            foreach ($tabSchema as $node) {
+                $components[] = $node;
+            }
+        }
+
+        $fields = [];
+        foreach ($this->collectFieldComponents($components) as $fieldComponent) {
+            $name = trim((string) $fieldComponent->getName());
+            if ($name === '') {
+                continue;
+            }
+
+            $fieldProps = [];
+            $serialized = $fieldComponent->toArray();
+            if (is_array($serialized['props'] ?? null)) {
+                $fieldProps = (array) $serialized['props'];
+            }
+
+            $rules = [];
+            foreach ($fieldComponent->getValidationRules() as $rule) {
+                if (is_string($rule)) {
+                    $normalized = trim($rule);
+                    if ($normalized !== '') {
+                        $rules[] = $normalized;
+                    }
+                }
+            }
+
+            $rules = array_values(array_unique($rules));
+            $label = trim((string) $fieldComponent->getLabel());
+            $type = trim((string) $fieldComponent->getProp('type', ''));
+            $language = (bool) $fieldComponent->getProp('language', false);
+            $description = trim((string) ($fieldProps['description'] ?? $fieldProps['hint'] ?? ''));
+            $apiFormat = trim((string) ($fieldComponent->getProp('apiFormat', $fieldProps['apiFormat'] ?? '')));
+            $apiPattern = trim((string) ($fieldComponent->getProp('apiPattern', $fieldProps['apiPattern'] ?? '')));
+            $apiDefaultConfigured = array_key_exists('apiDefault', $fieldProps) || array_key_exists('default', $fieldProps);
+            $apiDefault = $apiDefaultConfigured ? ($fieldProps['apiDefault'] ?? $fieldProps['default'] ?? null) : null;
+            $apiExampleConfigured = array_key_exists('apiExample', $fieldProps) || array_key_exists('example', $fieldProps);
+            $apiExample = $apiExampleConfigured ? ($fieldProps['apiExample'] ?? $fieldProps['example'] ?? null) : null;
+            $apiMinimumConfigured = array_key_exists('apiMinimum', $fieldProps) || $fieldComponent->getProp('apiMinimum', '__missing__') !== '__missing__';
+            $apiMaximumConfigured = array_key_exists('apiMaximum', $fieldProps) || $fieldComponent->getProp('apiMaximum', '__missing__') !== '__missing__';
+            $apiMinLengthConfigured = array_key_exists('apiMinLength', $fieldProps) || $fieldComponent->getProp('apiMinLength', '__missing__') !== '__missing__';
+            $apiMaxLengthConfigured = array_key_exists('apiMaxLength', $fieldProps) || $fieldComponent->getProp('apiMaxLength', '__missing__') !== '__missing__';
+            $apiMinItemsConfigured = array_key_exists('apiMinItems', $fieldProps) || $fieldComponent->getProp('apiMinItems', '__missing__') !== '__missing__';
+            $apiMaxItemsConfigured = array_key_exists('apiMaxItems', $fieldProps) || $fieldComponent->getProp('apiMaxItems', '__missing__') !== '__missing__';
+
+            $apiOptions = $fieldComponent->getProp('apiOptions', $fieldProps['apiOptions'] ?? null);
+            $apiEnum = $fieldComponent->getProp('apiEnum', $fieldProps['apiEnum'] ?? null);
+
+            $enumDefinition = $this->normalizeOpenApiEnumDefinitions(
+                is_array($apiOptions)
+                    ? (array) $apiOptions
+                    : (is_array($apiEnum) ? (array) $apiEnum : [])
+            );
+
+            if (($enumDefinition['enum'] ?? []) === [] && is_array($fieldProps['options'] ?? null)) {
+                $enumDefinition = $this->normalizeOpenApiEnumDefinitions((array) $fieldProps['options']);
+            }
+
+            $required = false;
+            $nullable = false;
+
+            foreach ($rules as $rule) {
+                $ruleName = strtolower((string) Str::before($rule, ':'));
+
+                if (preg_match('/^required(?::|_|$)/', $ruleName) === 1) {
+                    $required = true;
+                }
+
+                if ($ruleName === 'nullable') {
+                    $nullable = true;
+                }
+            }
+
+            if (isset($fields[$name])) {
+                $fields[$name]['rules'] = array_values(array_unique(array_merge($fields[$name]['rules'], $rules)));
+                $fields[$name]['required'] = (bool) ($fields[$name]['required'] || $required);
+                $fields[$name]['nullable'] = (bool) ($fields[$name]['nullable'] || $nullable);
+
+                if ($fields[$name]['label'] === '' && $label !== '') {
+                    $fields[$name]['label'] = $label;
+                }
+
+                if ($fields[$name]['description'] === '' && $description !== '') {
+                    $fields[$name]['description'] = $description;
+                }
+
+                if ($fields[$name]['type'] === '' && $type !== '') {
+                    $fields[$name]['type'] = $type;
+                }
+
+                $fields[$name]['language'] = (bool) ($fields[$name]['language'] || $language);
+
+                if ($fields[$name]['api_format'] === '' && $apiFormat !== '') {
+                    $fields[$name]['api_format'] = $apiFormat;
+                }
+
+                if ($fields[$name]['api_pattern'] === '' && $apiPattern !== '') {
+                    $fields[$name]['api_pattern'] = $apiPattern;
+                }
+
+                if (! $fields[$name]['api_default_configured'] && $apiDefaultConfigured) {
+                    $fields[$name]['api_default'] = $apiDefault;
+                    $fields[$name]['api_default_configured'] = true;
+                }
+
+                if (! $fields[$name]['api_example_configured'] && $apiExampleConfigured) {
+                    $fields[$name]['api_example'] = $apiExample;
+                    $fields[$name]['api_example_configured'] = true;
+                }
+
+                if (! $fields[$name]['api_minimum_configured'] && $apiMinimumConfigured) {
+                    $fields[$name]['api_minimum'] = $fieldComponent->getProp('apiMinimum', $fieldProps['apiMinimum'] ?? null);
+                    $fields[$name]['api_minimum_configured'] = true;
+                }
+
+                if (! $fields[$name]['api_maximum_configured'] && $apiMaximumConfigured) {
+                    $fields[$name]['api_maximum'] = $fieldComponent->getProp('apiMaximum', $fieldProps['apiMaximum'] ?? null);
+                    $fields[$name]['api_maximum_configured'] = true;
+                }
+
+                if (! $fields[$name]['api_min_length_configured'] && $apiMinLengthConfigured) {
+                    $fields[$name]['api_min_length'] = $fieldComponent->getProp('apiMinLength', $fieldProps['apiMinLength'] ?? null);
+                    $fields[$name]['api_min_length_configured'] = true;
+                }
+
+                if (! $fields[$name]['api_max_length_configured'] && $apiMaxLengthConfigured) {
+                    $fields[$name]['api_max_length'] = $fieldComponent->getProp('apiMaxLength', $fieldProps['apiMaxLength'] ?? null);
+                    $fields[$name]['api_max_length_configured'] = true;
+                }
+
+                if (! $fields[$name]['api_min_items_configured'] && $apiMinItemsConfigured) {
+                    $fields[$name]['api_min_items'] = $fieldComponent->getProp('apiMinItems', $fieldProps['apiMinItems'] ?? null);
+                    $fields[$name]['api_min_items_configured'] = true;
+                }
+
+                if (! $fields[$name]['api_max_items_configured'] && $apiMaxItemsConfigured) {
+                    $fields[$name]['api_max_items'] = $fieldComponent->getProp('apiMaxItems', $fieldProps['apiMaxItems'] ?? null);
+                    $fields[$name]['api_max_items_configured'] = true;
+                }
+
+                if (($fields[$name]['api_enum'] ?? []) === [] && ($enumDefinition['enum'] ?? []) !== []) {
+                    $fields[$name]['api_enum'] = $enumDefinition['enum'];
+                }
+
+                if (($fields[$name]['api_enum_descriptions'] ?? []) === [] && ($enumDefinition['descriptions'] ?? []) !== []) {
+                    $fields[$name]['api_enum_descriptions'] = $enumDefinition['descriptions'];
+                }
+                continue;
+            }
+
+            $fields[$name] = [
+                'name' => $name,
+                'label' => $label,
+                'description' => $description,
+                'type' => $type,
+                'rules' => $rules,
+                'required' => $required,
+                'nullable' => $nullable,
+                'language' => $language,
+                'api_format' => $apiFormat,
+                'api_pattern' => $apiPattern,
+                'api_default' => $apiDefault,
+                'api_default_configured' => $apiDefaultConfigured,
+                'api_example' => $apiExample,
+                'api_example_configured' => $apiExampleConfigured,
+                'api_minimum' => $apiMinimumConfigured ? $fieldComponent->getProp('apiMinimum', $fieldProps['apiMinimum'] ?? null) : null,
+                'api_minimum_configured' => $apiMinimumConfigured,
+                'api_maximum' => $apiMaximumConfigured ? $fieldComponent->getProp('apiMaximum', $fieldProps['apiMaximum'] ?? null) : null,
+                'api_maximum_configured' => $apiMaximumConfigured,
+                'api_min_length' => $apiMinLengthConfigured ? $fieldComponent->getProp('apiMinLength', $fieldProps['apiMinLength'] ?? null) : null,
+                'api_min_length_configured' => $apiMinLengthConfigured,
+                'api_max_length' => $apiMaxLengthConfigured ? $fieldComponent->getProp('apiMaxLength', $fieldProps['apiMaxLength'] ?? null) : null,
+                'api_max_length_configured' => $apiMaxLengthConfigured,
+                'api_min_items' => $apiMinItemsConfigured ? $fieldComponent->getProp('apiMinItems', $fieldProps['apiMinItems'] ?? null) : null,
+                'api_min_items_configured' => $apiMinItemsConfigured,
+                'api_max_items' => $apiMaxItemsConfigured ? $fieldComponent->getProp('apiMaxItems', $fieldProps['apiMaxItems'] ?? null) : null,
+                'api_max_items_configured' => $apiMaxItemsConfigured,
+                'api_enum' => ($enumDefinition['enum'] ?? []),
+                'api_enum_descriptions' => ($enumDefinition['descriptions'] ?? []),
+            ];
+        }
+
+        return $fields;
+    }
+
+    /**
+     * @param array<int, mixed> $nodes
+     * @return array<int, FieldComponent>
+     */
+    protected function collectFieldComponents(array $nodes): array
+    {
+        $collected = [];
+        $seen = [];
+
+        $walk = function (mixed $node) use (&$walk, &$collected, &$seen): void {
+            if ($node instanceof FieldComponent) {
+                $hash = spl_object_hash($node);
+                if (! isset($seen[$hash])) {
+                    $seen[$hash] = true;
+                    $collected[] = $node;
+                }
+            }
+
+            if ($node instanceof Component) {
+                foreach ($node->getChildrenComponents() as $child) {
+                    $walk($child);
+                }
+
+                foreach ($node->getSlotsComponents() as $slot) {
+                    $walk($slot);
+                }
+
+                return;
+            }
+
+            if (is_array($node)) {
+                foreach ($node as $entry) {
+                    $walk($entry);
+                }
+            }
+        };
+
+        foreach ($nodes as $node) {
+            $walk($node);
+        }
+
+        return $collected;
+    }
+
+    /**
+     * @param array<string, mixed> $field
+     * @return array<string, mixed>
+     */
+    protected function openApiSchemaForField(array $field): array
+    {
+        $language = (bool) ($field['language'] ?? false);
+        $rules = is_array($field['rules'] ?? null) ? $field['rules'] : [];
+        $componentType = strtolower(trim((string) ($field['type'] ?? '')));
+        $label = trim((string) ($field['label'] ?? ''));
+        $description = trim((string) ($field['description'] ?? ''));
+
+        if ($language) {
+            $schema = [
+                'type' => 'object',
+                'additionalProperties' => ['type' => 'string'],
+                'description' => $description !== ''
+                    ? $description
+                    : ($label !== '' ? $label : 'Localized field values by locale code.'),
+            ];
+
+            return $schema;
+        }
+
+        $type = 'string';
+        $format = null;
+        $enum = null;
+        $minLength = null;
+        $maxLength = null;
+        $minimum = null;
+        $maximum = null;
+        $minItems = null;
+        $maxItems = null;
+
+        if (in_array($componentType, ['number', 'range'], true)) {
+            $type = 'number';
+        } elseif ($componentType === 'date') {
+            $type = 'string';
+            $format = 'date';
+        } elseif ($componentType === 'datetime-local') {
+            $type = 'string';
+            $format = 'date-time';
+        } elseif ($componentType === 'email') {
+            $type = 'string';
+            $format = 'email';
+        }
+
+        foreach ($rules as $rule) {
+            $ruleName = strtolower(trim((string) Str::before($rule, ':')));
+            $ruleValue = trim((string) Str::after($rule, ':'));
+
+            if ($ruleName === 'integer') {
+                $type = 'integer';
+            } elseif (in_array($ruleName, ['numeric', 'decimal'], true)) {
+                $type = 'number';
+            } elseif ($ruleName === 'boolean') {
+                $type = 'boolean';
+            } elseif ($ruleName === 'array') {
+                $type = 'array';
+            } elseif ($ruleName === 'email') {
+                $type = 'string';
+                $format = 'email';
+            } elseif ($ruleName === 'date') {
+                $type = 'string';
+                if ($format === null) {
+                    $format = 'date';
+                }
+            } elseif ($ruleName === 'min' && is_numeric($ruleValue)) {
+                if ($type === 'string') {
+                    $minLength = (int) $ruleValue;
+                } elseif (in_array($type, ['number', 'integer'], true)) {
+                    $minimum = (float) $ruleValue;
+                } elseif ($type === 'array') {
+                    $minItems = (int) $ruleValue;
+                }
+            } elseif ($ruleName === 'max' && is_numeric($ruleValue)) {
+                if ($type === 'string') {
+                    $maxLength = (int) $ruleValue;
+                } elseif (in_array($type, ['number', 'integer'], true)) {
+                    $maximum = (float) $ruleValue;
+                } elseif ($type === 'array') {
+                    $maxItems = (int) $ruleValue;
+                }
+            } elseif ($ruleName === 'between' && $ruleValue !== '') {
+                $parts = array_values(array_filter(array_map(
+                    static fn (string $part): string => trim($part),
+                    explode(',', $ruleValue)
+                ), static fn (string $part): bool => $part !== ''));
+
+                if (count($parts) >= 2 && is_numeric($parts[0]) && is_numeric($parts[1])) {
+                    if ($type === 'string') {
+                        $minLength = (int) $parts[0];
+                        $maxLength = (int) $parts[1];
+                    } elseif (in_array($type, ['number', 'integer'], true)) {
+                        $minimum = (float) $parts[0];
+                        $maximum = (float) $parts[1];
+                    } elseif ($type === 'array') {
+                        $minItems = (int) $parts[0];
+                        $maxItems = (int) $parts[1];
+                    }
+                }
+            } elseif (in_array($ruleName, ['in', 'enum'], true) && $ruleValue !== '') {
+                $enum = array_values(array_filter(array_map(
+                    static fn (string $item): string => trim($item),
+                    explode(',', $ruleValue)
+                ), static fn (string $item): bool => $item !== ''));
+            }
+        }
+
+        if (is_array($field['api_enum'] ?? null) && $field['api_enum'] !== []) {
+            $enum = array_values((array) $field['api_enum']);
+        }
+
+        if (is_string($field['api_format'] ?? null)) {
+            $apiFormat = trim((string) $field['api_format']);
+            if ($apiFormat !== '') {
+                $format = $apiFormat;
+            }
+        }
+
+        if (($field['api_min_length_configured'] ?? false) === true) {
+            $minLength = is_numeric($field['api_min_length'] ?? null) ? (int) $field['api_min_length'] : null;
+        }
+
+        if (($field['api_max_length_configured'] ?? false) === true) {
+            $maxLength = is_numeric($field['api_max_length'] ?? null) ? (int) $field['api_max_length'] : null;
+        }
+
+        if (($field['api_minimum_configured'] ?? false) === true) {
+            $minimum = is_numeric($field['api_minimum'] ?? null) ? (float) $field['api_minimum'] : null;
+        }
+
+        if (($field['api_maximum_configured'] ?? false) === true) {
+            $maximum = is_numeric($field['api_maximum'] ?? null) ? (float) $field['api_maximum'] : null;
+        }
+
+        if (($field['api_min_items_configured'] ?? false) === true) {
+            $minItems = is_numeric($field['api_min_items'] ?? null) ? (int) $field['api_min_items'] : null;
+        }
+
+        if (($field['api_max_items_configured'] ?? false) === true) {
+            $maxItems = is_numeric($field['api_max_items'] ?? null) ? (int) $field['api_max_items'] : null;
+        }
+
+        $schema = [
+            'type' => $type,
+        ];
+
+        if ($format !== null && $type === 'string') {
+            $schema['format'] = $format;
+        }
+
+        if ($enum !== null && $enum !== []) {
+            $schema['enum'] = $enum;
+        }
+
+        if ($minLength !== null) {
+            $schema['minLength'] = $minLength;
+        }
+
+        if ($maxLength !== null) {
+            $schema['maxLength'] = $maxLength;
+        }
+
+        if ($minimum !== null) {
+            $schema['minimum'] = $minimum;
+        }
+
+        if ($maximum !== null) {
+            $schema['maximum'] = $maximum;
+        }
+
+        if ($minItems !== null) {
+            $schema['minItems'] = $minItems;
+        }
+
+        if ($maxItems !== null) {
+            $schema['maxItems'] = $maxItems;
+        }
+
+        if ($description !== '') {
+            $schema['description'] = $description;
+        } elseif ($label !== '') {
+            $schema['description'] = $label;
+        }
+
+        if (($field['api_default_configured'] ?? false) === true) {
+            $schema['default'] = $field['api_default'] ?? null;
+        }
+
+        if (($field['api_example_configured'] ?? false) === true) {
+            $schema['example'] = $field['api_example'] ?? null;
+        }
+
+        // Keep schema coherent when enum is present and example/default are set.
+        if (is_array($schema['enum'] ?? null) && $schema['enum'] !== []) {
+            if (array_key_exists('default', $schema) && ! in_array($schema['default'], $schema['enum'], true)) {
+                $schema['enum'][] = $schema['default'];
+            }
+
+            if (array_key_exists('example', $schema) && ! in_array($schema['example'], $schema['enum'], true)) {
+                $schema['enum'][] = $schema['example'];
+            }
+
+            $schema['enum'] = array_values(array_unique($schema['enum'], SORT_REGULAR));
+        }
+
+        if (is_string($field['api_pattern'] ?? null)) {
+            $pattern = trim((string) $field['api_pattern']);
+            if ($pattern !== '') {
+                $schema['pattern'] = $pattern;
+            }
+        }
+
+        if (is_array($field['api_enum_descriptions'] ?? null) && $field['api_enum_descriptions'] !== []) {
+            $schema['x-enumDescriptions'] = $field['api_enum_descriptions'];
+        }
+
+        return $schema;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    protected function resourceResponses(array $meta, string $operationClass): array
+    {
+        if (! is_string($meta['resource'] ?? null) || $meta['resource'] === '') {
+            return [];
+        }
+
+        $resourceOperation = strtolower(trim((string) ($meta['api_resource_operation'] ?? '')));
+
+        if ($operationClass === ResourceListOperation::class || $resourceOperation === 'index') {
+            return [
+                '200' => [
+                    'description' => 'Resource collection fetched successfully.',
+                ],
+            ];
+        }
+
+        if ($operationClass === ResourceCreateOperation::class || $resourceOperation === 'store') {
+            return [
+                '201' => [
+                    'description' => 'Resource created successfully.',
+                ],
+                '422' => [
+                    'description' => 'Validation failed.',
+                ],
+            ];
+        }
+
+        if ($operationClass === ResourceEditOperation::class || in_array($resourceOperation, ['show', 'update'], true)) {
+            $responses = [
+                '200' => [
+                    'description' => $resourceOperation === 'show'
+                        ? 'Resource fetched successfully.'
+                        : 'Resource updated successfully.',
+                ],
+                '404' => [
+                    'description' => 'Resource not found.',
+                ],
+            ];
+
+            if ($resourceOperation === 'update') {
+                $responses['422'] = [
+                    'description' => 'Validation failed.',
+                ];
+            }
+
+            return $responses;
+        }
+
+        if ($operationClass === ResourceDeleteOperation::class || $resourceOperation === 'delete') {
+            return [
+                '200' => [
+                    'description' => 'Resource deleted successfully.',
+                ],
+                '404' => [
+                    'description' => 'Resource not found.',
+                ],
+            ];
+        }
+
+        return [];
     }
 
     /**
@@ -192,14 +1726,101 @@ class OpenApiGenerator
         return $params;
     }
 
-    protected function summary(LaravelRoute $route, string $method, string $path): string
+    protected function summary(LaravelRoute $route, string $method, string $path, array $meta = []): string
     {
-        $name = trim((string) ($route->getName() ?? ''));
-        if ($name !== '') {
-            return $name;
+        $routeName = trim((string) ($route->getName() ?? ''));
+        $routeNameSummary = $this->resourceSummaryFromModuleApiRouteName($routeName, $path, $method);
+        if ($routeNameSummary !== null && $routeNameSummary !== '') {
+            return $routeNameSummary;
+        }
+
+        $resourceSummary = $this->resourceSummaryFromMeta($meta, $method);
+        if ($resourceSummary !== null && $resourceSummary !== '') {
+            return $resourceSummary;
+        }
+
+        $normalizedPath = $this->apiRelativePath($path);
+        if ($normalizedPath !== '') {
+            return sprintf('%s %s', strtoupper($method), $normalizedPath);
         }
 
         return sprintf('%s %s', strtoupper($method), $path);
+    }
+
+    protected function apiRelativePath(string $path): string
+    {
+        $normalized = '/'.ltrim(trim($path), '/');
+        $prefix = trim($this->apiPrefix(), '/');
+
+        if ($prefix === '') {
+            return $normalized;
+        }
+
+        $prefixPath = '/'.$prefix;
+
+        if (Str::startsWith($normalized, $prefixPath.'/')) {
+            $relative = substr($normalized, strlen($prefixPath));
+
+            return $relative !== '' ? $relative : '/';
+        }
+
+        if ($normalized === $prefixPath) {
+            return '/';
+        }
+
+        return $normalized;
+    }
+
+    protected function resourceSummaryFromModuleApiRouteName(string $routeName, string $path, string $method): ?string
+    {
+        if ($routeName === '' || ! Str::startsWith($routeName, 'module:api.')) {
+            return null;
+        }
+
+        $withoutPrefix = substr($routeName, strlen('module:api.'));
+        if (! is_string($withoutPrefix) || $withoutPrefix === '') {
+            return null;
+        }
+
+        $module = trim((string) Str::before($withoutPrefix, '.'));
+        if ($module === '') {
+            return null;
+        }
+
+        $uri = Str::contains($path, '{id}')
+            ? '/'.$module.'/{id}'
+            : '/'.$module;
+
+        return strtoupper($method).' '.$uri;
+    }
+
+    protected function resourceSummaryFromMeta(array $meta, string $method): ?string
+    {
+        $resourceClass = is_string($meta['resource'] ?? null)
+            ? trim((string) $meta['resource'])
+            : '';
+        $resourceOperation = strtolower(trim((string) ($meta['api_resource_operation'] ?? '')));
+
+        if ($resourceClass === '' || $resourceOperation === '') {
+            return null;
+        }
+
+        $moduleKey = trim($this->resolveResourceModuleKey($resourceClass));
+        if ($moduleKey === '') {
+            return null;
+        }
+
+        $uri = match ($resourceOperation) {
+            'index', 'store' => '/'.$moduleKey,
+            'show', 'update', 'delete' => '/'.$moduleKey.'/{id}',
+            default => null,
+        };
+
+        if (! is_string($uri) || $uri === '') {
+            return null;
+        }
+
+        return strtoupper($method).' '.$uri;
     }
 
     protected function operationId(LaravelRoute $route, string $method, string $path): string
@@ -220,8 +1841,13 @@ class OpenApiGenerator
             ->toString();
     }
 
-    protected function tagForPath(string $path, string $prefix): string
+    protected function tagForPath(string $path, string $prefix, array $meta = []): string
     {
+        $resourceTag = $this->tagForResourceMeta($meta);
+        if ($resourceTag !== null && $resourceTag !== '') {
+            return $resourceTag;
+        }
+
         $normalized = trim($path, '/');
         $prefix = trim($prefix, '/');
 
@@ -240,6 +1866,49 @@ class OpenApiGenerator
             ->replace(['-', '_'], ' ')
             ->title()
             ->toString();
+    }
+
+    protected function tagForResourceMeta(array $meta): ?string
+    {
+        $resourceClass = is_string($meta['resource'] ?? null)
+            ? trim((string) $meta['resource'])
+            : '';
+
+        if ($resourceClass === '') {
+            return null;
+        }
+
+        $moduleKey = $this->resolveResourceModuleKey($resourceClass);
+        if ($moduleKey === '') {
+            return null;
+        }
+
+        $label = function_exists('svarium_label')
+            ? trim((string) svarium_label("modules.{$moduleKey}.plural", ''))
+            : '';
+
+        if ($label !== '') {
+            return $label;
+        }
+
+        return (string) Str::of($moduleKey)
+            ->replace(['-', '_'], ' ')
+            ->title()
+            ->toString();
+    }
+
+    protected function resolveResourceModuleKey(string $resourceClass): string
+    {
+        $module = (string) Str::of(class_basename($resourceClass))
+            ->replace('Resource', '')
+            ->snake()
+            ->toString();
+
+        if ($module === '') {
+            return 'resource';
+        }
+
+        return $module;
     }
 
     protected function requiresAuth(array $middleware): bool
@@ -347,4 +2016,3 @@ class OpenApiGenerator
         return preg_match('/^[A-Za-z]:[\\\\\\/]/', $path) === 1;
     }
 }
-

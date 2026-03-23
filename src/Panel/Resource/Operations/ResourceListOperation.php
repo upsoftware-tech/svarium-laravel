@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\Panel\Resource\Operations;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -45,6 +46,82 @@ class ResourceListOperation extends Operation
     public static function methods(): array
     {
         return ['GET', 'POST'];
+    }
+
+    public function apiRun(PanelContext $context, ...$args): mixed
+    {
+        if (! $context->isGet()) {
+            return null;
+        }
+
+        $builder = $this->table($context);
+
+        if (! $builder) {
+            return JsonResult::make([
+                'status' => 'error',
+                'message' => __('Table configuration is not available for this resource.'),
+            ], 500);
+        }
+
+        $this->applyTableAccess($builder, $context);
+
+        $query = $builder->getQuery();
+        $builder->applyAutoWithFromColumns($query);
+
+        $requestedView = trim((string) $context->request()->get('view', ''));
+        if ($requestedView !== '') {
+            $builder->applySavedView(
+                $query,
+                $requestedView,
+                ! $context->request()->filled('sort')
+            );
+        }
+
+        $search = $context->request()->get('q');
+        if (! is_string($search) || trim($search) === '') {
+            $search = $context->request()->get('search');
+        }
+
+        if (is_string($search) && trim($search) !== '') {
+            $builder->applySearch($query, $search);
+        }
+
+        $builder->applyDropdownSearchFilters($query, $context->request());
+
+        if ($sort = $context->request()->get('sort')) {
+            $builder->applySort($query, (string) $sort);
+        } else {
+            $builder->applyDefaultSort($query);
+        }
+
+        $requestedRowsPerPage = $context->request()->get('per_page', $context->request()->get('rowsPerPage'));
+        $rowsPerPage = $builder->resolveRowsPerPage($requestedRowsPerPage);
+        $rowsPerPage = max(1, min(500, $rowsPerPage));
+
+        $paginator = $query->paginate($rowsPerPage)->appends($context->request()->query());
+        $items = array_map(
+            static fn ($row): array => $row instanceof Model ? $row->toArray() : (array) $row,
+            $paginator->items()
+        );
+
+        return JsonResult::make([
+            'status' => 'ok',
+            'data' => $items,
+            'meta' => [
+                'current_page' => $paginator->currentPage(),
+                'last_page' => $paginator->lastPage(),
+                'per_page' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'from' => $paginator->firstItem(),
+                'to' => $paginator->lastItem(),
+            ],
+            'links' => [
+                'first' => $paginator->url(1),
+                'last' => $paginator->url($paginator->lastPage()),
+                'prev' => $paginator->previousPageUrl(),
+                'next' => $paginator->nextPageUrl(),
+            ],
+        ]);
     }
 
     protected function resource()
@@ -101,6 +178,10 @@ class ResourceListOperation extends Operation
 
         if (method_exists($resource, 'canExport') && ! $resource->canExport($context)) {
             $builder->exported(false);
+        }
+
+        if (method_exists($resource, 'canSort') && ! $resource->canSort($context)) {
+            $builder->disableDnd();
         }
 
         $builder->exportUrl($this->exportUrl($context));
@@ -161,6 +242,10 @@ class ResourceListOperation extends Operation
             return $this->runDeleteViewAction($context, $builder);
         }
 
+        if ($tableAction === 'dnd') {
+            return $this->runDndAction($context, $builder);
+        }
+
         if ($tableAction === 'import') {
             return $this->runImportAction($context, $builder);
         }
@@ -172,6 +257,71 @@ class ResourceListOperation extends Operation
         }
 
         return $this->runBulkAction($context, $builder, $bulkAction);
+    }
+
+    protected function runDndAction(PanelContext $context, TableBuilder $builder): OperationResult
+    {
+        $request = $context->request();
+        $expectsJson = $request->expectsJson() || $request->wantsJson();
+        $resource = $this->resource();
+        if (method_exists($resource, 'canSort') && ! $resource->canSort($context)) {
+            if ($expectsJson) {
+                return JsonResult::make([
+                    'status' => 'forbidden',
+                    'message' => __('You do not have permission to change order.'),
+                ], 403);
+            }
+
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('You do not have permission to change order.'));
+        }
+
+        $rawIds = $context->input->get('_table_dnd_ids', []);
+
+        if (is_string($rawIds)) {
+            $decoded = json_decode($rawIds, true);
+            if (is_array($decoded)) {
+                $rawIds = $decoded;
+            } else {
+                $rawIds = array_map('trim', explode(',', $rawIds));
+            }
+        }
+
+        if (! is_array($rawIds) || $rawIds === []) {
+            if ($expectsJson) {
+                return JsonResult::make([
+                    'status' => 'invalid',
+                    'message' => __('Invalid rows order payload.'),
+                ], 422);
+            }
+
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Invalid rows order payload.'));
+        }
+
+        $updated = $builder->reorderByDnd($rawIds);
+
+        if (! $updated) {
+            if ($expectsJson) {
+                return JsonResult::make([
+                    'status' => 'warning',
+                    'message' => __('Unable to reorder rows.'),
+                ], 422);
+            }
+
+            return RedirectResult::to($context->request()->fullUrl())
+                ->warning(__('Unable to reorder rows.'));
+        }
+
+        if ($expectsJson) {
+            return JsonResult::make([
+                'status' => 'success',
+                'message' => __('Kolejność została zmieniona.'),
+            ]);
+        }
+
+        return RedirectResult::to($context->request()->fullUrl())
+            ->success(__('Kolejność została zmieniona.'));
     }
 
     protected function runSaveViewAction(PanelContext $context, TableBuilder $builder): RedirectResult

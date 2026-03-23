@@ -22,6 +22,7 @@ class NavigationService
     protected array $routeAccessCache = [];
     protected ?object $resolvedUser = null;
     protected bool $resolvedUserLoaded = false;
+    protected ?array $menuOverridesCache = null;
 
     public function __construct()
     {
@@ -43,6 +44,8 @@ class NavigationService
      */
     public function getTree(string|int|null $id = null): array
     {
+        $id = $this->resolveRuntimeNavigationId($id);
+
         $modelClass = $this->getModelClass();
         $query = $modelClass::with('children')
             ->where('is_active', true)
@@ -93,15 +96,70 @@ class NavigationService
         return $tree;
     }
 
-    public function getRegisteredTree(string|int|null $navigationId = null): array
+    public function getRegisteredTree(string|int|null $navigationId = null, bool $applyOverrides = true): array
     {
-        $children = $this->buildRegisteredChildren($navigationId);
+        $resolvedNavigationId = $this->resolveRuntimeNavigationId($navigationId);
+        $children = $this->buildRegisteredChildren($resolvedNavigationId, $applyOverrides);
 
         return [
-            'id' => 'navigation-runtime-root:'.(string) ($this->normalizeNavigationId($navigationId) ?? 'default'),
+            'id' => 'navigation-runtime-root:'.(string) ($this->normalizeNavigationId($resolvedNavigationId) ?? 'default'),
             'label' => 'Panel',
             'children' => $children,
         ];
+    }
+
+    protected function resolveRuntimeNavigationId(string|int|null $navigationId): string|int|null
+    {
+        $normalized = $this->normalizeNavigationId($navigationId);
+        if ($normalized !== null) {
+            return $normalized;
+        }
+
+        if (! (bool) config('upsoftware.navigation.per_role.enabled', true)) {
+            return null;
+        }
+
+        $map = (array) config('upsoftware.navigation.per_role.map', []);
+        if ($map === []) {
+            return null;
+        }
+
+        $activeRole = function_exists('get_role') ? get_role() : null;
+        if (! is_array($activeRole) || $activeRole === []) {
+            return null;
+        }
+
+        $roleId = trim((string) ($activeRole['id'] ?? ''));
+        $roleKey = strtolower(trim((string) ($activeRole['role_key'] ?? '')));
+        $roleNameLocale = strtolower(trim((string) ($activeRole['name_locale'] ?? '')));
+        $roleName = strtolower(trim((string) ($activeRole['name'] ?? '')));
+
+        $candidates = array_values(array_unique(array_filter([
+            $roleKey,
+            $roleNameLocale,
+            $roleName,
+            $roleId !== '' ? 'id:'.$roleId : '',
+            $roleId,
+        ], static fn (string $value): bool => $value !== '')));
+
+        foreach ($candidates as $candidate) {
+            foreach ($map as $mapKey => $targetNavigation) {
+                $normalizedMapKey = strtolower(trim((string) $mapKey));
+                if ($normalizedMapKey === '' || $normalizedMapKey !== $candidate) {
+                    continue;
+                }
+
+                $resolved = $this->normalizeNavigationId(
+                    is_string($targetNavigation) || is_int($targetNavigation) ? $targetNavigation : null
+                );
+
+                if ($resolved !== null) {
+                    return $resolved;
+                }
+            }
+        }
+
+        return null;
     }
 
     protected function resolveItemByIdentifier($query, string|int $id): mixed
@@ -365,10 +423,13 @@ class NavigationService
      * @param array<int, array<string, mixed>> $children
      * @return array<int, array<string, mixed>>
      */
-    protected function buildRegisteredChildren(string|int|null $navigationId): array
+    protected function buildRegisteredChildren(string|int|null $navigationId, bool $applyOverrides = true): array
     {
         $children = $this->appendRegisteredItems([], $navigationId);
         $children = $this->ensureDashboardNode($children);
+        if ($applyOverrides) {
+            $children = $this->applyMenuOverridesToNodes($children, $navigationId);
+        }
 
         return $this->pruneNavigationNodes($children);
     }
@@ -714,6 +775,153 @@ class NavigationService
      * @param array<int, array<string, mixed>> $nodes
      * @return array<int, array<string, mixed>>
      */
+    protected function applyMenuOverridesToNodes(array $nodes, string|int|null $navigationId): array
+    {
+        $overrides = $this->menuOverridesForNavigation($navigationId);
+        if ($overrides === []) {
+            return $nodes;
+        }
+
+        $resolved = [];
+
+        foreach ($nodes as $node) {
+            if (! is_array($node)) {
+                continue;
+            }
+
+            $nodeKey = $this->resolveNodeOverrideKey($node);
+            $override = $nodeKey !== null ? ($overrides[$nodeKey] ?? null) : null;
+
+            if (is_array($override)) {
+                if (array_key_exists('visible', $override) && ! $this->toBool($override['visible'], true)) {
+                    continue;
+                }
+
+                if (array_key_exists('order', $override) && is_numeric($override['order'])) {
+                    $node['order'] = (int) $override['order'];
+                }
+
+                $overrideLabel = trim((string) ($override['label'] ?? ''));
+                if ($overrideLabel !== '') {
+                    $node['label'] = $overrideLabel;
+                }
+            }
+
+            if (is_array($node['children'] ?? null) && $node['children'] !== []) {
+                $node['children'] = $this->applyMenuOverridesToNodes($node['children'], $navigationId);
+            }
+
+            $resolved[] = $node;
+        }
+
+        return $this->sortNodesByOrder($resolved);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function menuOverridesForNavigation(string|int|null $navigationId): array
+    {
+        $stored = $this->loadMenuOverrides();
+        if ($stored === []) {
+            return [];
+        }
+
+        $normalized = $this->normalizeNavigationId($navigationId);
+
+        $candidates = [];
+        if ($normalized === null) {
+            $candidates = ['main_menu', 'default', '__default', ''];
+        } elseif (is_int($normalized)) {
+            $candidates = ['id:'.$normalized, (string) $normalized];
+        } else {
+            $normalizedString = strtolower(trim((string) $normalized));
+            $candidates = [$normalizedString, 'str:'.$normalizedString];
+        }
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate === '') {
+                continue;
+            }
+
+            $bucket = $stored[$candidate] ?? null;
+            if (is_array($bucket)) {
+                return $bucket;
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function loadMenuOverrides(): array
+    {
+        if (is_array($this->menuOverridesCache)) {
+            return $this->menuOverridesCache;
+        }
+
+        $loaded = setting('menu_manager.overrides', []);
+
+        if (is_string($loaded)) {
+            $decoded = json_decode($loaded, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $loaded = $decoded;
+            }
+        }
+
+        $this->menuOverridesCache = is_array($loaded) ? $loaded : [];
+
+        return $this->menuOverridesCache;
+    }
+
+    protected function resolveNodeOverrideKey(array $node): ?string
+    {
+        $menuKey = trim((string) ($node['__menu_key'] ?? ''));
+        if ($menuKey !== '') {
+            return 'menu:'.$menuKey;
+        }
+
+        $id = trim((string) ($node['id'] ?? ''));
+        if ($id !== '') {
+            return 'id:'.$id;
+        }
+
+        return null;
+    }
+
+    protected function toBool(mixed $value, bool $default = false): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            return (int) $value !== 0;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+        if ($normalized === '') {
+            return $default;
+        }
+
+        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+
+        return $default;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $nodes
+     * @return array<int, array<string, mixed>>
+     */
     protected function sortNodesByOrder(array $nodes): array
     {
         $indexed = [];
@@ -920,7 +1128,7 @@ class NavigationService
             return true;
         }
 
-        if ($this->userHasRole($user, 'superadmin')) {
+        if ($this->activeRoleHasSuperAdminAccess($user)) {
             return true;
         }
 
@@ -940,6 +1148,35 @@ class NavigationService
         }
 
         return true;
+    }
+
+    protected function activeRoleHasSuperAdminAccess(object $user): bool
+    {
+        if (function_exists('get_role')) {
+            try {
+                $activeRole = get_role($user);
+                if (is_array($activeRole)) {
+                    $tokens = array_filter([
+                        strtolower(trim((string) ($activeRole['role_key'] ?? ''))),
+                        strtolower(trim((string) ($activeRole['name'] ?? ''))),
+                        strtolower(trim((string) ($activeRole['name_locale'] ?? ''))),
+                    ], static fn (string $value): bool => $value !== '');
+
+                    if (in_array('superadmin', $tokens, true) || in_array('superadministrator', $tokens, true)) {
+                        return true;
+                    }
+
+                    // Active role exists and is not superadmin: block broad fallback checks by all assigned roles.
+                    if ($tokens !== []) {
+                        return false;
+                    }
+                }
+            } catch (\Throwable) {
+                // fallback below
+            }
+        }
+
+        return $this->userHasRole($user, 'superadmin');
     }
 
     protected function resolveUser(): ?object
@@ -1214,7 +1451,54 @@ class NavigationService
 
     protected function userHasPermission(object $user, string $permission): bool
     {
+        $activeRoleId = 0;
+        if (function_exists('get_role_id')) {
+            $activeRoleId = (int) get_role_id();
+        } else {
+            $activeRoleId = (int) session('svarium.active_role_id', session('role_id', 0));
+        }
+
+        if ($activeRoleId > 0) {
+            $activeRole = $this->resolveActiveRoleForUser($user, $activeRoleId);
+            if ($activeRole !== null) {
+                return PermissionMatcher::hasPermission($activeRole, $permission);
+            }
+        }
+
         return PermissionMatcher::hasPermission($user, $permission);
+    }
+
+    protected function resolveActiveRoleForUser(object $user, int $activeRoleId): ?object
+    {
+        try {
+            if (method_exists($user, 'roles')) {
+                $roles = $user->roles;
+                if ($roles instanceof Collection) {
+                    $role = $roles->firstWhere('id', $activeRoleId);
+                    if (is_object($role)) {
+                        return $role;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // fallback to querying role model
+        }
+
+        $roleModelClass = trim((string) config('upsoftware.models.role', config('permission.models.role', '')));
+        if ($roleModelClass === '' || ! class_exists($roleModelClass)) {
+            return null;
+        }
+
+        try {
+            if (! is_subclass_of($roleModelClass, \Illuminate\Database\Eloquent\Model::class)) {
+                return null;
+            }
+
+            /** @var class-string<\Illuminate\Database\Eloquent\Model> $roleModelClass */
+            return $roleModelClass::query()->find($activeRoleId);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     protected function userHasRole(object $user, string $role): bool

@@ -23,6 +23,7 @@ class ResourceFormTab
     protected bool $default = false;
     protected bool $routed = false;
     protected bool|Closure $visible = true;
+    protected string|Closure|null $view = null;
     protected bool|Closure|null $card = null;
     protected string|int|float|Closure|null $widthContent = null;
     protected string|int|float|Closure|null $paddingContent = null;
@@ -147,6 +148,13 @@ class ResourceFormTab
         return $this;
     }
 
+    public function view(string|Closure|null $view = null): static
+    {
+        $this->view = $view;
+
+        return $this;
+    }
+
     public function widthContent(string|int|float|Closure|null $width = null): static
     {
         $this->widthContent = $width;
@@ -239,6 +247,11 @@ class ResourceFormTab
 
     public function resolveCard(PanelContext $context, ...$args): ?bool
     {
+        $view = $this->resolveView($context, ...$args);
+        if ($view !== null) {
+            return $view === 'card';
+        }
+
         if ($this->card instanceof Closure) {
             return (bool) ($this->card)($context, ...$args);
         }
@@ -248,6 +261,17 @@ class ResourceFormTab
         }
 
         return (bool) $this->card;
+    }
+
+    public function resolveView(PanelContext $context, ...$args): ?string
+    {
+        $value = $this->view;
+
+        if ($value instanceof Closure) {
+            $value = $value($context, ...$args);
+        }
+
+        return $this->normalizeView($value);
     }
 
     public function resolveWidthContent(PanelContext $context, ...$args): string|int|float|null
@@ -387,6 +411,26 @@ class ResourceFormTab
         }
 
         return is_array($schema) ? $schema : [];
+    }
+
+    protected function normalizeView(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if ($normalized === 'normal') {
+            return 'default';
+        }
+
+        return in_array($normalized, ['default', 'card', 'cards', 'tabs'], true)
+            ? $normalized
+            : null;
     }
 
     public function resolveAction(PanelContext $context, ...$args): array

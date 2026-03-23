@@ -6,6 +6,8 @@ use Upsoftware\Svarium\Http\Middleware\LocaleMiddleware;
 use Upsoftware\Svarium\Http\Middleware\HandleInertiaRequests;
 use Upsoftware\Svarium\Http\Middleware\InitializeTenancy;
 use Upsoftware\Svarium\Http\Middleware\ResolveDomainContext;
+use Upsoftware\Svarium\Http\Controllers\LogoutController;
+use Upsoftware\Svarium\Http\Controllers\SwitchRoleController;
 use Upsoftware\Svarium\Panel\Panel;
 use Upsoftware\Svarium\Panel\PanelRegistry;
 use Upsoftware\Svarium\Routing\SvariumHttpKernel;
@@ -75,6 +77,7 @@ $registerAuthRoutes = static function (?string $panelPrefix, string $authRoutePr
                 });
 
                 Route::get('logout', LogoutController::class)->middleware('auth')->name('logout');
+                Route::post('role/switch', SwitchRoleController::class)->middleware('auth')->name('role.switch');
             });
         });
 };

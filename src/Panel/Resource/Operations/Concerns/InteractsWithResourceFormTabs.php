@@ -213,12 +213,81 @@ trait InteractsWithResourceFormTabs
             ? (array) $context->params['__form_tab_error_fields']
             : [];
         $errorTabKeys = $this->resolveTabKeysForValidationErrors($context, $tabs, $errorFields, $record);
+        $forcedErrorTabKey = trim((string) ($context->params['__form_tab_error_tab'] ?? ''));
+        $forcedErrorTabNonce = trim((string) ($context->params['__form_tab_error_nonce'] ?? ''));
+
+        if ($forcedErrorTabKey !== '') {
+            foreach ($tabs as $candidateTab) {
+                if (! $candidateTab instanceof ResourceFormTab) {
+                    continue;
+                }
+
+                if ($this->matchesRequestedTabKey($candidateTab->key(), $forcedErrorTabKey)) {
+                    $forcedErrorTabKey = $candidateTab->key();
+                    $errorTabKeys[] = $forcedErrorTabKey;
+                    break;
+                }
+            }
+        }
+
+        // Ensure frontend receives an explicit validation-error tab marker even when
+        // field-to-tab matching cannot be resolved (e.g. complex/nested payload names).
+        // Without this marker, local tab state may remain on the previously opened tab.
+        if ($errorFields !== [] && $errorTabKeys === []) {
+            $fallbackErrorTabKey = $activeTab instanceof ResourceFormTab
+                ? trim($activeTab->key())
+                : '';
+
+            if ($fallbackErrorTabKey === '' && $tabs !== []) {
+                $fallbackErrorTabKey = trim((string) $tabs[0]->key());
+            }
+
+            if ($fallbackErrorTabKey !== '') {
+                $errorTabKeys[] = $fallbackErrorTabKey;
+            }
+        }
+
         $errorTabsLookup = array_fill_keys($errorTabKeys, true);
-        $resolvedActiveTab = $this->resolveFirstErrorTab($tabs, $errorTabsLookup) ?? $activeTab;
+        $resolvedActiveTab = null;
+
+        if ($forcedErrorTabKey !== '') {
+            foreach ($tabs as $candidateTab) {
+                if (! $candidateTab instanceof ResourceFormTab) {
+                    continue;
+                }
+
+                if ($candidateTab->key() === $forcedErrorTabKey) {
+                    $resolvedActiveTab = $candidateTab;
+                    break;
+                }
+            }
+        }
+
+        $resolvedActiveTab = $resolvedActiveTab
+            ?? $this->resolveFirstErrorTab($tabs, $errorTabsLookup)
+            ?? $activeTab;
+
+        $validationTabRenderKey = '';
+        if ($errorFields !== []) {
+            $validationTabKey = $forcedErrorTabKey !== ''
+                ? $forcedErrorTabKey
+                : ($resolvedActiveTab instanceof ResourceFormTab ? trim($resolvedActiveTab->key()) : '');
+
+            if ($validationTabKey !== '') {
+                $validationTabRenderKey = 'validation-tab-'
+                    .$validationTabKey
+                    .'-'
+                    .substr(md5(implode('|', array_map(static fn (mixed $value): string => (string) $value, $errorFields))), 0, 12);
+            }
+        }
 
         $tabComponent = Tab::make()
             ->position($position)
             ->variant($variant);
+
+        if ($validationTabRenderKey !== '') {
+            $tabComponent->prop('key', $validationTabRenderKey);
+        }
 
         $header = $this->resolveFormTabHeader($context, $tabs, $record);
 
@@ -228,6 +297,15 @@ trait InteractsWithResourceFormTabs
 
         if ($resolvedActiveTab instanceof ResourceFormTab) {
             $tabComponent->defaultOpen($resolvedActiveTab->key());
+            $tabComponent->prop('defaultValue', $resolvedActiveTab->key());
+
+            if ($errorFields !== []) {
+                $tabComponent->prop('forceValue', $resolvedActiveTab->key());
+
+                if ($forcedErrorTabNonce !== '') {
+                    $tabComponent->prop('forceNonce', $forcedErrorTabNonce);
+                }
+            }
         }
 
         foreach ($tabs as $tab) {
@@ -318,7 +396,16 @@ trait InteractsWithResourceFormTabs
         $resource = $this->resource();
         $config = $resource->resolveFormConfig($context, $record);
         $tabConfig = (array) ($config['tab'] ?? []);
-        $defaultCard = $this->normalizeBool($tabConfig['card'] ?? true, true);
+        $defaultView = $this->normalizeFormView($tabConfig['view'] ?? null);
+        $defaultCard = $this->normalizeBool($tabConfig['card'] ?? false, false);
+
+        $resolvedView = $record instanceof Model
+            ? $tab->resolveView($context, $record)
+            : $tab->resolveView($context);
+
+        if ($resolvedView === null && $defaultView !== null) {
+            $tab->view($defaultView);
+        }
 
         $resolvedCard = $record instanceof Model
             ? $tab->resolveCard($context, $record)
@@ -878,6 +965,26 @@ trait InteractsWithResourceFormTabs
         }
 
         return $default;
+    }
+
+    protected function normalizeFormView(mixed $value): ?string
+    {
+        if (! is_string($value)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($value));
+        if ($normalized === '') {
+            return null;
+        }
+
+        if ($normalized === 'normal') {
+            return 'default';
+        }
+
+        return in_array($normalized, ['default', 'card', 'cards', 'tabs'], true)
+            ? $normalized
+            : null;
     }
 
     protected function debugFormTabs(PanelContext $context, string $stage, array $payload = []): void

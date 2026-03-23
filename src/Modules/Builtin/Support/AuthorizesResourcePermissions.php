@@ -10,6 +10,11 @@ use Upsoftware\Svarium\Support\PermissionMatcher;
 
 trait AuthorizesResourcePermissions
 {
+    public function canSort(PanelContext $context): bool
+    {
+        return $this->canResourceAction($context, 'sort');
+    }
+
     protected function canResourceAction(PanelContext $context, string $action): bool
     {
         $user = $context->request()->user() ?? auth()->user();

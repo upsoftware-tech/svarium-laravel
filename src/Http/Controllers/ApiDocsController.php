@@ -28,6 +28,21 @@ class ApiDocsController extends Controller
 
         $specPath = '/'.trim((string) config('upsoftware.api.docs.spec_path', 'api/openapi.json'), '/');
         $specUrl = url($specPath);
+        $redocOptions = config('upsoftware.api.docs.redoc', []);
+        if (! is_array($redocOptions)) {
+            $redocOptions = [];
+        }
+        $redocOptions = array_merge([
+            'showObjectSchemaExamples' => true,
+        ], $redocOptions);
+        $redocOptionsJson = json_encode($redocOptions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (! is_string($redocOptionsJson) || trim($redocOptionsJson) === '') {
+            $redocOptionsJson = '{"showObjectSchemaExamples":true}';
+        }
+        $specUrlJson = json_encode($specUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (! is_string($specUrlJson) || trim($specUrlJson) === '') {
+            $specUrlJson = json_encode(url('/api/openapi.json'));
+        }
 
         $html = <<<'HTML'
 <!doctype html>
@@ -41,15 +56,19 @@ class ApiDocsController extends Controller
   </style>
 </head>
 <body>
-  <redoc spec-url="{{SPEC_URL}}"></redoc>
+  <div id="redoc-container"></div>
   <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+  <script>
+    Redoc.init({{SPEC_URL_JSON}}, {{REDOC_OPTIONS_JSON}}, document.getElementById('redoc-container'));
+  </script>
 </body>
 </html>
 HTML;
 
         $html = strtr($html, [
             '{{TITLE}}' => e($title),
-            '{{SPEC_URL}}' => e($specUrl),
+            '{{SPEC_URL_JSON}}' => $specUrlJson,
+            '{{REDOC_OPTIONS_JSON}}' => $redocOptionsJson,
         ]);
 
         return response($html, 200, [
@@ -108,4 +127,3 @@ HTML;
         return $normalized !== '';
     }
 }
-

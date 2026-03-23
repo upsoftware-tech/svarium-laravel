@@ -17,22 +17,80 @@ if (!function_exists('layout')) {
     }
 }
 
-function locales() {
-    $locales = get_model('setting')::getSettingGlobal('locales', []);
-    return array_values(array_map(function ($value) {
-        $array = [];
-        $array["value"] = $value["value"] ?? $value["code"] ?? $value["id"] ?? '';
+function locales()
+{
+    $languages = setting('locales', []);
 
-        if (!isset($value["icon"])) {
-            $array["icon"] = ["type" => "icon", "value" => "cif:".$value['flag'] ?? $value['code']];
-        } else {
-            $array["icon"] = $value["icon"];
+    if (is_string($languages)) {
+        $decoded = json_decode($languages, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            $languages = $decoded;
+        }
+    }
+
+    if (! is_array($languages)) {
+        return [];
+    }
+
+    return $languages;
+}
+
+if (! function_exists('setting')) {
+    function setting(
+        string $key,
+        mixed $default = null,
+        int|string|null $userId = null,
+        bool $fallbackToGlobal = true
+    ): mixed {
+        $model = (string) config('upsoftware.models.setting', '');
+        if ($model === '') {
+            $model = (string) config('svarium.models.setting', '');
+        }
+        if ($model === '' && function_exists('get_model')) {
+            $model = (string) get_model('setting');
+        }
+        if ($model === '') {
+            $model = \Upsoftware\Svarium\Models\Setting::class;
         }
 
-        $array["label"] = $value["native"] ?? $value['localized'] ?? '';
+        if (! class_exists($model) || ! method_exists($model, 'getSettingGlobal')) {
+            return $default;
+        }
 
-        return $array;
-    }, $locales));
+        $value = $model::getSettingGlobal($key, $default, null, $userId, $fallbackToGlobal);
+
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            $looksLikeJson = $trimmed !== ''
+                && (
+                    (str_starts_with($trimmed, '{') && str_ends_with($trimmed, '}'))
+                    || (str_starts_with($trimmed, '[') && str_ends_with($trimmed, ']'))
+                );
+
+            if ($looksLikeJson) {
+                $decoded = json_decode($trimmed, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $value = $decoded;
+                }
+            }
+        }
+
+        if ((bool) config('svarium.debug.setting', false)) {
+            \Illuminate\Support\Facades\Log::debug('svarium.setting helper', [
+                'key' => $key,
+                'model' => $model,
+                'user_id' => $userId,
+                'fallback_to_global' => $fallbackToGlobal,
+                'value_is_default' => $value === $default,
+                'value_type' => gettype($value),
+                'value_preview' => is_scalar($value)
+                    ? (string) $value
+                    : (is_array($value) ? 'array('.count($value).')' : get_debug_type($value)),
+            ]);
+        }
+
+        return $value;
+    }
 }
 
 function set_title($title) {
@@ -53,6 +111,12 @@ function central_connection() {
         return $forcedConnection;
     }
 
+    // In column tenancy mode shared data should stay on the default connection.
+    // Dedicated "central" connection is only required in database tenancy mode.
+    if (function_exists('svarium_tenancy_database_mode') && ! svarium_tenancy_database_mode()) {
+        return $defaultConnection;
+    }
+
     $candidates = [
         config('upsoftware.tenancy.database.central_connection'),
         config('tenancy.database.central_connection'),
@@ -66,6 +130,74 @@ function central_connection() {
     }
 
     return $defaultConnection;
+}
+
+if (! function_exists('debug_connection')) {
+    /**
+     * Dump database connection configuration and runtime details.
+     *
+     * @param  string|null  $connection  Dump only selected connection when provided.
+     * @param  bool  $terminate  Stop script execution after dump.
+     * @return array<string, mixed>
+     */
+    function debug_connection(?string $connection = null, bool $terminate = true): array
+    {
+        $defaultConnection = (string) config('database.default', 'mysql');
+        $configuredConnections = (array) config('database.connections', []);
+
+        $targetConnections = $connection !== null && $connection !== ''
+            ? [$connection]
+            : array_keys($configuredConnections);
+
+        $dump = [
+            'default_connection' => $defaultConnection,
+            'central_connection' => function_exists('central_connection') ? central_connection() : null,
+            'tenancy' => [
+                'enabled' => function_exists('svarium_tenancy_enabled') ? svarium_tenancy_enabled() : null,
+                'mode' => function_exists('svarium_tenancy_mode') ? svarium_tenancy_mode() : null,
+            ],
+            'connections' => [],
+        ];
+
+        foreach ($targetConnections as $name) {
+            $name = (string) $name;
+            $config = (array) ($configuredConnections[$name] ?? []);
+
+            $runtime = [
+                'connected' => false,
+                'driver' => null,
+                'database' => null,
+                'table_prefix' => null,
+                'error' => null,
+            ];
+
+            try {
+                $connectionInstance = \Illuminate\Support\Facades\DB::connection($name);
+                $runtime['connected'] = true;
+                $runtime['driver'] = $connectionInstance->getDriverName();
+                $runtime['database'] = $connectionInstance->getDatabaseName();
+                $runtime['table_prefix'] = $connectionInstance->getTablePrefix();
+            } catch (\Throwable $e) {
+                $runtime['error'] = $e->getMessage();
+            }
+
+            $dump['connections'][$name] = [
+                'is_default' => $name === $defaultConnection,
+                'config' => $config,
+                'runtime' => $runtime,
+            ];
+        }
+
+        echo '<pre>';
+        print_r($dump);
+        echo '</pre>';
+
+        if ($terminate) {
+            die;
+        }
+
+        return $dump;
+    }
 }
 
 if (! function_exists('svarium_tenancy_enabled')) {
@@ -489,10 +621,77 @@ if (! function_exists('module_route')) {
             ->replace(['/', '-'], '_')
             ->snake();
 
+        $normalizedAction = strtolower(trim((string) $action));
+
+        $moduleKeyCandidates = array_values(array_unique(array_filter([
+            trim($moduleName, '. '),
+            (string) str($moduleName)->replace('_', '.')->trim('.'),
+            (string) str($moduleName)->singular()->toString(),
+            (string) str($moduleName)->plural()->toString(),
+            (string) str($moduleName)->replace('_', '.')->singular()->trim('.'),
+            (string) str($moduleName)->replace('_', '.')->plural()->trim('.'),
+        ], static fn (mixed $candidate): bool => is_string($candidate) && trim($candidate) !== '')));
+
+        $actionKeyCandidates = [];
+        if ($normalizedAction !== '' && ! in_array($normalizedAction, ['index', 'list'], true)) {
+            $normalizedActionKey = (string) str($normalizedAction)
+                ->replace('-', '_')
+                ->replace('/', '.')
+                ->trim('.')
+                ->toString();
+
+            if ($normalizedActionKey !== '') {
+                $actionKeyCandidates[] = $normalizedActionKey;
+            }
+        }
+
+        $panelNameForRoute = $resolvedPanel instanceof \Upsoftware\Svarium\Panel\Panel
+            ? trim((string) $resolvedPanel->name)
+            : trim((string) $panel);
+
+        $routeParams = [];
+        if ($id !== null && $id !== '') {
+            $routeParams['id'] = $id;
+        }
+
+        $candidateRouteNames = [];
+        foreach ($moduleKeyCandidates as $moduleKeyCandidate) {
+            $moduleKeyCandidate = trim((string) $moduleKeyCandidate, '.');
+            if ($moduleKeyCandidate === '') {
+                continue;
+            }
+
+            $baseNames = [
+                "module:{$moduleKeyCandidate}",
+            ];
+
+            if ($panelNameForRoute !== '') {
+                $baseNames[] = "module:{$panelNameForRoute}.{$moduleKeyCandidate}";
+            }
+
+            foreach ($baseNames as $baseName) {
+                $candidateRouteNames[] = $baseName;
+
+                foreach ($actionKeyCandidates as $actionKeyCandidate) {
+                    $candidateRouteNames[] = "{$baseName}.{$actionKeyCandidate}";
+                }
+            }
+        }
+
+        foreach (array_values(array_unique($candidateRouteNames)) as $candidateRouteName) {
+            if (! \Illuminate\Support\Facades\Route::has($candidateRouteName)) {
+                continue;
+            }
+
+            try {
+                return trim(route($candidateRouteName, $routeParams, false), '/');
+            } catch (\Throwable) {
+                // Ignore unresolved route parameters and fallback to legacy path builder.
+            }
+        }
+
         $slug = (string) str($moduleName)->replace('_', '')->plural()->lower();
         $base = trim(implode('/', array_filter([$panelSegment, $slug])), '/');
-
-        $normalizedAction = strtolower(trim((string) $action));
 
         if ($normalizedAction === '' || in_array($normalizedAction, ['index', 'list'], true)) {
             return $base;
@@ -1235,6 +1434,42 @@ if (! function_exists('register_menu')) {
     }
 }
 
+if (! function_exists('menu_tree')) {
+    /**
+     * Return runtime menu tree in root + children structure.
+     *
+     * Example result:
+     * [
+     *   'id' => 'navigation-runtime-root:default',
+     *   'label' => 'Panel',
+     *   'children' => [ ... ]
+     * ]
+     */
+    function menu_tree(string|int|null $navigationId = null, bool $applyOverrides = true): array
+    {
+        return \Upsoftware\Svarium\Services\NavigationService::make()
+            ->getRegisteredTree($navigationId, $applyOverrides);
+    }
+}
+
+if (! function_exists('menu_children')) {
+    /**
+     * Return only root children nodes for runtime menu.
+     *
+     * Example result:
+     * [
+     *   ['label' => 'Dashboard', ...],
+     *   ['label' => 'Users', ...],
+     * ]
+     */
+    function menu_children(string|int|null $navigationId = null, bool $applyOverrides = true): array
+    {
+        $tree = menu_tree($navigationId, $applyOverrides);
+
+        return is_array($tree['children'] ?? null) ? $tree['children'] : [];
+    }
+}
+
 if (! function_exists('widget')) {
     /**
      * Build dashboard/page widget definition.
@@ -1295,5 +1530,487 @@ if (! function_exists('empty_state')) {
         return $component->children([
             \Upsoftware\Svarium\UI\Components\Text::make((string) $content),
         ]);
+    }
+}
+
+if (! function_exists('svarium_resolve_auth_user_model')) {
+    function svarium_resolve_auth_user_model(?\Illuminate\Database\Eloquent\Model $user = null): ?\Illuminate\Database\Eloquent\Model
+    {
+        if ($user instanceof \Illuminate\Database\Eloquent\Model) {
+            return $user;
+        }
+
+        try {
+            $resolved = auth()->user();
+
+            return $resolved instanceof \Illuminate\Database\Eloquent\Model ? $resolved : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+}
+
+if (! function_exists('svarium_session_store')) {
+    function svarium_session_store(): mixed
+    {
+        try {
+            if (function_exists('session')) {
+                $store = session();
+                if (is_object($store) && method_exists($store, 'get') && method_exists($store, 'put')) {
+                    return $store;
+                }
+            }
+        } catch (\Throwable) {
+            // ignore
+        }
+
+        try {
+            $request = request();
+            if ($request instanceof \Illuminate\Http\Request && $request->hasSession()) {
+                $store = $request->session();
+                if (is_object($store) && method_exists($store, 'get') && method_exists($store, 'put')) {
+                    return $store;
+                }
+            }
+        } catch (\Throwable) {
+            // ignore
+        }
+
+        return null;
+    }
+}
+
+if (! function_exists('svarium_session_get')) {
+    function svarium_session_get(string $key, mixed $default = null): mixed
+    {
+        $store = svarium_session_store();
+        if (! is_object($store) || ! method_exists($store, 'get')) {
+            return $default;
+        }
+
+        try {
+            return $store->get($key, $default);
+        } catch (\Throwable) {
+            return $default;
+        }
+    }
+}
+
+if (! function_exists('svarium_session_put')) {
+    function svarium_session_put(string $key, mixed $value): void
+    {
+        $store = svarium_session_store();
+        if (! is_object($store) || ! method_exists($store, 'put')) {
+            return;
+        }
+
+        try {
+            $store->put($key, $value);
+        } catch (\Throwable) {
+            // ignore
+        }
+    }
+}
+
+if (! function_exists('debug_role')) {
+    /**
+     * Get or set role switch debug mode.
+     *
+     * - debug_role() => bool (session fallback to config)
+     * - debug_role(true|false) => bool (persist in session and return current value)
+     */
+    function debug_role(?bool $enabled = null): bool
+    {
+        $sessionKey = 'svarium.debug_role';
+        $default = (bool) config('upsoftware.ui.sidebar_user.debug_role', false);
+
+        if ($enabled !== null) {
+            svarium_session_put($sessionKey, $enabled);
+        }
+
+        return (bool) svarium_session_get($sessionKey, $default);
+    }
+}
+
+if (! function_exists('svarium_role_model_type_candidates')) {
+    /**
+     * @return array<int, string>
+     */
+    function svarium_role_model_type_candidates(\Illuminate\Database\Eloquent\Model $user): array
+    {
+        $candidates = [
+            trim((string) (function_exists('svarium_model_type') ? svarium_model_type($user) : $user::class)),
+            trim((string) $user::class),
+            trim((string) config('upsoftware.models.user', '')),
+            trim((string) config('auth.providers.users.model', '')),
+            'App\\Models\\User',
+            'Upsoftware\\Svarium\\Models\\User',
+        ];
+
+        $unique = [];
+        foreach ($candidates as $candidate) {
+            if ($candidate === '') {
+                continue;
+            }
+
+            $normalized = ltrim($candidate, '\\');
+            if (in_array($normalized, $unique, true)) {
+                continue;
+            }
+
+            $unique[] = $normalized;
+        }
+
+        return $unique;
+    }
+}
+
+if (! function_exists('svarium_resolve_role_label')) {
+    function svarium_resolve_role_label(object $role): string
+    {
+        $locale = (string) app()->getLocale();
+        $fallbackLocale = (string) config('app.fallback_locale', 'en');
+
+        if (method_exists($role, 'getTranslation')) {
+            try {
+                $translated = trim((string) $role->getTranslation('name', $locale, false));
+                if ($translated !== '') {
+                    return $translated;
+                }
+
+                $fallback = trim((string) $role->getTranslation('name', $fallbackLocale, false));
+                if ($fallback !== '') {
+                    return $fallback;
+                }
+            } catch (\Throwable) {
+                // ignore and continue with fallback resolution
+            }
+        }
+
+        $name = '';
+        if (method_exists($role, 'getAttribute')) {
+            $name = trim((string) $role->getAttribute('name'));
+        } elseif (isset($role->name)) {
+            $name = trim((string) $role->name);
+        }
+
+        if ($name !== '') {
+            $decoded = json_decode($name, true);
+            if (is_array($decoded)) {
+                $fromLocale = trim((string) ($decoded[$locale] ?? ''));
+                if ($fromLocale !== '') {
+                    return $fromLocale;
+                }
+
+                $fromFallback = trim((string) ($decoded[$fallbackLocale] ?? ''));
+                if ($fromFallback !== '') {
+                    return $fromFallback;
+                }
+
+                $first = reset($decoded);
+                $firstString = trim((string) ($first ?? ''));
+                if ($firstString !== '') {
+                    return $firstString;
+                }
+            }
+
+            return $name;
+        }
+
+        $nameLocale = method_exists($role, 'getAttribute')
+            ? trim((string) $role->getAttribute('name_locale'))
+            : trim((string) ($role->name_locale ?? ''));
+
+        if ($nameLocale !== '') {
+            return $nameLocale;
+        }
+
+        $roleKey = method_exists($role, 'getAttribute')
+            ? trim((string) $role->getAttribute('role_key'))
+            : trim((string) ($role->role_key ?? ''));
+
+        if ($roleKey !== '') {
+            return $roleKey;
+        }
+
+        $id = method_exists($role, 'getAttribute')
+            ? $role->getAttribute('id')
+            : ($role->id ?? null);
+
+        return trim((string) ($id ?? ''));
+    }
+}
+
+if (! function_exists('get_roles')) {
+    /**
+     * @return array<int, array{id:int,name:string,name_locale:string,role_key:string,guard_name:string}>
+     */
+    function get_roles(?\Illuminate\Database\Eloquent\Model $user = null): array
+    {
+        $user = svarium_resolve_auth_user_model($user);
+        if (! $user) {
+            return [];
+        }
+
+        $cacheKey = ltrim($user::class, '\\').'#'.(string) $user->getKey();
+        static $cache = [];
+        if (isset($cache[$cacheKey]) && is_array($cache[$cacheKey])) {
+            return $cache[$cacheKey];
+        }
+
+        $table = trim((string) config('permission.table_names.model_has_roles', 'model_has_roles'));
+        if ($table === '') {
+            $table = 'model_has_roles';
+        }
+
+        $modelHasRoleClass = (string) (function_exists('get_model') ? get_model('model_has_role') : '');
+        if ($modelHasRoleClass === '' || ! class_exists($modelHasRoleClass)) {
+            $modelHasRoleClass = \Upsoftware\Svarium\Models\ModelHasRole::class;
+        }
+
+        $roleIds = [];
+
+        try {
+            $modelHasRole = new $modelHasRoleClass;
+            $connectionName = (string) ($modelHasRole->getConnectionName() ?: config('database.default'));
+            $schema = \Illuminate\Support\Facades\Schema::connection($connectionName);
+
+            if (! $schema->hasTable($table)) {
+                $cache[$cacheKey] = [];
+
+                return [];
+            }
+
+            $query = $modelHasRoleClass::query()
+                ->from($table)
+                ->where('model_id', $user->getKey());
+
+            if ($schema->hasColumn($table, 'model_type')) {
+                $candidates = svarium_role_model_type_candidates($user);
+                if ($candidates !== []) {
+                    $query->whereIn('model_type', $candidates);
+                }
+            }
+
+            if ($schema->hasColumn($table, 'status')) {
+                $query->where('status', 1);
+            }
+
+            $roleIds = $query->pluck('role_id')
+                ->map(static fn (mixed $value): int => (int) $value)
+                ->filter(static fn (int $value): bool => $value > 0)
+                ->unique()
+                ->values()
+                ->all();
+        } catch (\Throwable) {
+            $roleIds = [];
+        }
+
+        if ($roleIds === [] && method_exists($user, 'roles')) {
+            try {
+                $roleIds = $user->roles()
+                    ->pluck('id')
+                    ->map(static fn (mixed $value): int => (int) $value)
+                    ->filter(static fn (int $value): bool => $value > 0)
+                    ->unique()
+                    ->values()
+                    ->all();
+            } catch (\Throwable) {
+                $roleIds = [];
+            }
+        }
+
+        if ($roleIds === []) {
+            $cache[$cacheKey] = [];
+            svarium_session_put('svarium.roles', []);
+
+            return [];
+        }
+
+        $roleModelClass = (string) (function_exists('get_model') ? get_model('role') : '');
+        if ($roleModelClass === '' || ! class_exists($roleModelClass)) {
+            $roleModelClass = (string) config('permission.models.role', \Spatie\Permission\Models\Role::class);
+        }
+
+        if ($roleModelClass === '' || ! class_exists($roleModelClass)) {
+            $cache[$cacheKey] = [];
+
+            return [];
+        }
+
+        try {
+            $roles = $roleModelClass::query()
+                ->whereIn('id', $roleIds)
+                ->get()
+                ->keyBy('id');
+        } catch (\Throwable) {
+            $cache[$cacheKey] = [];
+
+            return [];
+        }
+
+        $items = [];
+
+        foreach ($roleIds as $roleId) {
+            $role = $roles->get($roleId);
+            if (! $role) {
+                continue;
+            }
+
+            $name = svarium_resolve_role_label($role);
+            $roleKey = trim((string) $role->getAttribute('role_key'));
+            $guardName = trim((string) $role->getAttribute('guard_name'));
+
+            $items[] = [
+                'id' => (int) $roleId,
+                'name' => $name,
+                'name_locale' => $name,
+                'role_key' => $roleKey,
+                'guard_name' => $guardName,
+            ];
+        }
+
+        $cache[$cacheKey] = $items;
+        svarium_session_put('svarium.roles', $items);
+
+        return $items;
+    }
+}
+
+if (! function_exists('change_role')) {
+    function change_role(int|string|array|object|null $role, ?\Illuminate\Database\Eloquent\Model $user = null): bool
+    {
+        $roles = get_roles($user);
+        if ($roles === []) {
+            return false;
+        }
+
+        $targetId = 0;
+
+        if (is_numeric($role)) {
+            $targetId = (int) $role;
+        } elseif (is_array($role)) {
+            $targetId = (int) ($role['id'] ?? 0);
+            if ($targetId <= 0) {
+                $token = trim((string) ($role['role_key'] ?? $role['name'] ?? ''));
+                foreach ($roles as $candidate) {
+                    if (strcasecmp((string) ($candidate['role_key'] ?? ''), $token) === 0
+                        || strcasecmp((string) ($candidate['name'] ?? ''), $token) === 0) {
+                        $targetId = (int) ($candidate['id'] ?? 0);
+                        break;
+                    }
+                }
+            }
+        } elseif (is_object($role)) {
+            $targetId = (int) (data_get($role, 'id', 0));
+        } elseif (is_string($role)) {
+            $token = trim($role);
+            foreach ($roles as $candidate) {
+                if ((string) ($candidate['id'] ?? '') === $token
+                    || strcasecmp((string) ($candidate['role_key'] ?? ''), $token) === 0
+                    || strcasecmp((string) ($candidate['name'] ?? ''), $token) === 0) {
+                    $targetId = (int) ($candidate['id'] ?? 0);
+                    break;
+                }
+            }
+        }
+
+        if ($targetId <= 0) {
+            return false;
+        }
+
+        $allowedIds = array_map(static fn (array $item): int => (int) ($item['id'] ?? 0), $roles);
+        if (! in_array($targetId, $allowedIds, true)) {
+            return false;
+        }
+
+        svarium_session_put('svarium.active_role_id', $targetId);
+        svarium_session_put('role_id', $targetId);
+
+        return true;
+    }
+}
+
+if (! function_exists('get_role_id')) {
+    function get_role_id(?\Illuminate\Database\Eloquent\Model $user = null): ?int
+    {
+        $roles = get_roles($user);
+        if ($roles === []) {
+            return null;
+        }
+
+        $allowedIds = array_map(static fn (array $item): int => (int) ($item['id'] ?? 0), $roles);
+
+        $active = (int) (svarium_session_get('svarium.active_role_id', svarium_session_get('role_id', 0)) ?? 0);
+        if ($active > 0 && in_array($active, $allowedIds, true)) {
+            return $active;
+        }
+
+        $first = (int) ($allowedIds[0] ?? 0);
+        if ($first > 0) {
+            svarium_session_put('svarium.active_role_id', $first);
+            svarium_session_put('role_id', $first);
+
+            return $first;
+        }
+
+        return null;
+    }
+}
+
+if (! function_exists('ge_role_id')) {
+    function ge_role_id(?\Illuminate\Database\Eloquent\Model $user = null): ?int
+    {
+        return get_role_id($user);
+    }
+}
+
+if (! function_exists('get_role')) {
+    /**
+     * @return array{id:int,name:string,name_locale:string,role_key:string,guard_name:string}|null
+     */
+    function get_role(?\Illuminate\Database\Eloquent\Model $user = null): ?array
+    {
+        $roles = get_roles($user);
+        if ($roles === []) {
+            return null;
+        }
+
+        $activeId = get_role_id($user);
+        if ($activeId === null) {
+            return $roles[0] ?? null;
+        }
+
+        foreach ($roles as $role) {
+            if ((int) ($role['id'] ?? 0) === $activeId) {
+                return $role;
+            }
+        }
+
+        return $roles[0] ?? null;
+    }
+}
+
+if (! function_exists('get_role_name')) {
+    function get_role_name(?\Illuminate\Database\Eloquent\Model $user = null): ?string
+    {
+        $role = get_role($user);
+        if (! is_array($role)) {
+            return null;
+        }
+
+        return trim((string) ($role['name_locale'] ?? $role['name'] ?? '')) ?: null;
+    }
+}
+
+if (! function_exists('get_role_key')) {
+    function get_role_key(?\Illuminate\Database\Eloquent\Model $user = null): ?string
+    {
+        $role = get_role($user);
+        if (! is_array($role)) {
+            return null;
+        }
+
+        return trim((string) ($role['role_key'] ?? '')) ?: null;
     }
 }

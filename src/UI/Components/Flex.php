@@ -108,6 +108,11 @@ class Flex extends Component
         return $this->appendAppearanceClass($map[$value]);
     }
 
+    public function align(string $align): static
+    {
+        return $this->items($align);
+    }
+
     public function wrap(string|bool $wrap = true): static
     {
         if (is_bool($wrap)) {

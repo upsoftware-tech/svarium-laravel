@@ -149,9 +149,11 @@ class OperationRegistry
                 continue;
             }
 
-            $uri = method_exists($class, 'uri')
-                ? (string) $class::uri()
-                : '';
+            if (! method_exists($class, 'uri')) {
+                continue;
+            }
+
+            $uri = (string) $class::uri();
 
             $methods = method_exists($class, 'methods')
                 ? (array) $class::methods()
