@@ -90,11 +90,13 @@ Skonfiguruj w `config/upsoftware.php`:
 - `tenancy.profile.table`: nazwa tabeli profilu tenanta (domyślnie `tenant_profiles`).
 - `tenancy.profile.foreign_key`: kolumna FK do `tenants.id` w tabeli profilu.
 - `tenancy.profile.model`: model obsługujący tabelę profilu.
+- Gdy profil jest włączony, ale tabela profilu nie istnieje, serializacja tenantów w API działa w trybie bezpiecznym (pomija payload profilu zamiast rzucać 500). Mimo to zalecane jest utrzymanie spójności config + migracji.
 - `tenancy.database.central_connection`: połączenie centralne (dane wspólne).
 - `tenancy.database.tenant_connection`: nazwa runtime connection dla trybu `database`.
 - `tenancy.database.template_connection`: połączenie bazowe kopiowane przed podmianą host/db/user/pass.
 - `tenancy.column.column`: nazwa kolumny tenant (domyślnie `tenant_id`).
 - `tenancy.column.strict`: gdy `true` i tenant nie jest rozpoznany, modele tenantowe zwracają pusty wynik.
+- serializacja tenantów/domen w API auth (`/auth/login`, `/auth/user`, `/auth/otp/*`, `/auth/tenant/select`) respektuje `APP_ENV` przez filtr `tenants.env = APP_ENV` (gdy kolumna `env` istnieje).
 
 ## Tryb `column` (`tenant_id`)
 

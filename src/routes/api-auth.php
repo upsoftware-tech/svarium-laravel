@@ -6,6 +6,7 @@ use Upsoftware\Svarium\Http\Controllers\ApiAuthLoginController;
 use Upsoftware\Svarium\Http\Controllers\ApiAuthOtpSendController;
 use Upsoftware\Svarium\Http\Controllers\ApiAuthOtpVerifyController;
 use Upsoftware\Svarium\Http\Controllers\ApiAuthTenantSelectController;
+use Upsoftware\Svarium\Http\Controllers\ApiAuthUserController;
 
 if (! (bool) config('upsoftware.api.enabled', true)) {
     return;
@@ -49,3 +50,22 @@ Route::middleware((array) config('upsoftware.api.auth.middleware', ['auth:sanctu
     ->post($tenantSelectPath, ApiAuthTenantSelectController::class)
     ->withoutMiddleware([ValidateCsrfToken::class])
     ->name('svarium.api.auth.tenant');
+
+$tenantSelectAliasPath = trim(implode('/', array_filter([$apiPrefix, 'auth/tenant/select'])), '/');
+if ($tenantSelectAliasPath === '') {
+    $tenantSelectAliasPath = 'auth/tenant/select';
+}
+
+Route::middleware((array) config('upsoftware.api.auth.middleware', ['auth:sanctum']))
+    ->post($tenantSelectAliasPath, ApiAuthTenantSelectController::class)
+    ->withoutMiddleware([ValidateCsrfToken::class])
+    ->name('svarium.api.auth.tenant.select');
+
+$userPath = trim(implode('/', array_filter([$apiPrefix, 'auth/user'])), '/');
+if ($userPath === '') {
+    $userPath = 'auth/user';
+}
+
+Route::middleware((array) config('upsoftware.api.auth.middleware', ['auth:sanctum']))
+    ->get($userPath, ApiAuthUserController::class)
+    ->name('svarium.api.auth.user');

@@ -22,6 +22,9 @@ Domyślny prefix API to `api/v1` (`config('upsoftware.api.prefix')`):
 1. `POST /api/v1/auth/login`
 2. `POST /api/v1/auth/otp/{userAuth}/send`
 3. `POST /api/v1/auth/otp/{userAuth}/verify`
+4. `POST /api/v1/auth/tenant`
+5. `POST /api/v1/auth/tenant/select` (alias)
+6. `GET /api/v1/auth/user`
 
 Ważne:
 - endpointy auth API są rejestrowane bez `ValidateCsrfToken`, więc dla tych endpointów nie wymagamy CSRF,
@@ -96,10 +99,30 @@ Przykład:
         "sio": null,
         "default": true
       }
-    ]
+    ],
+    "active_tenant_id": "1",
+    "tenant_select_url": "https://example.com/api/v1/auth/tenant/select"
   }
 }
 ```
+
+### Tenant bypass a lista tenantów w API
+
+Jeśli:
+- tenancy jest włączone (`upsoftware.tenancy.enabled = true`),
+- użytkownik ma rolę z `upsoftware.auth.tenant_bypass_role_keys`,
+
+to w odpowiedzi API listy tenantów (`user.institutions` oraz `user.tenant`) są budowane ze **wszystkich tenantów**, a nie tylko z tenantów przypisanych mapowaniem `model_has_tenants`.
+
+Dopasowanie roli bypass działa po:
+- `role_key`,
+- `name`,
+- `name_locale`,
+- `id` lub `id:{id}`.
+
+Dla ról wbudowanych uwzględniane są aliasy:
+- `superadmin` ↔ `super_admin`, `superadministrator`,
+- `admin` ↔ `administrator`.
 
 ### Odpowiedź 200: `otp_required` (OTP wymagane)
 
@@ -136,9 +159,92 @@ Przykład:
 }
 ```
 
+## 1a) Zmiana tenanta dla aktualnej sesji/tokenu
+
+Endpoint:
+- `POST /api/v1/auth/tenant`
+- `POST /api/v1/auth/tenant/select` (alias)
+
+Wymaga:
+- `Authorization: Bearer {token}`
+
+Request:
+
+```json
+{
+  "tenant_id": "1"
+}
+```
+
+`tenant_id` może być:
+- ID tenanta,
+- hash tenanta.
+
+Efekt:
+- aktualizowana jest kolumna `tenant_id` w `personal_access_tokens` **dla bieżącego tokenu/sesji API** (nie globalnie dla usera).
+
+Response 200:
+
+```json
+{
+  "status": "ok",
+  "active_tenant_id": "1",
+  "tenant": {
+    "id": "1",
+    "hash": "abc123hash",
+    "short_name": "PPP1",
+    "name": "Poradnia Psychologiczno-Pedagogiczna Nr 1",
+    "sio": null
+  }
+}
+```
+
 ## 2) Wysyłka OTP: `POST /api/v1/auth/otp/{userAuth}/send`
 
 Endpoint do pierwszej wysyłki lub ponownej wysyłki kodu.
+
+## Endpoint sesji użytkownika: `GET /api/v1/auth/user`
+
+Endpoint zwraca ten sam format obiektu użytkownika co login (`status`, `token`, `requires_otp`, `user`), na podstawie aktualnego tokenu Bearer.
+
+Wymagania:
+- nagłówek `Authorization: Bearer {token}`,
+- middleware z `upsoftware.api.auth.middleware` (domyślnie `auth:sanctum`).
+
+Przykład odpowiedzi `200`:
+
+```json
+{
+  "status": "authenticated",
+  "token": "25|8shv8FOH6f0ILb6IwA4EvC9PCo0cVaEhpEVcLlAm",
+  "requires_otp": false,
+  "user": {
+    "id": 1,
+    "name": "Admin",
+    "email": "info@upsoftware.tech",
+    "email_verified_at": null,
+    "roles": [
+      {
+        "id": 1,
+        "name": "Superadministrator",
+        "guard_name": "web"
+      }
+    ],
+    "institutions": [],
+    "tenant": [],
+    "active_tenant_id": null,
+    "tenant_select_url": "https://example.com/api/v1/auth/tenant/select"
+  }
+}
+```
+
+Uwaga:
+- role w payloadzie są deduplikowane (brak powtórzeń tej samej roli).
+- jeśli `tenancy.profile.enabled=true`, ale tabela profilu tenantów nie istnieje, endpoint nie zwróci już 500:
+  - payload tenantów zostanie zbudowany bez danych z `tenant_profiles`,
+  - zalecane docelowo: uruchomić migrację profilu tenantów lub wyłączyć profil w config.
+- jeżeli nadpisujesz `serializeTenantDirectory()` w klasie aplikacyjnej (np. `App\Http\Controllers\Api\AuthUserController`), użyj `parent::serializeTenantDirectory($user)` albo dodaj ten sam guard na brak tabeli profilu.
+- lista tenantów i domen w API (`institutions`, `tenant`, `tenant select`) jest filtrowana do rekordów z `tenants.env == APP_ENV` (jeśli kolumna `env` istnieje).
 
 ### Request
 

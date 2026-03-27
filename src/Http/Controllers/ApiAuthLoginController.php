@@ -248,7 +248,10 @@ class ApiAuthLoginController extends Controller
                 $tenantModel->setConnection($connection);
             }
 
-            $tenant = $tenantModel->newQuery()
+            $tenantQuery = $tenantModel->newQuery();
+            $tenantQuery = $this->applyTenantEnvironmentScope($tenantQuery, $tenantModel, $connection);
+
+            $tenant = $tenantQuery
                 ->byHash($value)
                 ->first();
 
@@ -275,6 +278,10 @@ class ApiAuthLoginController extends Controller
             return collect();
         }
 
+        if ($this->shouldBypassTenantScope($user)) {
+            return $this->resolveAllTenantIds();
+        }
+
         try {
             if (
                 is_string($modelHasTenantClass)
@@ -286,7 +293,7 @@ class ApiAuthLoginController extends Controller
                     $modelHasTenant->setConnection($connection);
                 }
 
-                return $modelHasTenant->newQuery()
+                $tenantIds = $modelHasTenant->newQuery()
                     ->where('model_type', svarium_model_type($user))
                     ->where('model_id', (string) $user->getKey())
                     ->pluck('tenant_id')
@@ -294,6 +301,8 @@ class ApiAuthLoginController extends Controller
                     ->filter(static fn (string $id): bool => $id !== '')
                     ->unique()
                     ->values();
+
+                return $this->filterTenantIdsByEnvironment($tenantIds, $tenantClass, $connection);
             }
 
             if (
@@ -306,7 +315,10 @@ class ApiAuthLoginController extends Controller
                     $tenantModel->setConnection($connection);
                 }
 
-                return $tenantModel->newQuery()
+                $tenantQuery = $tenantModel->newQuery();
+                $tenantQuery = $this->applyTenantEnvironmentScope($tenantQuery, $tenantModel, $connection);
+
+                $tenantIds = $tenantQuery
                     ->join('tenant_users', 'tenant_users.tenant_id', '=', 'tenants.id')
                     ->where('tenant_users.user_id', (string) $user->getKey())
                     ->pluck('tenants.id')
@@ -314,6 +326,8 @@ class ApiAuthLoginController extends Controller
                     ->filter(static fn (string $id): bool => $id !== '')
                     ->unique()
                     ->values();
+
+                return $this->filterTenantIdsByEnvironment($tenantIds, $tenantClass, $connection);
             }
 
         } catch (Throwable) {
@@ -321,6 +335,172 @@ class ApiAuthLoginController extends Controller
         }
 
         return collect();
+    }
+
+    protected function shouldBypassTenantScope(mixed $user): bool
+    {
+        if (! is_object($user) || ! function_exists('svarium_tenancy_enabled') || ! svarium_tenancy_enabled()) {
+            return false;
+        }
+
+        $keys = config('upsoftware.auth.tenant_bypass_role_keys', ['superadmin']);
+        if (is_string($keys)) {
+            $keys = explode(',', $keys);
+        }
+
+        if (! is_array($keys)) {
+            return false;
+        }
+
+        $bypassKeys = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $value): string => strtolower(trim((string) $value)),
+            $keys
+        ))));
+
+        $aliasMap = [
+            'superadmin' => ['super_admin', 'superadministrator'],
+            'admin' => ['administrator'],
+        ];
+
+        $expandedKeys = [];
+        foreach ($bypassKeys as $key) {
+            $expandedKeys[$key] = true;
+
+            foreach (($aliasMap[$key] ?? []) as $alias) {
+                $expandedKeys[strtolower(trim((string) $alias))] = true;
+            }
+        }
+
+        $bypassKeys = array_values(array_filter(array_keys($expandedKeys)));
+
+        if ($bypassKeys === []) {
+            return false;
+        }
+
+        $matchesBypassKey = static function (array $tokens) use ($bypassKeys): bool {
+            foreach ($tokens as $token) {
+                $normalized = strtolower(trim((string) $token));
+                if ($normalized !== '' && in_array($normalized, $bypassKeys, true)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        if (function_exists('get_roles')) {
+            $roles = get_roles($user);
+            foreach ($roles as $role) {
+                if (! is_array($role)) {
+                    continue;
+                }
+
+                $roleId = trim((string) ($role['id'] ?? ''));
+                $tokens = [
+                    $role['role_key'] ?? '',
+                    $role['name'] ?? '',
+                    $role['name_locale'] ?? '',
+                    $roleId,
+                    $roleId !== '' ? 'id:'.$roleId : '',
+                ];
+
+                if ($matchesBypassKey($tokens)) {
+                    return true;
+                }
+            }
+        }
+
+        try {
+            if (method_exists($user, 'hasRole')) {
+                foreach ($bypassKeys as $bypassKey) {
+                    try {
+                        if ($user->hasRole($bypassKey)) {
+                            return true;
+                        }
+                    } catch (Throwable) {
+                        // continue with broader fallback matching below
+                    }
+                }
+            }
+
+            if (method_exists($user, 'roles')) {
+                $roles = method_exists($user, 'relationLoaded') && $user->relationLoaded('roles')
+                    ? $user->getRelation('roles')
+                    : $user->roles()->get();
+
+                return $roles->contains(static function ($role) use ($matchesBypassKey): bool {
+                    if (! is_object($role) || ! method_exists($role, 'getAttribute')) {
+                        return false;
+                    }
+
+                    $roleName = $role->getAttribute('name');
+                    $roleNameLocale = trim((string) ($role->getAttribute('name_locale') ?? ''));
+                    $roleId = trim((string) ($role->getAttribute('id') ?? ''));
+
+                    $resolvedRoleName = '';
+                    if (is_array($roleName)) {
+                        $locale = app()->getLocale();
+                        $fallbackLocale = config('app.fallback_locale', 'en');
+                        $resolvedRoleName = trim((string) ($roleName[$locale] ?? $roleName[$fallbackLocale] ?? reset($roleName) ?? ''));
+                    } elseif (is_string($roleName)) {
+                        $decoded = json_decode($roleName, true);
+                        if (is_array($decoded)) {
+                            $locale = app()->getLocale();
+                            $fallbackLocale = config('app.fallback_locale', 'en');
+                            $resolvedRoleName = trim((string) ($decoded[$locale] ?? $decoded[$fallbackLocale] ?? reset($decoded) ?? ''));
+                        } else {
+                            $resolvedRoleName = trim($roleName);
+                        }
+                    }
+
+                    $tokens = [
+                        $role->getAttribute('role_key'),
+                        $roleNameLocale,
+                        $resolvedRoleName,
+                        $roleId,
+                        $roleId !== '' ? 'id:'.$roleId : '',
+                    ];
+
+                    return $matchesBypassKey($tokens);
+                });
+            }
+        } catch (Throwable) {
+            return false;
+        }
+
+        return false;
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    protected function resolveAllTenantIds(): Collection
+    {
+        $tenantClass = get_model('tenant');
+        $connection = function_exists('central_connection') ? central_connection() : null;
+
+        if (! is_string($tenantClass) || ! class_exists($tenantClass)) {
+            return collect();
+        }
+
+        try {
+            $tenantModel = new $tenantClass;
+            if (is_string($connection) && trim($connection) !== '' && method_exists($tenantModel, 'setConnection')) {
+                $tenantModel->setConnection($connection);
+            }
+
+            $tenantQuery = $tenantModel->newQuery();
+            $tenantQuery = $this->applyTenantEnvironmentScope($tenantQuery, $tenantModel, $connection);
+
+            return $tenantQuery
+                ->pluck('id')
+                ->map(static fn (mixed $id): string => trim((string) $id))
+                ->filter(static fn (string $id): bool => $id !== '')
+                ->unique()
+                ->values();
+        } catch (Throwable) {
+            return collect();
+        }
     }
 
     protected function persistDevice(Request $request, mixed $user, string $deviceUuid, string $deviceName): void
@@ -384,6 +564,8 @@ class ApiAuthLoginController extends Controller
             'roles' => $this->serializeRoles($user),
             'institutions' => $this->serializeInstitutions($user),
             'tenant' => $this->serializeTenantDirectory($user),
+            'active_tenant_id' => $this->resolveActiveTokenTenantId($user),
+            'tenant_select_url' => $this->buildApiTenantSelectUrl(),
         ];
     }
 
@@ -399,8 +581,7 @@ class ApiAuthLoginController extends Controller
                 : $user->roles()->get();
 
             $locale = app()->getLocale();
-
-            return $roles->map(static function ($role) use ($locale): array {
+            $resolved = $roles->map(static function ($role) use ($locale): array {
                 $name = trim((string) ($role->getAttribute('name_locale') ?? ''));
                 if ($name === '') {
                     $raw = $role->getAttribute('name');
@@ -424,7 +605,30 @@ class ApiAuthLoginController extends Controller
                     'name' => $name,
                     'guard_name' => (string) ($role->getAttribute('guard_name') ?? ''),
                 ];
-            })->values()->all();
+            });
+
+            $seen = [];
+            $unique = [];
+
+            foreach ($resolved as $role) {
+                if (! is_array($role)) {
+                    continue;
+                }
+
+                $id = trim((string) ($role['id'] ?? ''));
+                $guard = trim((string) ($role['guard_name'] ?? ''));
+                $name = trim((string) ($role['name'] ?? ''));
+                $key = $id.'|'.$guard.'|'.$name;
+
+                if ($key === '||' || isset($seen[$key])) {
+                    continue;
+                }
+
+                $seen[$key] = true;
+                $unique[] = $role;
+            }
+
+            return array_values($unique);
         } catch (Throwable) {
             return [];
         }
@@ -471,14 +675,7 @@ class ApiAuthLoginController extends Controller
                     continue;
                 }
 
-                $profilePayload = [];
-                if (method_exists($tenant, 'profile')) {
-                    $profile = $tenant->profile;
-                    $payload = is_object($profile) ? $profile->getAttribute('payload') : null;
-                    if (is_array($payload)) {
-                        $profilePayload = $payload;
-                    }
-                }
+                $profilePayload = $this->resolveTenantProfilePayload($tenant, $connection);
 
                 $hash = data_get($tenant, 'hash');
                 if (! is_string($hash) || trim($hash) === '') {
@@ -577,14 +774,7 @@ class ApiAuthLoginController extends Controller
                     continue;
                 }
 
-                $profilePayload = [];
-                if (method_exists($tenant, 'profile')) {
-                    $profile = $tenant->profile;
-                    $profileData = is_object($profile) ? $profile->getAttribute('payload') : null;
-                    if (is_array($profileData)) {
-                        $profilePayload = $profileData;
-                    }
-                }
+                $profilePayload = $this->resolveTenantProfilePayload($tenant, $connection);
 
                 $tenantName = trim((string) (
                     data_get($tenant, 'name')
@@ -852,6 +1042,155 @@ class ApiAuthLoginController extends Controller
             return max(1, (int) now()->diffInSeconds($availableAt));
         } catch (Throwable) {
             return 0;
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function resolveTenantProfilePayload(mixed $tenant, ?string $connection = null): array
+    {
+        if (! is_object($tenant) || ! method_exists($tenant, 'profile')) {
+            return [];
+        }
+
+        if (! (bool) config('upsoftware.tenancy.profile.enabled', true)) {
+            return [];
+        }
+
+        if (! $this->tenantProfileTableExists($connection)) {
+            return [];
+        }
+
+        try {
+            $profile = $tenant->profile;
+            $payload = is_object($profile) ? $profile->getAttribute('payload') : null;
+
+            return is_array($payload) ? $payload : [];
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    protected function tenantProfileTableExists(?string $connection = null): bool
+    {
+        $table = trim((string) config('upsoftware.tenancy.profile.table', 'tenant_profiles'));
+        if ($table === '') {
+            $table = 'tenant_profiles';
+        }
+
+        try {
+            if (is_string($connection) && trim($connection) !== '') {
+                return \Schema::connection($connection)->hasTable($table);
+            }
+
+            return \Schema::hasTable($table);
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    protected function applyTenantEnvironmentScope(mixed $query, mixed $tenantModel, ?string $connection = null): mixed
+    {
+        $appEnv = $this->resolveAppEnvironment();
+        if ($appEnv === null) {
+            return $query;
+        }
+
+        $table = is_object($tenantModel) && method_exists($tenantModel, 'getTable')
+            ? (string) $tenantModel->getTable()
+            : 'tenants';
+
+        try {
+            $hasEnvColumn = is_string($connection) && trim($connection) !== ''
+                ? \Schema::connection($connection)->hasColumn($table, 'env')
+                : \Schema::hasColumn($table, 'env');
+
+            if (! $hasEnvColumn || ! is_object($query) || ! method_exists($query, 'where')) {
+                return $query;
+            }
+
+            return $query->where($table.'.env', $appEnv);
+        } catch (Throwable) {
+            return $query;
+        }
+    }
+
+    protected function resolveAppEnvironment(): ?string
+    {
+        $env = trim((string) env('APP_ENV', app()->environment()));
+
+        return $env !== '' ? $env : null;
+    }
+
+    /**
+     * @param Collection<int, string> $tenantIds
+     * @return Collection<int, string>
+     */
+    protected function filterTenantIdsByEnvironment(Collection $tenantIds, mixed $tenantClass, ?string $connection = null): Collection
+    {
+        if ($tenantIds->isEmpty() || ! is_string($tenantClass) || ! class_exists($tenantClass)) {
+            return $tenantIds;
+        }
+
+        $appEnv = $this->resolveAppEnvironment();
+        if ($appEnv === null) {
+            return $tenantIds;
+        }
+
+        try {
+            $tenantModel = new $tenantClass;
+            if (is_string($connection) && trim($connection) !== '' && method_exists($tenantModel, 'setConnection')) {
+                $tenantModel->setConnection($connection);
+            }
+
+            $query = $tenantModel->newQuery()->whereIn('id', $tenantIds->all());
+            $query = $this->applyTenantEnvironmentScope($query, $tenantModel, $connection);
+
+            return $query
+                ->pluck('id')
+                ->map(static fn (mixed $id): string => trim((string) $id))
+                ->filter(static fn (string $id): bool => $id !== '')
+                ->unique()
+                ->values();
+        } catch (Throwable) {
+            return $tenantIds;
+        }
+    }
+
+    protected function resolveActiveTokenTenantId(mixed $user): ?string
+    {
+        if (! is_object($user) || ! method_exists($user, 'currentAccessToken')) {
+            return null;
+        }
+
+        try {
+            $token = $user->currentAccessToken();
+            if (! is_object($token) || ! method_exists($token, 'getAttribute')) {
+                return null;
+            }
+
+            $tenantId = trim((string) ($token->getAttribute('tenant_id') ?? ''));
+
+            return $tenantId !== '' ? $tenantId : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    protected function buildApiTenantSelectUrl(): ?string
+    {
+        try {
+            return route('svarium.api.auth.tenant.select');
+        } catch (Throwable) {
+            try {
+                return route('svarium.api.auth.tenant');
+            } catch (Throwable) {
+                $prefix = trim((string) config('upsoftware.api.prefix', 'api/v1'), '/');
+                $path = trim(implode('/', array_filter([$prefix, 'auth/tenant/select'])), '/');
+
+                return '/'.$path;
+            }
         }
     }
 }

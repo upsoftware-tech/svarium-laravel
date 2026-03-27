@@ -527,7 +527,9 @@ Przykład:
 
 ## `auth`
 
-- `tenant_bypass_role_keys` – lista `role_key`, które omijają sprawdzanie kontekstu tenant podczas logowania (tryb `tenancy=column`), np. `['superadmin', 'admin']`.
+- `tenant_bypass_role_keys` – lista kluczy bypass dla logowania w trybie `tenancy=column`.
+  Dopasowanie działa po `role_key`, `name`, `name_locale`, `id`, `id:{id}`.
+  Przykład: `['superadmin', 'admin']`.
 - `tenant_bypass_scope` – zakres działania bypass:
   - `all_tenants` – rola z `tenant_bypass_role_keys` może zalogować się na każdej domenie tenantowej.
   - `tenant` – rola z `tenant_bypass_role_keys` musi być przypisana do bieżącego tenanta (lub jako globalna rola z `tenant_id = null`).

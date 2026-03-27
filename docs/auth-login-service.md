@@ -62,6 +62,9 @@ Login może omijać standardowe sprawdzanie tenanta dla ról systemowych (`role_
 - `all_tenants` – użytkownik z taką rolą zaloguje się na każdej domenie tenantowej.
 - `tenant` – bypass działa tylko, jeśli rola jest przypięta do bieżącego tenanta (lub globalnie przez `tenant_id = null`).
 
+W API auth (login + OTP verify) bypass wpływa także na payload tenantów:
+- `user.institutions` oraz `user.tenant` zwracają pełną listę tenantów.
+
 ## Włączenie/wyłączenie OTP dla użytkownika
 
 ```php
