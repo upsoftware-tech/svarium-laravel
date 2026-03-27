@@ -47,6 +47,8 @@ Ten dokument opisuje wszystkie komendy Artisan rejestrowane przez paczkę `svari
 | `svarium:tenant.uninstall` | Wyłącza tenancy i czyści konfigurację/migracje tenancy. |
 | `svarium:tenant.install.owner` | Włącza/wyłącza owner binding tenancy. |
 | `svarium:tenant.install.profile` | Włącza/wyłącza profil tenantu. |
+| `svarium:subscription.install` | Konfiguruje moduł subskrypcji i opcjonalnie uruchamia migrację. |
+| `svarium:subscription.uninstall` | Wyłącza moduł subskrypcji i opcjonalnie wycofuje migrację. |
 | `svarium:tenant.migrate` | Uruchamia migracje tenancy (column/database mode). |
 | `svarium:tenant.migrate.rollback` | Rollback migracji tenancy. |
 | `svarium:tenant.seed` | Uruchamia seedery tenancy (column/database mode). |
@@ -1107,6 +1109,52 @@ Przykłady:
 ```bash
 php artisan svarium:tenant.install.profile --enable=true --migrate=true
 php artisan svarium:tenant.install.profile --enable=false
+```
+
+### `svarium:subscription.install`
+
+Konfiguruje moduł subskrypcji:
+
+- włącza/wyłącza `upsoftware.modules.builtin.subscriptions`,
+- uzupełnia brakujące mapowania modeli subskrypcji w `upsoftware.models.*`,
+- opcjonalnie uruchamia migrację tabel subskrypcji.
+
+Składnia:
+
+```bash
+php artisan svarium:subscription.install {--enable=} {--migrate=} {--force}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:subscription.install
+php artisan svarium:subscription.install --enable=true --migrate=true
+php artisan svarium:subscription.install --enable=false
+```
+
+### `svarium:subscription.uninstall`
+
+Alternatywa dezinstalacyjna do `svarium:subscription.install`.
+
+Komenda:
+
+- wyłącza moduł subskrypcji (`upsoftware.modules.builtin.subscriptions = false`),
+- opcjonalnie wycofuje migrację tabel subskrypcji.
+- rollback działa tylko na tabelach subskrypcji i wpisie tej migracji (bez resetu całej tabeli `migrations`).
+
+Składnia:
+
+```bash
+php artisan svarium:subscription.uninstall {--rollback=} {--force}
+```
+
+Przykłady:
+
+```bash
+php artisan svarium:subscription.uninstall
+php artisan svarium:subscription.uninstall --rollback=true
+php artisan svarium:subscription.uninstall --rollback=false
 ```
 
 ### `svarium:tenant.migrate`

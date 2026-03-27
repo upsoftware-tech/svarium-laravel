@@ -514,6 +514,60 @@ function show(string|array $dataOrView, ?array $params) {
     }
 }
 
+if (! function_exists('svarium_view')) {
+    /**
+     * Render Svarium UI from a regular Laravel controller (similar to return view()).
+     *
+     * Examples:
+     * return svarium_view(Text::make('Hello'));
+     * return svarium_view([Text::make('Hello'), Input::make('name')], layout: AppLayout::class);
+     */
+    function svarium_view(
+        \Upsoftware\Svarium\UI\Component|array|string $content,
+        ?string $layout = null,
+        array $props = [],
+        array $layoutProps = [],
+        ?string $view = null,
+        array $meta = []
+    ): \Symfony\Component\HttpFoundation\Response {
+        if (is_string($content)) {
+            return inertia($content, $props)->toResponse(request());
+        }
+
+        if (is_array($content)) {
+            $content = \Upsoftware\Svarium\UI\Components\Block::make()->children($content);
+        }
+
+        $result = new \Upsoftware\Svarium\Http\ComponentResult($content, $layout);
+
+        foreach ($props as $key => $value) {
+            if (! is_string($key) || trim($key) === '') {
+                continue;
+            }
+
+            $result->prop($key, $value);
+        }
+
+        if ($layoutProps !== []) {
+            $result->layoutProps($layoutProps);
+        }
+
+        if (is_string($view) && trim($view) !== '') {
+            $result->setView(trim($view));
+        }
+
+        foreach ($meta as $key => $value) {
+            if (! is_string($key) || trim($key) === '') {
+                continue;
+            }
+
+            $result->meta($key, $value);
+        }
+
+        return $result->toResponse();
+    }
+}
+
 if (! function_exists('module_route')) {
     /**
      * Build panel module/resource path in Svarium.

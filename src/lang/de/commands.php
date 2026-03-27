@@ -72,4 +72,8 @@ return [
         'seed' => 'Tenant-Datenbanken mit integrierter Svarium-Tenancy seeden',
         'uninstall' => 'Tenancy deaktivieren und Tenant-Migrationen zurückrollen',
     ],
+    'subscription' => [
+        'install' => 'Abonnement-Modul konfigurieren und optional Migration ausführen',
+        'uninstall' => 'Abonnement-Modul deaktivieren und optional Migration zurückrollen',
+    ],
 ];

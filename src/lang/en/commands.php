@@ -76,5 +76,6 @@ return [
     ],
     'subscription' => [
         'install' => 'Configure subscription module and optionally run migration',
+        'uninstall' => 'Disable subscription module and optionally rollback migration',
     ],
 ];

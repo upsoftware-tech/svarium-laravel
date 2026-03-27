@@ -40,6 +40,7 @@ php artisan svarium:app:install
 - [Komponent SelectIcon (PHP + Vue, kolekcje ikon, lazy loading)](./select-icon-component.md)
 - [Komponent DropdownButton (PHP + Vue)](./dropdown-button-component.md)
 - [Komponent MenuBar (PHP + Vue, shadcn-vue menubar)](./menubar-component.md)
+- [Helper `svarium_view()` (render Svarium w kontrolerze Laravel)](./svarium-view-helper.md)
 - [DropdownSearch (pełne API + kolory + pozycje ikon/liczników)](./dropdown-search.md)
 - [Tabela (`TableBuilder`) - pełna dokumentacja](./table.md)
 - [Warunkowa widoczność pól formularza (`showWhen`, `visibleWhen`)](./form-conditional-visibility.md)

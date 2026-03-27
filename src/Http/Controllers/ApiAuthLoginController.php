@@ -216,6 +216,11 @@ class ApiAuthLoginController extends Controller
             }
         }
 
+        $assignedTenantIds = $this->resolveAssignedTenantIds($user);
+        if ($assignedTenantIds->count() === 1) {
+            return $assignedTenantIds->first();
+        }
+
         return null;
     }
 
@@ -311,25 +316,6 @@ class ApiAuthLoginController extends Controller
                     ->values();
             }
 
-            if (is_string($tenantClass) && class_exists($tenantClass)) {
-                $tenantModel = new $tenantClass;
-                if (is_string($connection) && trim($connection) !== '' && method_exists($tenantModel, 'setConnection')) {
-                    $tenantModel->setConnection($connection);
-                }
-
-                $query = $tenantModel->newQuery();
-
-                if (\Schema::connection((string) $connection)->hasColumn('tenants', 'status')) {
-                    $query->where('status', true);
-                }
-
-                return $query
-                    ->pluck('id')
-                    ->map(static fn (mixed $id): string => trim((string) $id))
-                    ->filter(static fn (string $id): bool => $id !== '')
-                    ->unique()
-                    ->values();
-            }
         } catch (Throwable) {
             return collect();
         }
@@ -397,6 +383,7 @@ class ApiAuthLoginController extends Controller
             'email_verified_at' => $this->toIsoString($user->getAttribute('email_verified_at') ?? null),
             'roles' => $this->serializeRoles($user),
             'institutions' => $this->serializeInstitutions($user),
+            'tenant' => $this->serializeTenantDirectory($user),
         ];
     }
 
@@ -528,6 +515,184 @@ class ApiAuthLoginController extends Controller
             return $list;
         } catch (Throwable) {
             return [];
+        }
+    }
+
+    protected function serializeTenantDirectory(mixed $user): array
+    {
+        try {
+            $tenantIds = $this->resolveAssignedTenantIds($user);
+            if ($tenantIds->isEmpty()) {
+                return [];
+            }
+
+            $tenantClass = get_model('tenant');
+            $domainClass = get_model('domain');
+            $connection = function_exists('central_connection') ? central_connection() : null;
+
+            if (! is_string($tenantClass) || ! class_exists($tenantClass)) {
+                return [];
+            }
+
+            $tenantModel = new $tenantClass;
+            if (is_string($connection) && trim($connection) !== '' && method_exists($tenantModel, 'setConnection')) {
+                $tenantModel->setConnection($connection);
+            }
+
+            $tenants = $tenantModel->newQuery()
+                ->whereIn('id', $tenantIds->all())
+                ->get()
+                ->keyBy(static fn ($tenant): string => (string) $tenant->getKey());
+
+            $domainsByTenant = collect();
+
+            if (is_string($domainClass) && class_exists($domainClass)) {
+                try {
+                    $domainModel = new $domainClass;
+                    if (is_string($connection) && trim($connection) !== '' && method_exists($domainModel, 'setConnection')) {
+                        $domainModel->setConnection($connection);
+                    }
+
+                    $domainQuery = $domainModel->newQuery()
+                        ->whereIn('tenant_id', $tenantIds->all());
+
+                    if (\Schema::connection((string) $connection)->hasColumn($domainModel->getTable(), 'status')) {
+                        $domainQuery->where('status', true);
+                    }
+
+                    $domainsByTenant = $domainQuery
+                        ->get()
+                        ->groupBy(static fn ($domain): string => (string) $domain->tenant_id);
+                } catch (Throwable) {
+                    $domainsByTenant = collect();
+                }
+            }
+
+            $rolesByTenant = $this->resolveTenantRoles($user, $tenantIds);
+
+            $payload = [];
+            foreach ($tenantIds as $tenantId) {
+                $tenant = $tenants->get((string) $tenantId);
+                if (! is_object($tenant)) {
+                    continue;
+                }
+
+                $profilePayload = [];
+                if (method_exists($tenant, 'profile')) {
+                    $profile = $tenant->profile;
+                    $profileData = is_object($profile) ? $profile->getAttribute('payload') : null;
+                    if (is_array($profileData)) {
+                        $profilePayload = $profileData;
+                    }
+                }
+
+                $tenantName = trim((string) (
+                    data_get($tenant, 'name')
+                    ?? data_get($profilePayload, 'name')
+                    ?? data_get($tenant, 'short_name')
+                    ?? data_get($profilePayload, 'short_name')
+                    ?? $tenant->getKey()
+                ));
+
+                $hash = data_get($tenant, 'hash');
+                if ((! is_string($hash) || trim($hash) === '') && method_exists($tenant, 'getHash')) {
+                    $hash = (string) $tenant->getHash($tenant->getKey());
+                }
+
+                $domains = $domainsByTenant->get((string) $tenantId, collect());
+                if ($domains instanceof Collection && $domains->isNotEmpty()) {
+                    foreach ($domains as $domain) {
+                        $domainName = trim((string) ($domain->domain ?? ''));
+                        $key = $tenantName.($domainName !== '' ? ':'.$domainName : '');
+
+                        $payload[$key] = [
+                            'id' => (string) $tenant->getKey(),
+                            'hash' => is_string($hash) ? trim($hash) : null,
+                            'short_name' => (string) (
+                                data_get($tenant, 'short_name')
+                                ?? data_get($profilePayload, 'short_name')
+                                ?? ''
+                            ),
+                            'name' => $tenantName,
+                            'domain' => $domainName !== '' ? $domainName : null,
+                            'roles' => $rolesByTenant->get((string) $tenantId, []),
+                        ];
+                    }
+
+                    continue;
+                }
+
+                $payload[$tenantName] = [
+                    'id' => (string) $tenant->getKey(),
+                    'hash' => is_string($hash) ? trim($hash) : null,
+                    'short_name' => (string) (
+                        data_get($tenant, 'short_name')
+                        ?? data_get($profilePayload, 'short_name')
+                        ?? ''
+                    ),
+                    'name' => $tenantName,
+                    'domain' => null,
+                    'roles' => $rolesByTenant->get((string) $tenantId, []),
+                ];
+            }
+
+            return $payload;
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+    protected function resolveTenantRoles(mixed $user, Collection $tenantIds): Collection
+    {
+        $modelHasRoleClass = get_model('model_has_role');
+        $connection = function_exists('central_connection') ? central_connection() : null;
+
+        if (! is_string($modelHasRoleClass) || ! class_exists($modelHasRoleClass) || ! is_object($user)) {
+            return collect();
+        }
+
+        try {
+            $modelHasRole = new $modelHasRoleClass;
+            if (is_string($connection) && trim($connection) !== '' && method_exists($modelHasRole, 'setConnection')) {
+                $modelHasRole->setConnection($connection);
+            }
+
+            $query = $modelHasRole->newQuery()
+                ->with('role')
+                ->where('model_id', (string) $user->getKey())
+                ->where('model_type', svarium_model_type($user));
+
+            if (\Schema::connection((string) $connection)->hasColumn($modelHasRole->getTable(), 'status')) {
+                $query->where('status', 1);
+            }
+
+            if (\Schema::connection((string) $connection)->hasColumn($modelHasRole->getTable(), 'tenant_id')) {
+                $query->whereIn('tenant_id', $tenantIds->all());
+            } else {
+                return collect();
+            }
+
+            return $query->get()
+                ->groupBy(static fn ($row): string => trim((string) ($row->tenant_id ?? '')))
+                ->map(function ($rows): array {
+                    return $rows->map(static function ($row): array {
+                        $role = $row->role;
+                        if (! is_object($role)) {
+                            return [];
+                        }
+
+                        return [
+                            'id' => $role->getKey(),
+                            'name' => trim((string) ($role->name_locale ?? $role->name ?? '')),
+                            'guard_name' => (string) ($role->guard_name ?? ''),
+                        ];
+                    })
+                        ->filter(static fn (array $role): bool => $role !== [])
+                        ->values()
+                        ->all();
+                });
+        } catch (Throwable) {
+            return collect();
         }
     }
 

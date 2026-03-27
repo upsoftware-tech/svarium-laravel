@@ -76,5 +76,6 @@ return [
     ],
     'subscription' => [
         'install' => 'Konfiguruje moduł subskrypcji i opcjonalnie uruchamia migrację',
+        'uninstall' => 'Wyłącza moduł subskrypcji i opcjonalnie wycofuje migrację',
     ],
 ];
