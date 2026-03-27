@@ -1,5 +1,5 @@
 {
-    "version": "1.0.1+45",
+    "version": "1.0.1+49",
     "name": "upsoftware/svarium",
     "type": "library",
     "description": "Svarium Commercial System",
@@ -35,6 +35,7 @@
         "laravel-lang/common": "^6.7",
         "laravel-lang/locales": "^2.10",
         "laravel/prompts": "^0.3.11",
+        "laravel/sanctum": "^4.3",
         "laravel/socialite": "^5.24",
         "hashids/hashids": "^5.0",
         "psr/http-message": "^1.1 || ^2.0",
