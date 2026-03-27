@@ -883,6 +883,7 @@ php artisan svarium:make.notification SendCodeNotification --module=Patient --fo
 ### `svarium:make.layout`
 
 Generator klasy layoutu w `app/Svarium/Layouts`.
+Domyślnie generuje klasę opartą o `Upsoftware\Svarium\Layouts\PanelLayout` (pełny szkielet panelu: sidebar/header/body/scroll), z gotowymi metodami `defineHeader()` i `defineFooter()`.
 
 Składnia:
 

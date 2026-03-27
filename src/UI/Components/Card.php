@@ -36,6 +36,11 @@ class Card extends Component
         return $this->prop('icon', trim($icon));
     }
 
+    public function backUrl(string $url): static
+    {
+        return $this->prop('backUrl', trim($url));
+    }
+
     public function variant(string $variant): static
     {
         $normalized = strtolower(trim($variant));

@@ -176,6 +176,38 @@ Konfiguracja endpointu:
 ],
 ```
 
+## Górny select nad listą opcji (`Select`)
+
+Możesz dodać dodatkowy `select` w dropdownie pola `Select`:
+
+- renderuje się na górze nad listą,
+- jest wyrównany do prawej,
+- domyślna szerokość to ok. `240px`.
+
+API:
+
+```php
+Select::make('region_id')
+    ->optionsModel(Region::class, 'id', 'name')
+    ->topSelect([
+        ['value' => 'all', 'label' => __('All')],
+        ['value' => 'active', 'label' => __('Active')],
+        ['value' => 'inactive', 'label' => __('Inactive')],
+    ])
+    ->topSelectValue('all')
+    ->topSelectPlaceholder(__('Select'))
+    ->topSelectWidth(240)
+    ->topSelectName('region_mode');
+```
+
+Dostępne metody:
+
+- `->topSelect(array|Arrayable|ModelOptionsBuilder $options)`
+- `->topSelectValue(mixed $value)`
+- `->topSelectPlaceholder(?string $placeholder)`
+- `->topSelectWidth(string|int|float|null $width = 240)`
+- `->topSelectName(?string $name)`
+
 ## Przykład pełny
 
 ```php

@@ -100,6 +100,25 @@ Disable wrapper completely:
 })
 ```
 
+## Per-operation `Container` (full width / disable)
+
+W pojedynczej `Operation` możesz sterować kontenerem przez `layoutProps(...)`:
+
+```php
+protected function layoutProps(PanelContext $context, ...$args): array
+{
+    return [
+        'containerEnabled' => true, // false = bez Container
+        'containerFluid' => true,   // true = full width
+        // 'containerPosition' => 'center', // left|center|right
+    ];
+}
+```
+
+Uwaga:
+- `containerFluid=true` działa tylko gdy `containerEnabled=true`.
+- jeśli chcesz pełną szerokość, zwykle ustawiaj `containerEnabled=true` + `containerFluid=true`.
+
 Important:
 
 - if you manually add your own `Container` inside page content, then you will get nested containers
@@ -133,8 +152,49 @@ For regular operations (`ComponentResult`), layout composition is applied in thi
 2. Panel slots are applied (`header`, `sidebar`, etc.), excluding `body/content`.
 3. Operation-level overrides are applied, excluding `body/content`.
 4. Body is assembled (`Panel::content(...)` wrapper if present, otherwise operation component).
+5. Named element overrides are applied for blocks marked with `->element('...')`.
 
 This order means operation overrides can replace panel slot values for the same slot.
+
+## Named layout elements (`Block::element`)
+
+Możesz oznaczyć dowolny `Block` jako „punkt wstrzyknięcia”:
+
+```php
+Block::make()
+    ->element('sidebar')
+    ->width('280px');
+```
+
+Następnie w konkretnej `Operation` podać zawartość dla tego elementu:
+
+```php
+protected function elementSidebar(PanelContext $context): array
+{
+    return [
+        Text::make('Dynamic sidebar'),
+    ];
+}
+```
+
+Mapowanie:
+- `elementSidebar()` -> `element('sidebar')`
+- `elementContentHeader()` -> `element('content_header')`
+
+Możesz też użyć jawnej mapy:
+
+```php
+protected function layoutElements(PanelContext $context): array
+{
+    return [
+        'sidebar' => [Text::make('Dynamic sidebar')],
+    ];
+}
+```
+
+Priorytet:
+- najpierw zbierane są metody `elementXxx()`,
+- potem `layoutElements()` może je nadpisać po kluczu.
 
 ## Minimal full example
 

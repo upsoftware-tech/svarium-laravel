@@ -20,6 +20,7 @@ class ComponentResult implements OperationResult
     protected array $slotOverrides = [];
     protected array $props = [];
     protected array $layoutProps = [];
+    protected array $elementOverrides = [];
 
     public function setLayout(?string $layout): void
     {
@@ -107,6 +108,31 @@ class ComponentResult implements OperationResult
     public function footer($content): static
     {
         $this->slotOverrides['footer'] = $content;
+        return $this;
+    }
+
+    public function element(string $name, mixed $content): static
+    {
+        $resolved = trim($name);
+        if ($resolved === '') {
+            return $this;
+        }
+
+        $this->elementOverrides[$resolved] = $content;
+
+        return $this;
+    }
+
+    public function elements(array $overrides): static
+    {
+        foreach ($overrides as $name => $content) {
+            if (! is_string($name)) {
+                continue;
+            }
+
+            $this->element($name, $content);
+        }
+
         return $this;
     }
 
@@ -200,6 +226,10 @@ class ComponentResult implements OperationResult
 
                 $layoutTree = $layout->toArray();
             }
+        }
+
+        if ($this->elementOverrides !== []) {
+            $this->applyElementOverridesToLayoutTree($layoutTree);
         }
 
         $layoutTree = $this->wrapWithRootLayout($layoutTree);
@@ -525,5 +555,56 @@ class ComponentResult implements OperationResult
         }
 
         return implode(' ', $tokens);
+    }
+
+    protected function applyElementOverridesToLayoutTree(array &$layoutTree): void
+    {
+        if (isset($layoutTree['children']) && is_array($layoutTree['children'])) {
+            $layoutTree['children'] = $this->applyElementOverridesToNodes($layoutTree['children']);
+        }
+
+        if (isset($layoutTree['slots']) && is_array($layoutTree['slots'])) {
+            foreach ($layoutTree['slots'] as $slotName => $slotNodes) {
+                if (! is_array($slotNodes)) {
+                    continue;
+                }
+
+                $layoutTree['slots'][$slotName] = $this->applyElementOverridesToNodes($slotNodes);
+            }
+        }
+    }
+
+    protected function applyElementOverridesToNodes(array $nodes): array
+    {
+        $result = [];
+
+        foreach ($nodes as $node) {
+            if (! is_array($node)) {
+                continue;
+            }
+
+            $props = is_array($node['props'] ?? null) ? $node['props'] : [];
+            $elementName = trim((string) ($props['element'] ?? ''));
+
+            if ($elementName !== '' && array_key_exists($elementName, $this->elementOverrides)) {
+                $node['children'] = $this->normalizeNodes($this->elementOverrides[$elementName]);
+            } elseif (isset($node['children']) && is_array($node['children'])) {
+                $node['children'] = $this->applyElementOverridesToNodes($node['children']);
+            }
+
+            if (isset($node['slots']) && is_array($node['slots'])) {
+                foreach ($node['slots'] as $slotName => $slotNodes) {
+                    if (! is_array($slotNodes)) {
+                        continue;
+                    }
+
+                    $node['slots'][$slotName] = $this->applyElementOverridesToNodes($slotNodes);
+                }
+            }
+
+            $result[] = $node;
+        }
+
+        return $result;
     }
 }

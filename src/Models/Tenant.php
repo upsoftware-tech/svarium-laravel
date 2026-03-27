@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
-use Illuminate\Support\Str;
 use RuntimeException;
 use Upsoftware\Svarium\Casts\EncryptedOrPlainText;
 use Upsoftware\Svarium\Traits\UsesConnection;
@@ -18,12 +17,7 @@ class Tenant extends Model
 
     protected $table = 'tenants';
 
-    protected $keyType = 'string';
-
-    public $incrementing = false;
-
     protected $fillable = [
-        'id',
         'name',
         'slug',
         'status',
@@ -47,11 +41,7 @@ class Tenant extends Model
 
     protected static function booted(): void
     {
-        static::creating(function (self $model): void {
-            if (! $model->id) {
-                $model->id = 'tenant_'.Str::lower((string) Str::ulid());
-            }
-        });
+        //
     }
 
     public function domains(): HasMany

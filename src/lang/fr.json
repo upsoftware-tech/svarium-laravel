@@ -240,6 +240,11 @@
     "firstname": "prénom",
     "javascript object notation (json)": "notation d’objet JavaScript (json)",
     "lastname": "nom",
+    "menu_manager": {
+        "items": {
+            "menu_58d164f9e72e13388eb171994554e26f4d897b07": "Regions"
+        }
+    },
     "open document spreadsheet (ods)": "feuille de calcul OpenDocument (ods)",
     "or": "ou",
     "or login with": "ou se connecter avec",

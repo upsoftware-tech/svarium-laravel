@@ -2,6 +2,7 @@
 
 namespace Upsoftware\Svarium\Panel;
 
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Validation\Rule;
 use Upsoftware\Svarium\Enums\ExecutionMode;
@@ -11,8 +12,10 @@ use Upsoftware\Svarium\Http\OperationResult;
 use Upsoftware\Svarium\Panel\Table\TableBuilder;
 use Upsoftware\Svarium\UI\Components\Button;
 use Upsoftware\Svarium\UI\Components\Block;
+use Upsoftware\Svarium\UI\Components\Card;
 use Upsoftware\Svarium\UI\Components\FieldComponent;
 use Upsoftware\Svarium\UI\Components\Form\Form;
+use Upsoftware\Svarium\UI\Components\Grid;
 use Upsoftware\Svarium\Support\PermissionMatcher;
 use Upsoftware\Svarium\Support\ShowWhenEvaluator;
 use Upsoftware\Svarium\Widgets\WidgetRegistry;
@@ -60,12 +63,49 @@ abstract class Operation
         return [];
     }
 
+    /**
+     * Optional form-like layout config for FORM/TREE/DUPLICATE executions.
+     *
+     * Supported keys:
+     * - view: default|card
+     * - card: bool (fallback)
+     * - title, subtitle, icon, action
+     * - contentCols (default 12)
+     * - contentGap (default 4)
+     * - paddingContent (default '4')
+     * - widthContent
+     * - colSpan
+     * - gridColumns (default 12, used by colSpan)
+     */
+    protected function formLayout(PanelContext $context, ...$args): array
+    {
+        return [];
+    }
+
+    /**
+     * Optional back URL used by form card layout.
+     * When provided, card header shows a back arrow instead of static icon.
+     */
+    protected function backUrl(PanelContext $context, ...$args): ?string
+    {
+        return null;
+    }
+
     protected function layoutProps(PanelContext $context, ...$args): array
     {
         return [];
     }
 
     protected function layoutSlots(PanelContext $context, ...$args): array
+    {
+        return [];
+    }
+
+    /**
+     * Named element content overrides for layout components marked with:
+     * Block::make()->element('sidebar')
+     */
+    protected function layoutElements(PanelContext $context, ...$args): array
     {
         return [];
     }
@@ -323,6 +363,7 @@ abstract class Operation
             match ($this->execution()) {
                 ExecutionMode::TABLE => 'table',
                 ExecutionMode::FORM  => $context->isPost() ? 'save' : 'form',
+                ExecutionMode::TREE  => $context->isPost() ? 'save' : 'form',
                 ExecutionMode::DUPLICATE => 'duplicate',
                 ExecutionMode::ACTION => 'action',
                 ExecutionMode::VIEW  => 'view',
@@ -345,6 +386,7 @@ abstract class Operation
             |--------------------------------------------------------------------------
             */
             ExecutionMode::FORM => $this->handleForm($context, ...$args),
+            ExecutionMode::TREE => $this->handleForm($context, ...$args),
             ExecutionMode::DUPLICATE => $this->handleForm($context, ...$args),
 
             /*
@@ -353,7 +395,6 @@ abstract class Operation
             |--------------------------------------------------------------------------
             */
             ExecutionMode::TABLE => $this->handleTable($context, ...$args),
-            ExecutionMode::TREE,
             ExecutionMode::VIEW => $this->render($context, ...$args),
         };
     }
@@ -1692,7 +1733,7 @@ abstract class Operation
     {
         return in_array(
             $this->execution(),
-            [ExecutionMode::FORM, ExecutionMode::DUPLICATE]
+            [ExecutionMode::FORM, ExecutionMode::TREE, ExecutionMode::DUPLICATE]
         );
     }
 
@@ -1776,6 +1817,8 @@ abstract class Operation
         $this->hydrateFields($schema, $args, $context);
 
         if ($this->isFormLike()) {
+            $schema = $this->applyFormLayoutSchema($schema, $context, ...$args);
+
             $submitOptions = $this->resolvedSubmitOptions($context);
             $activeSubmitAction = $this->resolveActiveSubmitAction($submitOptions);
 
@@ -1840,7 +1883,130 @@ abstract class Operation
             $this->applyLayoutSlots($result, $layoutSlots);
         }
 
+        $layoutElements = $this->resolveLayoutElements($context, ...$args);
+        if ($layoutElements !== []) {
+            $result->elements($layoutElements);
+        }
+
         return $result;
+    }
+
+    /**
+     * @param array<int, mixed> $schema
+     * @return array<int, mixed>
+     */
+    protected function applyFormLayoutSchema(array $schema, PanelContext $context, ...$args): array
+    {
+        $layout = $this->formLayout($context, ...$args);
+        if (! is_array($layout) || $layout === []) {
+            return $schema;
+        }
+
+        $view = strtolower(trim((string) ($layout['view'] ?? 'default')));
+        $cardEnabled = $view === 'card'
+            || ($view === '' && $this->toBool($layout['card'] ?? false, false))
+            || $this->toBool($layout['card'] ?? false, false);
+
+        if (! $cardEnabled) {
+            return $schema;
+        }
+
+        $title = trim((string) ($layout['title'] ?? ''));
+        $subtitle = trim((string) ($layout['subtitle'] ?? ''));
+        $icon = trim((string) ($layout['icon'] ?? ''));
+        $action = $layout['action'] ?? null;
+        $backUrl = trim((string) ($layout['backUrl'] ?? $layout['back_url'] ?? $this->backUrl($context, ...$args)));
+
+        $contentCols = $this->normalizeInt($layout['contentCols'] ?? 12, 12, 1, 12);
+        $gridColumns = $this->normalizeInt($layout['gridColumns'] ?? 12, 12, 1, 12);
+        $contentGap = $this->normalizeInt($layout['contentGap'] ?? 4, 4, 0, 24);
+        $contentPadding = $layout['paddingContent'] ?? '4';
+        $contentWidth = $layout['widthContent'] ?? null;
+        $colSpan = $layout['colSpan'] ?? null;
+
+        $card = Card::make()
+            ->variant('form-tab')
+            ->contentPadding($contentPadding)
+            ->children([
+                Grid::make()
+                    ->cols($contentCols)
+                    ->gap($contentGap)
+                    ->children($schema),
+            ]);
+
+        if ($title !== '') {
+            $card->title($title);
+        }
+
+        if ($subtitle !== '') {
+            $card->description($subtitle);
+        }
+
+        if ($icon !== '') {
+            $card->icon($icon);
+        }
+
+        if ($backUrl !== '') {
+            $card->backUrl($backUrl);
+        }
+
+        if ($action !== null) {
+            $card->action($action);
+        }
+
+        if ($contentWidth !== null && $contentWidth !== '') {
+            $card->contentWidth($contentWidth);
+        }
+
+        if ($colSpan !== null && $colSpan !== '') {
+            $card->colSpan($colSpan, $gridColumns);
+        }
+
+        return [$card];
+    }
+
+    protected function toBool(mixed $value, bool $default = false): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if (is_numeric($value)) {
+            return (int) $value !== 0;
+        }
+
+        $normalized = strtolower(trim((string) $value));
+        if ($normalized === '') {
+            return $default;
+        }
+
+        if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+
+        if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+
+        return $default;
+    }
+
+    protected function normalizeInt(mixed $value, int $default, int $min, int $max): int
+    {
+        if (! is_numeric($value)) {
+            return $default;
+        }
+
+        $resolved = (int) $value;
+        if ($resolved < $min) {
+            return $min;
+        }
+
+        if ($resolved > $max) {
+            return $max;
+        }
+
+        return $resolved;
     }
 
     /**
@@ -2068,6 +2234,72 @@ abstract class Operation
 
             $result->{$method}($content);
         }
+    }
+
+    protected function resolveLayoutElements(PanelContext $context, ...$args): array
+    {
+        $resolved = $this->resolveLayoutElementsFromMethods($context, ...$args);
+
+        $declared = $this->layoutElements($context, ...$args);
+        if (is_array($declared) && $declared !== []) {
+            foreach ($declared as $name => $content) {
+                if (! is_string($name)) {
+                    continue;
+                }
+
+                $normalized = trim($name);
+                if ($normalized === '') {
+                    continue;
+                }
+
+                $resolved[$normalized] = $content;
+            }
+        }
+
+        return $resolved;
+    }
+
+    protected function resolveLayoutElementsFromMethods(PanelContext $context, ...$args): array
+    {
+        $resolved = [];
+        $reflection = new \ReflectionObject($this);
+
+        foreach ($reflection->getMethods() as $method) {
+            if ($method->isStatic()) {
+                continue;
+            }
+
+            $methodName = $method->getName();
+            if (! preg_match('/^element[A-Z].+$/', $methodName)) {
+                continue;
+            }
+
+            $elementName = $this->resolveElementNameFromMethod($methodName);
+            if ($elementName === null) {
+                continue;
+            }
+
+            $content = $this->call($methodName, $context, ...$args);
+            if ($content === null) {
+                continue;
+            }
+
+            $resolved[$elementName] = $content;
+        }
+
+        return $resolved;
+    }
+
+    protected function resolveElementNameFromMethod(string $methodName): ?string
+    {
+        $suffix = substr($methodName, strlen('element'));
+        $suffix = trim((string) $suffix);
+
+        if ($suffix === '') {
+            return null;
+        }
+
+        return Str::snake($suffix);
     }
 
     protected function call(string $method, PanelContext $context, ...$routeArgs)

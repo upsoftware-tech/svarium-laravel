@@ -13,6 +13,10 @@ class MenuRegistry
      */
     protected array $items = [];
     /**
+     * @var array<string, array{id:string|int,label:?string,meta:array<string,mixed>}>
+     */
+    protected array $navigations = [];
+    /**
      * @var array<string, array<string, string>>
      */
     protected array $reverseTranslationCache = [];
@@ -23,9 +27,65 @@ class MenuRegistry
      */
     public function register(array $items, array $defaults = []): void
     {
+        $defaultNavigationId = $defaults['navigation_id'] ?? null;
+        if (is_string($defaultNavigationId) || is_int($defaultNavigationId)) {
+            $defaultNavigationLabel = isset($defaults['navigation_label'])
+                ? trim((string) $defaults['navigation_label'])
+                : null;
+            $defaultSource = isset($defaults['source'])
+                ? trim((string) $defaults['source'])
+                : null;
+
+            $this->registerNavigation(
+                $defaultNavigationId,
+                $defaultNavigationLabel !== '' ? $defaultNavigationLabel : null,
+                [
+                    'source' => $defaultSource !== '' ? $defaultSource : null,
+                ]
+            );
+        }
+
         foreach ($this->normalizeMany($items, $defaults) as $item) {
             $this->items[$item['key']] = $item;
         }
+    }
+
+    /**
+     * Register navigation container metadata (for example label).
+     */
+    public function registerNavigation(
+        string|int $navigationId,
+        ?string $label = null,
+        array $meta = []
+    ): void {
+        $normalized = $this->normalizeNavigationId($navigationId);
+        if ($normalized === null) {
+            return;
+        }
+
+        $key = $this->navigationStorageKey($normalized);
+        $existing = $this->navigations[$key] ?? null;
+
+        $resolvedLabel = is_string($label) ? trim($label) : null;
+        if (($resolvedLabel === null || $resolvedLabel === '') && is_array($existing)) {
+            $existingLabel = $existing['label'] ?? null;
+            $resolvedLabel = is_string($existingLabel) ? trim($existingLabel) : null;
+        }
+        if ($resolvedLabel === '') {
+            $resolvedLabel = null;
+        }
+
+        $existingMeta = is_array($existing['meta'] ?? null) ? $existing['meta'] : [];
+        $resolvedMeta = array_filter(
+            [...$existingMeta, ...$meta],
+            static fn (mixed $value): bool => $value !== null && $value !== ''
+        );
+
+        $this->navigations[$key] = [
+            'id' => $normalized,
+            'label' => $resolvedLabel,
+            'meta' => $resolvedMeta,
+        ];
     }
 
     /**
@@ -34,17 +94,25 @@ class MenuRegistry
     public function allForNavigation(string|int|null $navigationId = null): array
     {
         $normalizedNavigationId = $this->normalizeNavigationId($navigationId);
+        $isMainNavigation = $this->isMainNavigationId($normalizedNavigationId);
 
         $filtered = array_values(array_filter(
             $this->items,
-            function (array $item) use ($normalizedNavigationId): bool {
+            function (array $item) use ($normalizedNavigationId, $isMainNavigation): bool {
                 $itemNavigationId = $item['navigation_id'] ?? null;
+                $itemNavigationNormalized = $this->normalizeNavigationId(
+                    (is_string($itemNavigationId) || is_int($itemNavigationId)) ? $itemNavigationId : null
+                );
 
-                if ($itemNavigationId === null) {
+                if ($itemNavigationNormalized === null) {
+                    return $isMainNavigation;
+                }
+
+                if ($isMainNavigation && $this->isMainNavigationId($itemNavigationNormalized)) {
                     return true;
                 }
 
-                return $this->normalizeNavigationId($itemNavigationId) === $normalizedNavigationId;
+                return $itemNavigationNormalized === $normalizedNavigationId;
             }
         ));
 
@@ -70,12 +138,35 @@ class MenuRegistry
         return array_values($this->items);
     }
 
+    protected function isMainNavigationId(string|int|null $navigationId): bool
+    {
+        if ($navigationId === null) {
+            return true;
+        }
+
+        if (is_int($navigationId)) {
+            return false;
+        }
+
+        $normalized = strtolower(trim((string) $navigationId));
+
+        return in_array($normalized, ['main_menu', 'main', 'default', '__default'], true);
+    }
+
     /**
      * @return array<int, string|int|null>
      */
     public function navigationIds(): array
     {
         $ids = [null];
+
+        foreach ($this->navigations as $navigation) {
+            if (! is_array($navigation)) {
+                continue;
+            }
+
+            $ids[] = $this->normalizeNavigationId($navigation['id'] ?? null);
+        }
 
         foreach ($this->items as $item) {
             if (! is_array($item)) {
@@ -103,6 +194,25 @@ class MenuRegistry
         }
 
         return array_values($unique);
+    }
+
+    public function navigationLabel(string|int|null $navigationId): ?string
+    {
+        $normalized = $this->normalizeNavigationId($navigationId);
+        if ($normalized === null) {
+            return null;
+        }
+
+        $key = $this->navigationStorageKey($normalized);
+        $label = $this->navigations[$key]['label'] ?? null;
+
+        if (! is_string($label)) {
+            return null;
+        }
+
+        $trimmed = trim($label);
+
+        return $trimmed !== '' ? $trimmed : null;
     }
 
     /**
@@ -169,6 +279,9 @@ class MenuRegistry
         $navigationId = $rawItem['navigation_id']
             ?? $rawItem['navigation']
             ?? ($defaults['navigation_id'] ?? null);
+        $navigationLabel = isset($rawItem['navigation_label'])
+            ? trim((string) $rawItem['navigation_label'])
+            : trim((string) ($defaults['navigation_label'] ?? ''));
 
         $path = [
             ...$pathPrefix,
@@ -207,6 +320,14 @@ class MenuRegistry
         $children = isset($rawItem['children']) && is_array($rawItem['children'])
             ? $rawItem['children']
             : [];
+
+        if (is_string($navigationId) || is_int($navigationId)) {
+            $this->registerNavigation(
+                $navigationId,
+                $navigationLabel !== '' ? $navigationLabel : null,
+                ['source' => $source !== '' ? $source : null]
+            );
+        }
 
         $results = [];
 
@@ -566,5 +687,14 @@ class MenuRegistry
         }
 
         return $trimmed;
+    }
+
+    protected function navigationStorageKey(string|int $navigationId): string
+    {
+        if (is_int($navigationId)) {
+            return 'int:'.$navigationId;
+        }
+
+        return 'str:'.$navigationId;
     }
 }

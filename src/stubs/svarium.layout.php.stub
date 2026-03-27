@@ -2,9 +2,18 @@
 
 namespace App\Svarium\Layouts;
 
-use Upsoftware\Svarium\UI\Layouts\PanelLayout;
+use Upsoftware\Svarium\Layouts\Panel\HeaderLayout;
+use Upsoftware\Svarium\Layouts\PanelLayout as BasePanelLayout;
 
-class {{LayoutName}} extends PanelLayout
+class {{LayoutName}} extends BasePanelLayout
 {
-}
+    public function defineHeader(): string
+    {
+        return HeaderLayout::class;
+    }
 
+    public function defineFooter(): array|string
+    {
+        return [];
+    }
+}

@@ -36,6 +36,17 @@ class Block extends Component
         ]);
     }
 
+    public function element(?string $name): static
+    {
+        $resolved = trim((string) $name);
+
+        if ($resolved === '') {
+            return $this;
+        }
+
+        return $this->prop('element', $resolved);
+    }
+
     public function flex(string|int|float|bool $flex = true): static
     {
         if (is_bool($flex)) {

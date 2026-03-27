@@ -60,6 +60,7 @@ class DropdownSearch extends Search
             $normalizedName = trim($name);
             $instance->name = $normalizedName;
             $instance->prop('name', $normalizedName);
+            $instance->column($normalizedName);
             $instance->label($normalizedName);
         } elseif ($name !== null && method_exists($instance, 'name')) {
             $instance->label(__('View'));
@@ -147,6 +148,13 @@ class DropdownSearch extends Search
         }
 
         $this->staticOptions = $normalized;
+        $this->items = array_values(array_map(static function (array $item): array {
+            if (! array_key_exists('count', $item)) {
+                $item['count'] = 0;
+            }
+
+            return $item;
+        }, $normalized));
 
         return $this;
     }

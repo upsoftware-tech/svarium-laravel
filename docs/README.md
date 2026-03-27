@@ -28,6 +28,7 @@ php artisan svarium:app:install
 - [Konfiguracja `config/upsoftware.php`](./config-upsoftware.md)
 - Operacje aplikacji: preferowana ścieżka `app/Svarium/Operations` (legacy: `app/Svarium/Panel/Operations`)
 - [Layouty panelu](./panel-layouts.md)
+  - named elements: `Block::element('...')` + `Operation::elementXxx()` / `layoutElements()`
 - [Komponent Container (`position`, `fluid`)](./container-component.md)
 - [Komponent Grid (kolumny, breakpointy, span, rows)](./grid-component.md)
 - [Komponent Aspect (aspect-ratio, square/video/auto, centrowanie flex)](./aspect-component.md)
@@ -37,6 +38,8 @@ php artisan svarium:app:install
 - [Komponent Pin (PHP + Vue, OTP / verification code)](./pin-component.md)
 - [Komponent InputFile (PHP + Vue, upload/autostart/progress/preview)](./input-file-component.md)
 - [Komponent SelectIcon (PHP + Vue, kolekcje ikon, lazy loading)](./select-icon-component.md)
+- [Komponent DropdownButton (PHP + Vue)](./dropdown-button-component.md)
+- [Komponent MenuBar (PHP + Vue, shadcn-vue menubar)](./menubar-component.md)
 - [DropdownSearch (pełne API + kolory + pozycje ikon/liczników)](./dropdown-search.md)
 - [Tabela (`TableBuilder`) - pełna dokumentacja](./table.md)
 - [Warunkowa widoczność pól formularza (`showWhen`, `visibleWhen`)](./form-conditional-visibility.md)

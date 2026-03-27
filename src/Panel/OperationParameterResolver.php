@@ -15,6 +15,7 @@ class OperationParameterResolver
         return match ($operation->execution()) {
             ExecutionMode::ACTION => 'run',
             ExecutionMode::FORM => $context->isPost() ? 'save' : 'schema',
+            ExecutionMode::TREE => $context->isPost() ? 'save' : 'schema',
             ExecutionMode::DUPLICATE => $context->isPost() ? 'save' : 'schema',
             ExecutionMode::TABLE => 'table',
             ExecutionMode::VIEW => 'render',

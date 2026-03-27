@@ -14,6 +14,9 @@ Komponent wspiera:
 - globalne kolory (`color`, `iconColor`) z nadpisaniem per opcja,
 - pozycjonowanie ikony i licznika (`left`, `right`, `end`).
 
+Uwaga:
+- `->options([...])` działa także bez `->column(...)` (dropdown renderuje wtedy podane opcje statycznie).
+
 ## Pełne API (PHP)
 
 ```php
@@ -43,6 +46,15 @@ Jeśli podasz `make('is_enabled')`, ten klucz zostanie użyty jako parametr requ
 
 ```text
 ?is_enabled[]=1
+```
+
+Od teraz `make('is_enabled')` automatycznie ustawia też `column('is_enabled')`.
+Jeśli chcesz inny parametr URL niż kolumna SQL, nadpisz to jawnie:
+
+```php
+DropdownSearch::make('status')
+    ->name('state')
+    ->column('status');
 ```
 
 Po wejściu ponownie na stronę komponent odczyta zaznaczenia z URL i odtworzy stan checkboxów.

@@ -240,6 +240,11 @@
     "firstname": "имя",
     "javascript object notation (json)": "нотация объектов JavaScript (json)",
     "lastname": "фамилия",
+    "menu_manager": {
+        "items": {
+            "menu_58d164f9e72e13388eb171994554e26f4d897b07": "Regions"
+        }
+    },
     "open document spreadsheet (ods)": "таблица OpenDocument (ods)",
     "or": "или",
     "or login with": "або увійти через",

@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\PersonalAccessToken;
 use RuntimeException;
 use Throwable;
 use Upsoftware\Svarium\Auth\AuthManager;
@@ -67,7 +69,12 @@ class ApiAuthLoginController extends Controller
 
         $this->persistDevice($request, $user, $deviceUuid, $deviceName);
 
-        $token = $this->createApiToken($authManager, $user, $deviceName);
+        $token = $this->createApiToken(
+            $authManager,
+            $user,
+            $deviceName,
+            $data['tenant_id'] ?? null
+        );
 
         return response()->json([
             'status' => 'authenticated',
@@ -82,7 +89,8 @@ class ApiAuthLoginController extends Controller
      *   email:string,
      *   password:string,
      *   device_name?:string|null,
-     *   device_uuid?:string|null
+     *   device_uuid?:string|null,
+     *   tenant_id?:string|null
      * }
      */
     protected function validated(Request $request): array
@@ -92,6 +100,7 @@ class ApiAuthLoginController extends Controller
             'password' => ['required', 'string'],
             'device_name' => ['nullable', 'string', 'max:191'],
             'device_uuid' => ['nullable', 'uuid'],
+            'tenant_id' => ['nullable', 'string', 'max:191'],
         ]);
 
         if ($validator->fails()) {
@@ -102,7 +111,8 @@ class ApiAuthLoginController extends Controller
          *   email:string,
          *   password:string,
          *   device_name?:string|null,
-         *   device_uuid?:string|null
+         *   device_uuid?:string|null,
+         *   tenant_id?:string|null
          * } $data
          */
         $data = $validator->validated();
@@ -132,7 +142,12 @@ class ApiAuthLoginController extends Controller
         return 'api_'.substr($deviceUuid, 0, 12);
     }
 
-    protected function createApiToken(AuthManager $authManager, mixed $user, string $deviceName): string
+    protected function createApiToken(
+        AuthManager $authManager,
+        mixed $user,
+        string $deviceName,
+        mixed $requestedTenantId = null
+    ): string
     {
         $handler = $authManager->resolveHandler();
         if (! is_object($handler) || ! method_exists($handler, 'createToken')) {
@@ -145,7 +160,181 @@ class ApiAuthLoginController extends Controller
             throw new RuntimeException('Empty API token returned by auth handler.');
         }
 
+        $this->attachTenantToToken(
+            $token,
+            $this->resolveApiTenantId($user, $requestedTenantId)
+        );
+
         return $token;
+    }
+
+    protected function attachTenantToToken(string $plainTextToken, ?string $tenantId): void
+    {
+        if ($tenantId === null || trim($tenantId) === '') {
+            return;
+        }
+
+        $connection = function_exists('central_connection') ? central_connection() : null;
+
+        if (! \Schema::connection((string) $connection)->hasColumn('personal_access_tokens', 'tenant_id')) {
+            return;
+        }
+
+        $tokenId = trim((string) Str::before($plainTextToken, '|'));
+        if ($tokenId === '') {
+            return;
+        }
+
+        $tokenQuery = new PersonalAccessToken;
+        if (is_string($connection) && trim($connection) !== '') {
+            $tokenQuery->setConnection($connection);
+        }
+
+        $tokenQuery->newQuery()
+            ->whereKey($tokenId)
+            ->update(['tenant_id' => $tenantId]);
+    }
+
+    protected function resolveApiTenantId(mixed $user, mixed $requestedTenantId = null): ?string
+    {
+        $resolvedRequestedTenantId = $this->normalizeRequestedTenantId($requestedTenantId);
+        if ($resolvedRequestedTenantId !== null) {
+            $assignedTenantIds = $this->resolveAssignedTenantIds($user);
+
+            if ($assignedTenantIds->isEmpty() || $assignedTenantIds->contains($resolvedRequestedTenantId)) {
+                return $resolvedRequestedTenantId;
+            }
+        }
+
+        if (function_exists('tenant')) {
+            $currentTenant = tenant();
+            if (is_object($currentTenant) && method_exists($currentTenant, 'getKey')) {
+                $currentTenantId = trim((string) $currentTenant->getKey());
+                if ($currentTenantId !== '') {
+                    return $currentTenantId;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    protected function normalizeRequestedTenantId(mixed $requestedTenantId): ?string
+    {
+        $value = trim((string) $requestedTenantId);
+        if ($value === '') {
+            return null;
+        }
+
+        $tenantClass = get_model('tenant');
+        if (! is_string($tenantClass) || ! class_exists($tenantClass)) {
+            return $value;
+        }
+
+        if (ctype_digit($value)) {
+            return $value;
+        }
+
+        $connection = function_exists('central_connection') ? central_connection() : null;
+
+        try {
+            $tenantModel = new $tenantClass;
+            if (is_string($connection) && trim($connection) !== '' && method_exists($tenantModel, 'setConnection')) {
+                $tenantModel->setConnection($connection);
+            }
+
+            $tenant = $tenantModel->newQuery()
+                ->byHash($value)
+                ->first();
+
+            if (is_object($tenant) && method_exists($tenant, 'getKey')) {
+                return trim((string) $tenant->getKey()) ?: null;
+            }
+        } catch (Throwable) {
+            return null;
+        }
+
+        return null;
+    }
+
+    /**
+     * @return Collection<int, string>
+     */
+    protected function resolveAssignedTenantIds(mixed $user): Collection
+    {
+        $modelHasTenantClass = get_model('model_has_tenant');
+        $tenantClass = get_model('tenant');
+        $connection = function_exists('central_connection') ? central_connection() : null;
+
+        if (! is_object($user)) {
+            return collect();
+        }
+
+        try {
+            if (
+                is_string($modelHasTenantClass)
+                && class_exists($modelHasTenantClass)
+                && \Schema::connection((string) $connection)->hasTable('model_has_tenants')
+            ) {
+                $modelHasTenant = new $modelHasTenantClass;
+                if (is_string($connection) && trim($connection) !== '' && method_exists($modelHasTenant, 'setConnection')) {
+                    $modelHasTenant->setConnection($connection);
+                }
+
+                return $modelHasTenant->newQuery()
+                    ->where('model_type', svarium_model_type($user))
+                    ->where('model_id', (string) $user->getKey())
+                    ->pluck('tenant_id')
+                    ->map(static fn (mixed $id): string => trim((string) $id))
+                    ->filter(static fn (string $id): bool => $id !== '')
+                    ->unique()
+                    ->values();
+            }
+
+            if (
+                is_string($tenantClass)
+                && class_exists($tenantClass)
+                && \Schema::connection((string) $connection)->hasTable('tenant_users')
+            ) {
+                $tenantModel = new $tenantClass;
+                if (is_string($connection) && trim($connection) !== '' && method_exists($tenantModel, 'setConnection')) {
+                    $tenantModel->setConnection($connection);
+                }
+
+                return $tenantModel->newQuery()
+                    ->join('tenant_users', 'tenant_users.tenant_id', '=', 'tenants.id')
+                    ->where('tenant_users.user_id', (string) $user->getKey())
+                    ->pluck('tenants.id')
+                    ->map(static fn (mixed $id): string => trim((string) $id))
+                    ->filter(static fn (string $id): bool => $id !== '')
+                    ->unique()
+                    ->values();
+            }
+
+            if (is_string($tenantClass) && class_exists($tenantClass)) {
+                $tenantModel = new $tenantClass;
+                if (is_string($connection) && trim($connection) !== '' && method_exists($tenantModel, 'setConnection')) {
+                    $tenantModel->setConnection($connection);
+                }
+
+                $query = $tenantModel->newQuery();
+
+                if (\Schema::connection((string) $connection)->hasColumn('tenants', 'status')) {
+                    $query->where('status', true);
+                }
+
+                return $query
+                    ->pluck('id')
+                    ->map(static fn (mixed $id): string => trim((string) $id))
+                    ->filter(static fn (string $id): bool => $id !== '')
+                    ->unique()
+                    ->values();
+            }
+        } catch (Throwable) {
+            return collect();
+        }
+
+        return collect();
     }
 
     protected function persistDevice(Request $request, mixed $user, string $deviceUuid, string $deviceName): void
@@ -257,30 +446,25 @@ class ApiAuthLoginController extends Controller
     protected function serializeInstitutions(mixed $user): array
     {
         try {
-            $modelHasTenantClass = get_model('model_has_tenant');
             $tenantClass = get_model('tenant');
-
-            if (! is_string($modelHasTenantClass) || ! class_exists($modelHasTenantClass)) {
-                return [];
-            }
+            $connection = function_exists('central_connection') ? central_connection() : null;
 
             if (! is_string($tenantClass) || ! class_exists($tenantClass)) {
                 return [];
             }
 
-            $tenantIds = $modelHasTenantClass::query()
-                ->where('model_type', svarium_model_type($user))
-                ->where('model_id', (string) $user->getKey())
-                ->pluck('tenant_id')
-                ->filter(static fn (mixed $id): bool => $id !== null && $id !== '')
-                ->unique()
-                ->values();
+            $tenantIds = $this->resolveAssignedTenantIds($user);
 
             if ($tenantIds->isEmpty()) {
                 return [];
             }
 
-            $tenants = $tenantClass::query()
+            $tenantModel = new $tenantClass;
+            if (is_string($connection) && trim($connection) !== '' && method_exists($tenantModel, 'setConnection')) {
+                $tenantModel->setConnection($connection);
+            }
+
+            $tenants = $tenantModel->newQuery()
                 ->whereIn('id', $tenantIds->all())
                 ->get()
                 ->keyBy(static fn ($tenant): string => (string) $tenant->getKey());

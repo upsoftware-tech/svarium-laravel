@@ -24,6 +24,8 @@ class ModuleCommand extends CoreCommand
     protected string $resourceMode = 'crud';
     protected bool $pageAcceptsPost = false;
     protected bool $enableApi = false;
+    protected bool $createTableMigration = false;
+    protected ?string $tableMigrationName = null;
     /**
      * @var array{create: bool, preview: bool, edit: bool, duplicate: bool, delete: bool}
      */
@@ -56,6 +58,11 @@ class ModuleCommand extends CoreCommand
             return;
         }
 
+        if (! $this->confirmCreateModule($name)) {
+            $this->warn('Anulowano tworzenie modułu.');
+            return;
+        }
+
         $this->availableLocales = $this->resolveAvailableLocales();
         $this->moduleTranslations = $this->resolveModuleTranslations($name, $this->availableLocales);
         $this->entryView = $this->resolveEntryView();
@@ -63,6 +70,10 @@ class ModuleCommand extends CoreCommand
         $this->resourceMode = $this->resolveResourceMode();
         $this->resourceActions = $this->resolveResourceActions($this->resourceMode);
         $this->enableApi = $this->resolveEnableApi();
+        $this->createTableMigration = $this->resolveCreateTableMigration($name);
+        $this->tableMigrationName = $this->createTableMigration
+            ? $this->resolveTableMigrationName($name)
+            : null;
         $this->menuMethod = $this->buildMenuMethod($name, $this->resolveMenuConfig($name));
         $base = svarium_path("Modules/{$name}");
 
@@ -77,9 +88,28 @@ class ModuleCommand extends CoreCommand
             $this->createFormClass($name, $base);
         }
         $this->createEntryOperationClass($name, $base);
+
+        if ($this->createTableMigration && is_string($this->tableMigrationName) && trim($this->tableMigrationName) !== '') {
+            $this->createTableMigrationForModule($name, $this->tableMigrationName);
+        }
+
         $this->syncLanguageFiles();
 
         $this->info("Svarium module {$name} created.");
+    }
+
+    protected function confirmCreateModule(string $name): bool
+    {
+        if (! $this->input->isInteractive()) {
+            return true;
+        }
+
+        return (bool) confirm(
+            "Utworzyć model {$name}?",
+            true,
+            'Tak',
+            'Nie'
+        );
     }
 
     protected function resolveModuleName(): string
@@ -592,6 +622,68 @@ PHP;
         }
 
         return (bool) confirm('Czy włączyć API w module (Resource::$api = true)?', false, 'Tak', 'Nie');
+    }
+
+    protected function resolveCreateTableMigration(string $moduleName): bool
+    {
+        if ($this->entryView !== 'table') {
+            return false;
+        }
+
+        if (! $this->input->isInteractive()) {
+            return false;
+        }
+
+        $defaultMigrationName = $this->defaultTableMigrationName($moduleName);
+
+        return (bool) confirm(
+            "Utworzyć tabelę (migrację {$defaultMigrationName})?",
+            true,
+            'Tak',
+            'Nie'
+        );
+    }
+
+    protected function resolveTableMigrationName(string $moduleName): string
+    {
+        $default = $this->defaultTableMigrationName($moduleName);
+
+        if (! $this->input->isInteractive()) {
+            return $default;
+        }
+
+        $name = trim((string) text(
+            'Nazwa migracji',
+            "np. {$default}",
+            $default
+        ));
+
+        return $name !== '' ? $name : $default;
+    }
+
+    protected function defaultTableMigrationName(string $moduleName): string
+    {
+        $table = Str::snake(Str::pluralStudly($moduleName));
+
+        return "create_{$table}_table";
+    }
+
+    protected function createTableMigrationForModule(string $moduleName, string $migrationName): void
+    {
+        $table = Str::snake(Str::pluralStudly($moduleName));
+
+        $exitCode = $this->call('svarium:make:migration', [
+            'name' => $migrationName,
+            '--module' => $moduleName,
+            '--create' => $table,
+        ]);
+
+        if ($exitCode !== self::SUCCESS) {
+            $this->warn('Nie udało się utworzyć migracji tabeli dla modułu.');
+            return;
+        }
+
+        $this->info("Migracja {$migrationName} utworzona dla tabeli {$table}.");
     }
 
     /**

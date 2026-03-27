@@ -903,7 +903,7 @@ class SubscriptionsOperation extends Operation
         return array_values($normalized);
     }
 
-    protected function toBool(mixed $value): bool
+    protected function toBool(mixed $value, bool $default = false): bool
     {
         if (is_bool($value)) {
             return $value;
@@ -914,6 +914,10 @@ class SubscriptionsOperation extends Operation
         }
 
         $normalized = strtolower(trim((string) $value));
+
+        if ($normalized === '') {
+            return $default;
+        }
 
         return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }

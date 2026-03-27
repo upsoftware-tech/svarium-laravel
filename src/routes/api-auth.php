@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use Upsoftware\Svarium\Http\Controllers\ApiAuthLoginController;
 use Upsoftware\Svarium\Http\Controllers\ApiAuthOtpSendController;
 use Upsoftware\Svarium\Http\Controllers\ApiAuthOtpVerifyController;
+use Upsoftware\Svarium\Http\Controllers\ApiAuthTenantSelectController;
 
 if (! (bool) config('upsoftware.api.enabled', true)) {
     return;
@@ -38,3 +39,13 @@ if ($otpVerifyPath === '') {
 Route::post($otpVerifyPath, ApiAuthOtpVerifyController::class)
     ->withoutMiddleware([ValidateCsrfToken::class])
     ->name('svarium.api.auth.otp.verify');
+
+$tenantSelectPath = trim(implode('/', array_filter([$apiPrefix, 'auth/tenant'])), '/');
+if ($tenantSelectPath === '') {
+    $tenantSelectPath = 'auth/tenant';
+}
+
+Route::middleware((array) config('upsoftware.api.auth.middleware', ['auth:sanctum']))
+    ->post($tenantSelectPath, ApiAuthTenantSelectController::class)
+    ->withoutMiddleware([ValidateCsrfToken::class])
+    ->name('svarium.api.auth.tenant');

@@ -63,21 +63,20 @@ class TenancyManager
             return;
         }
 
+        $tenant = null;
         $host = $this->normalizeHost((string) $request->getHost());
 
-        if ($host === '') {
-            return;
+        if (
+            $host !== ''
+            && $this->domainsEnabled()
+            && ! $this->isCentralDomain($host)
+        ) {
+            $tenant = $this->resolveTenantByHost($host);
         }
 
-        if (! $this->domainsEnabled()) {
-            return;
+        if (! $tenant instanceof Model) {
+            $tenant = $this->resolveTenantFromApiToken($request);
         }
-
-        if ($this->isCentralDomain($host)) {
-            return;
-        }
-
-        $tenant = $this->resolveTenantByHost($host);
 
         if (! $tenant instanceof Model) {
             return;
@@ -87,6 +86,38 @@ class TenancyManager
 
         if ($this->isDatabaseMode()) {
             $this->bootstrapTenantDatabaseConnection($tenant);
+        }
+    }
+
+    protected function resolveTenantFromApiToken(Request $request): ?Model
+    {
+        $user = $request->user();
+        if (! is_object($user) || ! method_exists($user, 'currentAccessToken')) {
+            return null;
+        }
+
+        $token = $user->currentAccessToken();
+        if (! is_object($token) || ! method_exists($token, 'getAttribute')) {
+            return null;
+        }
+
+        $tenantId = trim((string) $token->getAttribute('tenant_id'));
+        if ($tenantId === '') {
+            return null;
+        }
+
+        $tenantModelClass = $this->resolveTenantModelClass();
+        if ($tenantModelClass === null) {
+            return null;
+        }
+
+        try {
+            /** @var Model|null $tenant */
+            $tenant = $tenantModelClass::query()->find($tenantId);
+
+            return $tenant instanceof Model ? $tenant : null;
+        } catch (Throwable) {
+            return null;
         }
     }
 

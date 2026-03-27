@@ -1420,16 +1420,68 @@ if (! function_exists('register_menu')) {
     /**
      * Register runtime menu items from modules/pages.
      *
-     * Example:
+     * Examples:
      * register_menu([
      *   ['label' => 'Pages', 'route_name' => 'panel.pages', 'path' => ['CMS', 'Content']],
      * ]);
+     *
+     * // Register named menu container + items:
+     * register_menu('setting', 'Ustawienia', [
+     *   MenuItem::make()->menu('setting')->label('messages.menu.settings'),
+     * ]);
      */
-    function register_menu(array $items, string|int|null $navigationId = null, ?string $source = null): void
+    function register_menu(
+        array|string $items,
+        string|int|null $navigationId = null,
+        array|string|null $source = null
+    ): void
     {
-        app(\Upsoftware\Svarium\Menu\MenuRegistry::class)->register($items, [
+        /** @var \Upsoftware\Svarium\Menu\MenuRegistry $registry */
+        $registry = app(\Upsoftware\Svarium\Menu\MenuRegistry::class);
+
+        // Shorthand style:
+        // register_menu('setting', 'Ustawienia', [MenuItem::make()->menu('setting')->...]);
+        if (is_string($items)) {
+            $menuId = trim($items);
+            if ($menuId === '') {
+                return;
+            }
+
+            $menuLabel = is_string($navigationId) || is_int($navigationId)
+                ? trim((string) $navigationId)
+                : '';
+
+            $menuItems = is_array($source) ? $source : [];
+            $resolvedSource = is_string($source) ? trim($source) : 'helper';
+            if ($resolvedSource === '') {
+                $resolvedSource = 'helper';
+            }
+
+            $registry->registerNavigation(
+                ctype_digit($menuId) ? (int) $menuId : $menuId,
+                $menuLabel !== '' ? $menuLabel : null,
+                ['source' => $resolvedSource]
+            );
+
+            if ($menuItems !== []) {
+                $registry->register($menuItems, [
+                    'navigation_id' => ctype_digit($menuId) ? (int) $menuId : $menuId,
+                    'navigation_label' => $menuLabel !== '' ? $menuLabel : null,
+                    'source' => $resolvedSource,
+                ]);
+            }
+
+            return;
+        }
+
+        $resolvedSource = is_string($source) ? trim($source) : 'helper';
+        if ($resolvedSource === '') {
+            $resolvedSource = 'helper';
+        }
+
+        $registry->register($items, [
             'navigation_id' => $navigationId,
-            'source' => $source ?? 'helper',
+            'source' => $resolvedSource,
         ]);
     }
 }

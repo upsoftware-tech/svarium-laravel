@@ -236,6 +236,35 @@ class Select extends FieldComponent
         return $this->prop('searchable', $enabled);
     }
 
+    public function topSelect(array|Arrayable|ModelOptionsBuilder $options): static
+    {
+        if ($options instanceof ModelOptionsBuilder || $options instanceof Arrayable) {
+            $options = $options->toArray();
+        }
+
+        return $this->prop('topSelectOptions', $this->normalizeOptions($options));
+    }
+
+    public function topSelectValue(mixed $value): static
+    {
+        return $this->prop('topSelectValue', $value);
+    }
+
+    public function topSelectPlaceholder(?string $placeholder): static
+    {
+        return $this->prop('topSelectPlaceholder', $placeholder);
+    }
+
+    public function topSelectWidth(string|int|float|null $width = 240): static
+    {
+        return $this->prop('topSelectWidth', $width);
+    }
+
+    public function topSelectName(?string $name): static
+    {
+        return $this->prop('topSelectName', $name);
+    }
+
     public function languageSelector(bool $enabled = true): static
     {
         return $this->prop('languageSelector', $enabled);

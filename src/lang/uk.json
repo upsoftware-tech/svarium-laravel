@@ -334,6 +334,11 @@
     "firstname": "ім’я",
     "javascript object notation (json)": "нотація об’єктів JavaScript (json)",
     "lastname": "прізвище",
+    "menu_manager": {
+        "items": {
+            "menu_58d164f9e72e13388eb171994554e26f4d897b07": "Regions"
+        }
+    },
     "open document spreadsheet (ods)": "таблиця OpenDocument (ods)",
     "or": "або",
     "or login with": "або увійти через",

@@ -32,42 +32,57 @@ class PanelLayout extends BasePanelLayout
         // Mark as definition layout so it is flattened into root layout (CleanLayout).
         $this->prop('__definition_layout', true);
 
-        $this->body([
-            Flex::make()
-                ->height('screen')
-                ->children([
-                    Sidebar::make()
-                        ->header(SidebarHeader::make())
-                        ->children(PanelNavigation::make())
-                        ->footer(SidebarUser::make()),
-                    Flex::make()
-                        ->flex(1)
-                        ->padding('2 s-0')
-                        ->children([
-                            Flex::make()
-                                ->flex(1)
-                                ->direction('col')
-                                ->bg('white', 'slate-900')
-                                ->rounded('xl')
-                                ->border()
-                                ->header($this->defineHeader())
-                                ->footer($this->defineFooter())
-                                ->children([
-                                    Block::make()->flex(1)
-                                        ->children([
-                                            ScrollArea::make()
-                                                ->height('calc(100vh-70px)')
-                                                ->children([
-                                                    Container::make()
-                                                        ->padding(6)
-                                                        ->children([
-                                                            Body::make(),
-                                                        ]),
-                                                ]),
-                                        ]),
-                                ]),
-                        ]),
-                ]),
-        ]);
+        $this->body(function (): array {
+            $bodyContent = Body::make();
+
+            if ((bool) $this->getProp('containerEnabled', true)) {
+                $bodyContent = Container::make()
+                    ->fluid((bool) $this->getProp('containerFluid', false))
+                    ->position((string) $this->getProp('containerPosition', 'center'))
+                    ->children([
+                        $bodyContent,
+                    ]);
+            }
+
+            return [
+                Flex::make()
+                    ->height('screen')
+                    ->children([
+                        Sidebar::make()
+                            ->header(SidebarHeader::make())
+                            ->children(PanelNavigation::make())
+                            ->footer(SidebarUser::make()),
+                        Flex::make()
+                            ->flex(1)
+                            ->class('min-w-0')
+                            ->padding('2 s-0')
+                            ->children([
+                                Flex::make()
+                                    ->flex(1)
+                                    ->class('min-w-0')
+                                    ->direction('col')
+                                    ->bg('white', 'slate-900')
+                                    ->rounded('xl')
+                                    ->border()
+                                    ->header($this->defineHeader())
+                                    ->footer($this->defineFooter())
+                                    ->children([
+                                        Block::make()->flex(1)
+                                            ->children([
+                                                ScrollArea::make()
+                                                    ->height('calc(100vh-70px)')
+                                                    ->children([
+                                                        Block::make()
+                                                            ->padding(6)
+                                                            ->children([
+                                                                $bodyContent,
+                                                            ]),
+                                                    ]),
+                                            ]),
+                                    ]),
+                            ]),
+                    ]),
+            ];
+        });
     }
 }

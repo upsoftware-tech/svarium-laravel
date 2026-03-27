@@ -3,13 +3,16 @@
 namespace Upsoftware\Svarium\Modules\Builtin\MenuManager\Panel;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Throwable;
 use Upsoftware\Svarium\Enums\ExecutionMode;
 use Upsoftware\Svarium\Http\RedirectResult;
 use Upsoftware\Svarium\Menu\MenuRegistry;
 use Upsoftware\Svarium\Panel\Operation;
 use Upsoftware\Svarium\Panel\PanelContext;
-use Upsoftware\Svarium\Services\NavigationService;
+use Upsoftware\Svarium\UI\Components\DropdownAction;
+use Upsoftware\Svarium\UI\Components\Flex;
+use Upsoftware\Svarium\UI\Components\Form\Select;
 use Upsoftware\Svarium\UI\Components\TreeSortable;
 
 class MenuManagerOperation extends Operation
@@ -28,12 +31,17 @@ class MenuManagerOperation extends Operation
 
     public function execution(): ExecutionMode
     {
-        return ExecutionMode::FORM;
+        return ExecutionMode::TREE;
     }
 
     protected function submitLabel(): string
     {
         return __('svarium::messages.Save menu settings');
+    }
+
+    protected function hasSubmit(): bool
+    {
+        return false;
     }
 
     public function title(): string
@@ -48,43 +56,250 @@ class MenuManagerOperation extends Operation
 
     public function schema(PanelContext $context): array
     {
-        $treeItems = collect(menu_children())
+        $selectedNavigation = $this->resolveSelectedNavigationToken($context);
+        $navigationOptions = $this->resolveNavigationOptions();
+
+        $treeItems = collect(menu_children($selectedNavigation))
             ->filter(fn (mixed $node) => is_array($node))
-            ->map(fn (array $node) => $this->mapMenuNodeForTreeSortable($node, 0, null))
+            ->map(fn (array $node) => $this->mapMenuNodeForTreeSortable($node, 0, null, $selectedNavigation))
             ->filter(fn (array $node) => ($node['value'] ?? '') !== '')
             ->values()
             ->all();
 
         $treeItems = $this->removeDuplicatedDescendantsFromRoot($treeItems);
 
-        return [
-            TreeSortable::make('menu')
-                ->columns([
-                    ['key' => 'label', 'label' => __('Label')],
-                    ['key' => 'value', 'label' => __('Key')],
-                ])
-                ->autosave(true, 400)
-                ->items($treeItems),
-        ];
+        $schema = [];
+
+        $headerChildren = [];
+
+        if (count($navigationOptions) > 1) {
+            $headerChildren[] = Select::make('_menu_manager_navigation')
+                ->width(240)
+                ->label(false)
+                ->options($navigationOptions)
+                ->value($selectedNavigation)
+                ->clear(false)
+                ->class('w-[240px]')
+                ->prop('navigateOnChange', true)
+                ->prop('navigateQueryParam', 'menu')
+                ->prop('navigateUrl', panel_href(static::uri()))
+                ->prop('navigatePreserveQuery', false);
+        }
+
+        $headerChildren[] = DropdownAction::make()
+            ->name('_menu_action')
+            ->label(__('Add'))
+            ->variant('outline')
+            ->icon('lucide:plus')
+            ->options([
+                ['value' => 'label', 'label' => __('Dodaj etykietę')],
+                ['value' => 'separator', 'label' => __('Dodaj separator')],
+            ])
+            ->prop('submitOnChange', true)
+            ->prop('submitUrl', $this->menuManagerUrl($selectedNavigation))
+            ->default(null);
+
+        $schema[] = Flex::make()
+            ->justify('end')
+            ->gap(2)
+            ->children($headerChildren);
+
+        $schema[] = TreeSortable::make('menu')
+            ->columns([
+                ['key' => 'label', 'label' => __('Label')],
+                ['key' => 'value', 'label' => __('Key')],
+            ])
+            ->autosave(true, 400)
+            ->items($treeItems);
+
+        return $schema;
     }
 
-    protected function mapMenuNodeForTreeSortable(array $node, int $depth = 0, ?string $parent = null): array
+    /**
+     * @return array<int, array{value:string,label:string}>
+     */
+    protected function resolveNavigationOptions(): array
     {
+        /** @var MenuRegistry $registry */
+        $registry = app(MenuRegistry::class);
+        $ids = $registry->navigationIds();
+
+        $items = [];
+        $seen = [];
+
+        foreach ($ids as $id) {
+            $token = $this->navigationToken($id);
+            if ($token === '' || isset($seen[$token])) {
+                continue;
+            }
+
+            $seen[$token] = true;
+            $items[] = [
+                'value' => $token,
+                'label' => $this->resolveNavigationLabel($registry, $id),
+            ];
+        }
+
+        if ($items === []) {
+            return [
+                [
+                    'value' => 'main_menu',
+                    'label' => __('Main menu'),
+                ],
+            ];
+        }
+
+        usort($items, static function (array $left, array $right): int {
+            $leftValue = (string) ($left['value'] ?? '');
+            $rightValue = (string) ($right['value'] ?? '');
+
+            if ($leftValue === 'main_menu' && $rightValue !== 'main_menu') {
+                return -1;
+            }
+
+            if ($rightValue === 'main_menu' && $leftValue !== 'main_menu') {
+                return 1;
+            }
+
+            return strcasecmp((string) ($left['label'] ?? ''), (string) ($right['label'] ?? ''));
+        });
+
+        return array_values($items);
+    }
+
+    protected function resolveSelectedNavigationToken(PanelContext $context): string
+    {
+        $request = $context->request();
+        $requested = trim((string) $request->input(
+            '_menu_manager_navigation',
+            $request->query('menu', $request->query('navigation', ''))
+        ));
+
+        if ($requested === '') {
+            $requested = $this->extractNavigationFromReferer($request->headers->get('referer'));
+        }
+
+        if ($requested === '') {
+            $requested = 'main_menu';
+        }
+
+        $available = collect($this->resolveNavigationOptions())
+            ->map(static fn (array $item): string => (string) ($item['value'] ?? ''))
+            ->filter(static fn (string $value): bool => $value !== '')
+            ->values()
+            ->all();
+
+        if ($available === []) {
+            return 'main_menu';
+        }
+
+        if (! in_array($requested, $available, true)) {
+            return (string) ($available[0] ?? 'main_menu');
+        }
+
+        return $requested;
+    }
+
+    protected function extractNavigationFromReferer(?string $referer): string
+    {
+        if (! is_string($referer) || trim($referer) === '') {
+            return '';
+        }
+
+        $query = parse_url($referer, PHP_URL_QUERY);
+        if (! is_string($query) || $query === '') {
+            return '';
+        }
+
+        parse_str($query, $params);
+        if (! is_array($params)) {
+            return '';
+        }
+
+        return trim((string) ($params['menu'] ?? $params['navigation'] ?? ''));
+    }
+
+    protected function resolveNavigationLabel(MenuRegistry $registry, mixed $navigationId): string
+    {
+        if ($navigationId === null) {
+            return __('Main menu');
+        }
+
+        if (is_string($navigationId) || is_int($navigationId)) {
+            $label = $registry->navigationLabel($navigationId);
+            if (is_string($label) && trim($label) !== '') {
+                return trim($label);
+            }
+
+            $raw = trim((string) $navigationId);
+            if ($raw !== '') {
+                return ucfirst(str_replace(['_', '-'], ' ', $raw));
+            }
+        }
+
+        return __('Menu');
+    }
+
+    protected function navigationToken(mixed $navigationId): string
+    {
+        if ($navigationId === null) {
+            return 'main_menu';
+        }
+
+        if (is_int($navigationId)) {
+            return (string) $navigationId;
+        }
+
+        $token = trim((string) $navigationId);
+        if ($token === '') {
+            return 'main_menu';
+        }
+
+        return $token;
+    }
+
+    protected function menuManagerUrl(string $navigationToken = 'main_menu'): string
+    {
+        $base = panel_href(static::uri());
+
+        return $base.'?menu='.rawurlencode($navigationToken);
+    }
+
+    protected function mapMenuNodeForTreeSortable(
+        array $node,
+        int $depth = 0,
+        ?string $parent = null,
+        string $selectedNavigation = 'main_menu'
+    ): array {
         $value = (string) ($node['__menu_key'] ?? $node['id'] ?? '');
+        $isDashboard = str_starts_with($value, 'navigation-static-dashboard:');
+
+        $children = $node['children'] ?? null;
+        $hasChildren = is_array($children) && $children !== [];
 
         $mapped = [
             'value' => $value,
             'label' => (string) ($node['label'] ?? ''),
+            'url' => trim((string) ($node['url'] ?? '')),
+            'edit_url' => $value !== '' && (string) ($node['type'] ?? 'item') !== 'separator'
+                ? panel_href('system/menu-manager/edit/'.rawurlencode($value)).'?menu='.rawurlencode($selectedNavigation)
+                : '',
+            'type' => (string) ($node['type'] ?? 'item'),
             'parent' => $parent,
-            'lock' => $parent !== null,
+            'lock' => $depth === 0 && ($hasChildren || $isDashboard),
+            'fixed' => $isDashboard,
             'children' => [],
         ];
 
-        $children = $node['children'] ?? null;
         if (is_array($children) && $children !== []) {
             $mappedChildren = collect($children)
                 ->filter(fn (mixed $child) => is_array($child))
-                ->map(fn (array $child) => $this->mapMenuNodeForTreeSortable($child, $depth + 1, $value !== '' ? $value : null))
+                ->map(fn (array $child) => $this->mapMenuNodeForTreeSortable(
+                    $child,
+                    $depth + 1,
+                    $value !== '' ? $value : null,
+                    $selectedNavigation
+                ))
                 ->filter(fn (array $child) => ($child['value'] ?? '') !== '')
                 ->values()
                 ->all();
@@ -96,7 +311,7 @@ class MenuManagerOperation extends Operation
     }
 
     /**
-     * @param array<int, array<string, mixed>> $nodes
+     * @param  array<int, array<string, mixed>>  $nodes
      * @return array<int, array<string, mixed>>
      */
     protected function removeDuplicatedDescendantsFromRoot(array $nodes): array
@@ -136,8 +351,8 @@ class MenuManagerOperation extends Operation
     }
 
     /**
-     * @param array<int, array<string, mixed>> $children
-     * @param array<int, string> $values
+     * @param  array<int, array<string, mixed>>  $children
+     * @param  array<int, string>  $values
      */
     protected function collectDescendantValues(array $children, array &$values): void
     {
@@ -159,7 +374,7 @@ class MenuManagerOperation extends Operation
     }
 
     /**
-     * @param array<int, array<string, mixed>> $children
+     * @param  array<int, array<string, mixed>>  $children
      * @return array<int, array<string, mixed>>
      */
     protected function normalizeUniqueChildren(array $children): array
@@ -188,17 +403,32 @@ class MenuManagerOperation extends Operation
 
     protected function save(PanelContext $context): RedirectResult
     {
+        $selectedNavigation = $this->resolveSelectedNavigationToken($context);
+        $menuAction = strtolower(trim((string) $context->input('_menu_action', '')));
+        if (in_array($menuAction, ['separator', 'label'], true)) {
+            $this->appendCustomNodeFromAction($menuAction, $selectedNavigation);
+
+            return RedirectResult::to($this->menuManagerUrl($selectedNavigation))
+                ->success($menuAction === 'separator'
+                    ? __('Separator has been added.')
+                    : __('Label has been added.'));
+        }
+
         $treePayload = $this->decodeTreeSortablePayload($context->input('menu'));
         if ($treePayload !== []) {
-            $this->persistOrderOverridesFromTree($treePayload);
+            $this->persistOrderOverridesFromTree($treePayload, $selectedNavigation);
 
-            return RedirectResult::to(panel_href(static::uri()))
+            return RedirectResult::to($this->menuManagerUrl($selectedNavigation))
                 ->success(__('svarium::messages.Menu settings have been saved.'));
         }
 
         $items = $context->input('menu_manager.items', []);
         if (! is_array($items)) {
             $items = [];
+        }
+
+        if ($items === []) {
+            return RedirectResult::to($this->menuManagerUrl($selectedNavigation));
         }
 
         $stored = [];
@@ -240,8 +470,39 @@ class MenuManagerOperation extends Operation
             $settingModel::setSettingGlobal('menu_manager.overrides', $stored, true);
         }
 
-        return RedirectResult::to(panel_href(static::uri()))
+        return RedirectResult::to($this->menuManagerUrl($selectedNavigation))
             ->success(__('svarium::messages.Menu settings have been saved.'));
+    }
+
+    protected function appendCustomNodeFromAction(string $action, string $navigationBucket = 'main_menu'): void
+    {
+        $normalizedBucket = $this->normalizeNavigationBucket($navigationBucket);
+        $stored = setting('menu_manager.custom_nodes', []);
+        if (! is_array($stored)) {
+            $stored = [];
+        }
+
+        $bucketNodes = $stored[$normalizedBucket] ?? [];
+        if (! is_array($bucketNodes)) {
+            $bucketNodes = [];
+        }
+
+        $keyPrefix = $action === 'separator' ? 'separator' : 'label';
+        $nodeKey = 'menu-manager-custom:'.$keyPrefix.':'.(string) Str::uuid();
+
+        $bucketNodes[] = [
+            'value' => $nodeKey,
+            'type' => $action,
+            'label' => $action === 'label' ? (string) __('New label') : '',
+            'children' => [],
+        ];
+
+        $stored[$normalizedBucket] = array_values($bucketNodes);
+
+        $settingModel = (string) config('upsoftware.models.setting', \Upsoftware\Svarium\Models\Setting::class);
+        if (class_exists($settingModel) && method_exists($settingModel, 'setSettingGlobal')) {
+            $settingModel::setSettingGlobal('menu_manager.custom_nodes', $stored, true);
+        }
     }
 
     /**
@@ -266,9 +527,9 @@ class MenuManagerOperation extends Operation
     }
 
     /**
-     * @param array<int, array<string, mixed>> $tree
+     * @param  array<int, array<string, mixed>>  $tree
      */
-    protected function persistOrderOverridesFromTree(array $tree): void
+    protected function persistOrderOverridesFromTree(array $tree, string $navigationBucket = 'main_menu'): void
     {
         $orderOverrides = [];
         $this->collectOrderOverridesFromTree($tree, $orderOverrides);
@@ -282,20 +543,25 @@ class MenuManagerOperation extends Operation
             $existing = [];
         }
 
-        $bucket = 'main_menu';
+        $bucket = $this->normalizeNavigationBucket($navigationBucket);
         $currentBucket = $existing[$bucket] ?? [];
         if (! is_array($currentBucket)) {
             $currentBucket = [];
         }
 
         foreach ($orderOverrides as $nodeKey => $entry) {
-            $currentEntry = $currentBucket[$nodeKey] ?? [];
+            $normalizedKey = $this->normalizeOverrideNodeKey($nodeKey);
+            if ($normalizedKey === '') {
+                continue;
+            }
+
+            $currentEntry = $currentBucket[$normalizedKey] ?? [];
             if (! is_array($currentEntry)) {
                 $currentEntry = [];
             }
 
             $currentEntry['order'] = (int) ($entry['order'] ?? 0);
-            $currentBucket[$nodeKey] = $currentEntry;
+            $currentBucket[$normalizedKey] = $currentEntry;
         }
 
         $existing[$bucket] = $currentBucket;
@@ -307,8 +573,8 @@ class MenuManagerOperation extends Operation
     }
 
     /**
-     * @param array<int, array<string, mixed>> $nodes
-     * @param array<string, array{order: int}> $overrides
+     * @param  array<int, array<string, mixed>>  $nodes
+     * @param  array<string, array{order: int}>  $overrides
      */
     protected function collectOrderOverridesFromTree(array $nodes, array &$overrides): void
     {
@@ -330,6 +596,26 @@ class MenuManagerOperation extends Operation
                 $this->collectOrderOverridesFromTree($children, $overrides);
             }
         }
+    }
+
+    protected function normalizeOverrideNodeKey(string $nodeKey): string
+    {
+        $nodeKey = trim($nodeKey);
+        if ($nodeKey === '') {
+            return '';
+        }
+
+        if (str_starts_with($nodeKey, 'menu:') || str_starts_with($nodeKey, 'id:')) {
+            return $nodeKey;
+        }
+
+        // Runtime/static navigation nodes (groups/dashboard/static leaves) are
+        // resolved in NavigationService by "id:*" keys, not "menu:*".
+        if (str_starts_with($nodeKey, 'navigation-static-')) {
+            return 'id:'.$nodeKey;
+        }
+
+        return 'menu:'.$nodeKey;
     }
 
     protected function normalizeNavigationBucket(mixed $bucket): string

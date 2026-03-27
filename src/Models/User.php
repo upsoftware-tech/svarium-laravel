@@ -6,6 +6,7 @@ use App\Models\User as UserBase;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\HasApiTokens;
 use Laravel\Sanctum\NewAccessToken;
 use Laravel\Sanctum\Sanctum;
 use RuntimeException;
@@ -14,7 +15,7 @@ use Upsoftware\Svarium\Traits\UseDevices;
 use Upsoftware\Svarium\Traits\UsesConnection;
 
 class User extends UserBase {
-    use HasSetting, UsesConnection, UseDevices;
+    use HasApiTokens, HasSetting, UsesConnection, UseDevices;
 
     public function routeNotificationForSms()
     {

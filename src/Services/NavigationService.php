@@ -3,6 +3,7 @@
 namespace Upsoftware\Svarium\Services;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Collection;
@@ -23,6 +24,7 @@ class NavigationService
     protected ?object $resolvedUser = null;
     protected bool $resolvedUserLoaded = false;
     protected ?array $menuOverridesCache = null;
+    protected ?array $menuCustomNodesCache = null;
 
     public function __construct()
     {
@@ -258,10 +260,15 @@ class NavigationService
 
         foreach ($registered as $item) {
             $source = (string) ($item['source'] ?? '');
-            $path = is_array($item['path'] ?? null) ? $item['path'] : [];
+            $rawPath = is_array($item['path'] ?? null)
+                ? array_values(array_map(
+                    static fn (mixed $segment): string => trim((string) $segment),
+                    $item['path']
+                ))
+                : [];
             $path = array_values(array_map(
                 fn (mixed $segment): string => $this->translateMenuLabel((string) $segment, $source),
-                $path
+                $rawPath
             ));
             $pathIds = is_array($item['path_ids'] ?? null)
                 ? array_values(array_map(
@@ -300,14 +307,14 @@ class NavigationService
                 $branch = &$this->findOrCreateGroupNode(
                     $branch,
                     $segment,
-                    array_slice($path, 0, $index + 1),
+                    array_slice($rawPath, 0, $index + 1),
                     array_slice($pathIds, 0, $index + 1),
                     $segmentPathId,
                     $navigationId
                 );
             }
 
-            $this->appendLeafNode($branch, $item, $navigationId, $path);
+            $this->appendLeafNode($branch, $item, $navigationId, $rawPath);
         }
 
         $children = $this->sortNodesByOrder($children);
@@ -426,7 +433,8 @@ class NavigationService
     protected function buildRegisteredChildren(string|int|null $navigationId, bool $applyOverrides = true): array
     {
         $children = $this->appendRegisteredItems([], $navigationId);
-        $children = $this->ensureDashboardNode($children);
+        $children = $this->ensureDashboardNode($children, $navigationId);
+        $children = $this->appendCustomNodes($children, $navigationId);
         if ($applyOverrides) {
             $children = $this->applyMenuOverridesToNodes($children, $navigationId);
         }
@@ -440,8 +448,12 @@ class NavigationService
      * @param array<int, array<string, mixed>> $children
      * @return array<int, array<string, mixed>>
      */
-    protected function ensureDashboardNode(array $children): array
+    protected function ensureDashboardNode(array $children, string|int|null $navigationId = null): array
     {
+        if (! $this->isMainNavigationId($navigationId)) {
+            return $this->sortNodesByOrder($this->removeDashboardNodes($children));
+        }
+
         if (! $this->isDashboardVisible()) {
             return $this->sortNodesByOrder($this->removeDashboardNodes($children));
         }
@@ -472,6 +484,22 @@ class NavigationService
         ];
 
         return $this->sortNodesByOrder($children);
+    }
+
+    protected function isMainNavigationId(string|int|null $navigationId): bool
+    {
+        $normalized = $this->normalizeNavigationId($navigationId);
+        if ($normalized === null) {
+            return true;
+        }
+
+        if (is_int($normalized)) {
+            return false;
+        }
+
+        $value = strtolower(trim($normalized));
+
+        return in_array($value, ['main_menu', 'main', 'default', '__default'], true);
     }
 
     protected function resolveDashboardUrl(): string
@@ -584,21 +612,29 @@ class NavigationService
     ): array
     {
         $normalizedSegmentId = is_string($segmentId) ? trim($segmentId) : '';
+        $groupSignature = $normalizedSegmentId !== ''
+            ? 'pid:'.$normalizedSegmentId
+            : 'path:'.sha1(implode('/', $path));
+        $expectedGroupId = 'navigation-static-group:'.sha1((string) $this->normalizeNavigationId($navigationId).'|'.($pathIds !== [] ? implode('/', $pathIds) : implode('/', $path)));
 
         foreach ($nodes as $index => $node) {
             $nodePathId = trim((string) ($node['__path_id'] ?? ''));
+            $nodeGroupSignature = trim((string) ($node['__group_signature'] ?? ''));
+            $nodeId = trim((string) ($node['id'] ?? ''));
 
             $matchesPathId = $normalizedSegmentId !== '' && $nodePathId !== '' && $nodePathId === $normalizedSegmentId;
-            $matchesLabel = ($node['label'] ?? null) === $label;
+            $matchesGroupSignature = $nodeGroupSignature !== '' && $nodeGroupSignature === $groupSignature;
+            $matchesExpectedId = $nodeId !== '' && $nodeId === $expectedGroupId;
 
             if (($node['type'] ?? 'item') === 'item'
-                && ($matchesPathId || ($normalizedSegmentId === '' && $matchesLabel))
+                && ($matchesPathId || $matchesGroupSignature || $matchesExpectedId)
                 && is_array($node['children'] ?? null)
                 && (($node['url'] ?? null) === null || ($node['url'] ?? null) === '')
             ) {
-                if ($matchesPathId && $matchesLabel === false && $label !== '') {
+                if (($matchesPathId || $matchesGroupSignature || $matchesExpectedId) && ($node['label'] ?? null) !== $label && $label !== '') {
                     $nodes[$index]['label'] = $label;
                 }
+                $nodes[$index]['__group_signature'] = $groupSignature;
 
                 return $nodes[$index]['children'];
             }
@@ -615,6 +651,7 @@ class NavigationService
             'url' => null,
             'children' => [],
             '__path_id' => $normalizedSegmentId !== '' ? $normalizedSegmentId : null,
+            '__group_signature' => $groupSignature,
         ];
 
         $lastIndex = array_key_last($nodes);
@@ -724,18 +761,25 @@ class NavigationService
             ?? (is_array($item['path_ids'] ?? null) ? ($item['path_ids'][array_key_last($item['path_ids'])] ?? null) : null)
             ?? ''
         ));
+        $groupSignature = $pathId !== ''
+            ? 'pid:'.$pathId
+            : 'path:'.sha1(implode('/', $fullPath));
+        $expectedGroupId = 'navigation-static-group:'.sha1((string) $this->normalizeNavigationId($navigationId).'|'.($pathId !== '' ? $pathId : implode('/', $fullPath)));
 
         foreach ($nodes as $index => $node) {
             $nodePathId = trim((string) ($node['__path_id'] ?? ''));
+            $nodeGroupSignature = trim((string) ($node['__group_signature'] ?? ''));
+            $nodeId = trim((string) ($node['id'] ?? ''));
             $matchesPathId = $pathId !== '' && $nodePathId !== '' && $nodePathId === $pathId;
-            $matchesLabel = ($node['label'] ?? null) === $label;
+            $matchesGroupSignature = $nodeGroupSignature !== '' && $nodeGroupSignature === $groupSignature;
+            $matchesExpectedId = $nodeId !== '' && $nodeId === $expectedGroupId;
 
             if (($node['type'] ?? 'item') === 'item'
-                && ($matchesPathId || ($pathId === '' && $matchesLabel))
+                && ($matchesPathId || $matchesGroupSignature || $matchesExpectedId)
                 && is_array($node['children'] ?? null)
                 && (($node['url'] ?? null) === null || ($node['url'] ?? null) === '')
             ) {
-                if ($matchesPathId && $matchesLabel === false && $label !== '') {
+                if (($matchesPathId || $matchesGroupSignature || $matchesExpectedId) && ($node['label'] ?? null) !== $label && $label !== '') {
                     $nodes[$index]['label'] = $label;
                 }
 
@@ -750,6 +794,7 @@ class NavigationService
 
                 $nodes[$index]['__menu_key'] = $signature;
                 $nodes[$index]['__path_id'] = $pathId !== '' ? $pathId : ($node['__path_id'] ?? null);
+                $nodes[$index]['__group_signature'] = $groupSignature;
 
                 return;
             }
@@ -768,6 +813,7 @@ class NavigationService
             'order' => $order,
             '__menu_key' => $signature,
             '__path_id' => $pathId !== '' ? $pathId : null,
+            '__group_signature' => $groupSignature,
         ];
     }
 
@@ -791,6 +837,15 @@ class NavigationService
 
             $nodeKey = $this->resolveNodeOverrideKey($node);
             $override = $nodeKey !== null ? ($overrides[$nodeKey] ?? null) : null;
+            if (! is_array($override) && is_string($nodeKey) && str_starts_with($nodeKey, 'menu:')) {
+                $legacyKey = substr($nodeKey, 5);
+                if ($legacyKey !== '') {
+                    $legacyOverride = $overrides[$legacyKey] ?? null;
+                    if (is_array($legacyOverride)) {
+                        $override = $legacyOverride;
+                    }
+                }
+            }
 
             if (is_array($override)) {
                 if (array_key_exists('visible', $override) && ! $this->toBool($override['visible'], true)) {
@@ -802,8 +857,17 @@ class NavigationService
                 }
 
                 $overrideLabel = trim((string) ($override['label'] ?? ''));
-                if ($overrideLabel !== '') {
-                    $node['label'] = $overrideLabel;
+                if (
+                    $overrideLabel !== ''
+                    && (str_starts_with($overrideLabel, 'messages.') || str_contains($overrideLabel, '::'))
+                ) {
+                    $translatedOverrideLabel = $this->translateMenuLabel($overrideLabel);
+                    if (
+                        trim($translatedOverrideLabel) !== ''
+                        && (! str_starts_with($overrideLabel, 'messages.') || $translatedOverrideLabel !== $overrideLabel)
+                    ) {
+                        $node['label'] = $translatedOverrideLabel;
+                    }
                 }
             }
 
@@ -852,6 +916,153 @@ class NavigationService
         }
 
         return [];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $nodes
+     * @return array<int, array<string, mixed>>
+     */
+    protected function appendCustomNodes(array $nodes, string|int|null $navigationId): array
+    {
+        $customNodes = $this->menuCustomNodesForNavigation($navigationId);
+        if ($customNodes === []) {
+            return $nodes;
+        }
+
+        foreach ($customNodes as $customNode) {
+            $normalized = $this->normalizeCustomNode($customNode);
+            if ($normalized === null) {
+                continue;
+            }
+
+            $nodes[] = $normalized;
+        }
+
+        return $this->sortNodesByOrder($nodes);
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    protected function menuCustomNodesForNavigation(string|int|null $navigationId): array
+    {
+        $stored = $this->loadMenuCustomNodes();
+        if ($stored === []) {
+            return [];
+        }
+
+        $normalized = $this->normalizeNavigationId($navigationId);
+        $candidates = [];
+
+        if ($normalized === null) {
+            $candidates = ['main_menu', 'default', '__default', ''];
+        } elseif (is_int($normalized)) {
+            $candidates = ['id:'.$normalized, (string) $normalized];
+        } else {
+            $normalizedString = strtolower(trim((string) $normalized));
+            $candidates = [$normalizedString, 'str:'.$normalizedString];
+        }
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate === '') {
+                continue;
+            }
+
+            $bucket = $stored[$candidate] ?? null;
+            if (is_array($bucket)) {
+                return array_values(array_filter($bucket, static fn (mixed $item): bool => is_array($item)));
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function loadMenuCustomNodes(): array
+    {
+        if (is_array($this->menuCustomNodesCache)) {
+            return $this->menuCustomNodesCache;
+        }
+
+        $loaded = setting('menu_manager.custom_nodes', []);
+        if (is_string($loaded)) {
+            $decoded = json_decode($loaded, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $loaded = $decoded;
+            }
+        }
+
+        $this->menuCustomNodesCache = is_array($loaded) ? $loaded : [];
+
+        return $this->menuCustomNodesCache;
+    }
+
+    /**
+     * @param  array<string, mixed>  $node
+     * @return array<string, mixed>|null
+     */
+    protected function normalizeCustomNode(array $node): ?array
+    {
+        $value = trim((string) ($node['value'] ?? $node['id'] ?? ''));
+        if ($value === '') {
+            return null;
+        }
+
+        $type = strtolower(trim((string) ($node['type'] ?? 'item')));
+        if (! in_array($type, ['item', 'label', 'separator'], true)) {
+            $type = 'item';
+        }
+
+        $childrenRaw = $node['children'] ?? [];
+        $children = [];
+        if (is_array($childrenRaw)) {
+            foreach ($childrenRaw as $child) {
+                if (! is_array($child)) {
+                    continue;
+                }
+
+                $normalizedChild = $this->normalizeCustomNode($child);
+                if ($normalizedChild !== null) {
+                    $children[] = $normalizedChild;
+                }
+            }
+        }
+
+        if ($type === 'separator') {
+            return [
+                'type' => 'separator',
+                '__menu_key' => $value,
+                'children' => [],
+            ];
+        }
+
+        $label = $this->translateMenuLabel((string) ($node['label'] ?? ''));
+        $order = is_numeric($node['order'] ?? null) ? (int) $node['order'] : 0;
+        $url = trim((string) ($node['url'] ?? ''));
+        $icon = trim((string) ($node['icon'] ?? ''));
+
+        if ($type === 'label') {
+            return [
+                'type' => 'label',
+                'label' => $label,
+                '__menu_key' => $value,
+                'order' => $order,
+                'children' => [],
+            ];
+        }
+
+        return [
+            'id' => 'navigation-custom-item:'.sha1($value),
+            'label' => $label,
+            'url' => $url !== '' ? $url : null,
+            'icon' => $icon !== '' ? ['type' => $this->resolveIconType($icon), 'value' => $icon] : null,
+            'children' => $children,
+            'order' => $order,
+            '__menu_key' => $value,
+        ];
     }
 
     /**
@@ -1061,7 +1272,59 @@ class NavigationService
             }
         }
 
+        if (str_starts_with($normalized, 'messages.')) {
+            $resolved = $this->resolveGlobalMessagesTranslation($normalized);
+            if (is_string($resolved) && trim($resolved) !== '' && $resolved !== $normalized) {
+                return $resolved;
+            }
+        }
+
         return $label;
+    }
+
+    protected function resolveGlobalMessagesTranslation(string $key): ?string
+    {
+        $normalized = trim($key);
+        if (! str_starts_with($normalized, 'messages.')) {
+            return null;
+        }
+
+        $path = trim(substr($normalized, strlen('messages.')));
+        if ($path === '') {
+            return null;
+        }
+
+        $candidateLocales = array_values(array_filter(array_unique([
+            strtolower(trim((string) app()->getLocale())),
+            strtolower(trim((string) config('app.locale', ''))),
+            strtolower(trim((string) config('app.fallback_locale', ''))),
+            'en',
+            'pl',
+        ])));
+
+        foreach ($candidateLocales as $locale) {
+            $messagesFile = base_path("app/Svarium/Lang/{$locale}/messages.php");
+            if (! is_file($messagesFile)) {
+                continue;
+            }
+
+            $loaded = include $messagesFile;
+            if (! is_array($loaded)) {
+                continue;
+            }
+
+            $value = Arr::get($loaded, $path);
+            if (! is_scalar($value)) {
+                continue;
+            }
+
+            $resolved = trim((string) $value);
+            if ($resolved !== '') {
+                return $resolved;
+            }
+        }
+
+        return null;
     }
 
     protected function resolveModuleNamespaceFromSource(string $source): ?string

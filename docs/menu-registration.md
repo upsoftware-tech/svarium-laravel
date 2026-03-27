@@ -244,6 +244,27 @@ register_menu([
 ], navigationId: 1, source: 'custom');
 ```
 
+Nowy skrót "wordpressowy" (rejestracja kontenera + wpisów jednym wywołaniem):
+
+```php
+register_menu('setting', 'Ustawienia', [
+    MenuItem::make()
+        ->menu('setting')
+        ->label('messages.menu.general')
+        ->icon('lucide:sliders')
+        ->order(10),
+]);
+```
+
+Jak to działa:
+- `setting` to `navigation_id` (osobne drzewo menu),
+- `Ustawienia` to etykieta tego kontenera nawigacji,
+- pozycje z `->menu('setting')` trafiają do nawigacji `setting`, a nie do `default`.
+
+Uwaga:
+- dla skrótu 3. argument to tablica pozycji,
+- dla klasycznego wariantu `register_menu([...])` możesz dalej używać `source: '...'`.
+
 ## API `MenuItem`
 
 - `MenuItem::make('Label')`
@@ -335,3 +356,42 @@ php artisan svarium:menu.map --navigation=sidebar_user
 # wygodny format do kopiowania / automatyzacji
 php artisan svarium:menu.map --json
 ```
+
+## Menu manager: przełączanie drzewa
+
+Ekran `/system/menu-manager` automatycznie pokazuje na górze `Select` z wyborem menu, gdy w systemie jest więcej niż jedno menu (`navigation_id`).
+
+Jak to działa:
+- wybór opcji w `Select` przełącza edytowane drzewo,
+- gdy menu jest tylko jedno, `Select` nie jest renderowany,
+- po przełączeniu menu widoczne są tylko pozycje przypięte do wybranego `navigation_id` (np. `->menu('setting')`),
+- automatyczny `Dashboard / Pulpit` jest dokładany tylko do `main_menu`,
+- `Dashboard / Pulpit` nie jest dokładany do innych menu (np. `setting`, `sidebar_user`),
+- aktywne menu jest trzymane w query `?menu=<navigation_id>`,
+- przy zapisie i autosave aktywne menu jest utrzymywane (nie wraca do `main_menu`),
+- autosave zapisuje kolejność do właściwego bucketu (`menu_manager.overrides.<menu>`),
+- edycja pozycji (`/system/menu-manager/edit/{menuKey}`) zachowuje wybrane menu przez ten sam parametr `menu`.
+
+Przykłady:
+
+```text
+/system/menu-manager?menu=main_menu
+/system/menu-manager?menu=setting
+```
+
+## Menu manager: szybkie dodawanie pozycji
+
+W `/system/menu-manager` możesz użyć `DropdownAction` (np. "Dodaj separator", "Dodaj etykietę") do szybkiego dodania pozycji.
+
+Jak to działa:
+- wybór opcji wykonuje od razu `POST` (`submitOnChange`),
+- backend dopisuje nowy node do ustawienia globalnego:
+  - `menu_manager.custom_nodes.<menu>`,
+- nowy node trafia od razu do drzewa i może być dalej sortowany w `TreeSortable`,
+- jego kolejność jest dalej utrzymywana przez `menu_manager.overrides.<menu>`.
+- przycisk `Add` jest renderowany zawsze; `Select` wyboru menu pojawia się tylko gdy menu jest więcej niż jedno.
+
+Uwagi:
+- custom node’y są per menu (`main_menu`, `setting`, `sidebar_user`, ...),
+- separator nie otwiera edycji (brak `edit_url`),
+- etykietę można edytować jak zwykły wpis.

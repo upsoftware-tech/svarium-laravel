@@ -538,7 +538,7 @@ class VerificationOperation extends Operation
         }
     }
 
-    protected function toBool(mixed $value): bool
+    protected function toBool(mixed $value, bool $default = false): bool
     {
         if (is_bool($value)) {
             return $value;
@@ -549,6 +549,10 @@ class VerificationOperation extends Operation
         }
 
         $normalized = strtolower(trim((string) $value));
+
+        if ($normalized === '') {
+            return $default;
+        }
 
         return in_array($normalized, ['1', 'true', 'on', 'yes'], true);
     }
